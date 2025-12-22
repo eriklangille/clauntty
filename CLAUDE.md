@@ -6,19 +6,21 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  SwiftUI Views          GhosttyBridge         SwiftNIO SSH  │
-│  ┌──────────────┐      ┌─────────────┐      ┌────────────┐  │
-│  │ Terminal UI  │◄────►│ Local PTY   │◄────►│ SSH Channel│  │
-│  │ + Keyboard   │      │ (bridge)    │      │ (remote)   │  │
-│  └──────────────┘      └─────────────┘      └────────────┘  │
-│         │                     │                    │        │
-│         ▼                     ▼                    ▼        │
-│  GhosttyKit.xcframework      PTY master     Remote Server   │
-│  (Metal rendering)           ◄─────►                        │
+│  SwiftUI Views              Direct I/O          SwiftNIO SSH │
+│  ┌──────────────┐         ┌───────────┐      ┌────────────┐  │
+│  │ Terminal UI  │ ──────► │ SSH Data  │ ───► │ SSH Channel│  │
+│  │ + Keyboard   │ ◄────── │ Flow      │ ◄─── │ (remote)   │  │
+│  └──────────────┘         └───────────┘      └────────────┘  │
+│         │                                          │         │
+│         ▼                                          ▼         │
+│  GhosttyKit.xcframework                     Remote Server    │
+│  (Metal rendering)                                           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**PTY Bridge**: iOS can't fork shells (sandbox), but CAN create PTYs. Bridge redirects SSH ↔ PTY.
+**Data Flow**:
+- **SSH → Terminal**: `SSHChannelHandler.channelRead()` → `ghostty_surface_write_pty_output()` → rendered
+- **Keyboard → SSH**: `insertText()` → `SSHConnection.sendData()` → SSH channel
 
 ## Repository Layout
 
@@ -90,23 +92,30 @@ void ghostty_app_tick(ghostty_app_t);
 void ghostty_surface_set_size(ghostty_surface_t, uint32_t w, uint32_t h);
 void ghostty_surface_set_focus(ghostty_surface_t, bool);
 
-// Input
+// Input (keyboard → terminal)
 void ghostty_surface_key(ghostty_surface_t, ghostty_input_key_s);
 void ghostty_surface_text(ghostty_surface_t, const char*, size_t);
+
+// Output (SSH → terminal display) - iOS-specific
+void ghostty_surface_write_pty_output(ghostty_surface_t, const char*, size_t);
 ```
+
+The `ghostty_surface_write_pty_output` function feeds data directly to the terminal for rendering, bypassing the PTY. This is used on iOS to display SSH output since no local process is spawned.
 
 ## Current Status
 
 **Working:**
 - Terminal surface rendering (Metal) ✓
-- PTY creation on iOS ✓
 - GhosttyKit initialization ✓
 - Connection list UI ✓
+- SSH connection wiring ✓
+- Keyboard input → SSH ✓
+- SSH output → Terminal display ✓
 
 **TODO:**
-- [ ] Wire keyboard input to surface
-- [ ] Wire SSH connection
-- [ ] Connect SSH ↔ Terminal data flow
+- [ ] Test SSH connection end-to-end
+- [ ] Handle SSH key authentication
+- [ ] Terminal resize events → SSH window change
 
 ## iOS Fixes Applied
 
@@ -124,7 +133,21 @@ ghostty's `build.zig.zon` uses local libxev: `.path = "../libxev"`
 **File**: `../ghostty/src/termio/Exec.zig`
 
 - Skip process spawn on iOS (sandbox restriction)
-- PTY created for external data source (SSH bridge)
+- PTY created for external data source (SSH)
+
+### Ghostty embedded.zig (iOS API)
+**File**: `../ghostty/src/apprt/embedded.zig`
+
+Added `ghostty_surface_write_pty_output()` function to write SSH data directly to terminal:
+```zig
+export fn ghostty_surface_write_pty_output(
+    surface: *Surface,
+    ptr: [*]const u8,
+    len: usize,
+) void {
+    surface.core_surface.io.processOutput(ptr[0..len]);
+}
+```
 
 ### Metal.zig
 **File**: `../ghostty/src/renderer/Metal.zig` line 127
@@ -162,6 +185,32 @@ Store goldens in `Tests/Golden/` (e.g., `terminal_empty.png`, `terminal_colors.p
 **Note**: Metal rendering only works in simulator, not headless XCTest.
 
 ## SSH Testing
+
+### Docker Test Server (Recommended)
+
+Spin up an isolated SSH server for safe testing:
+
+```bash
+# Start the test server (uses port 22 by default)
+./scripts/docker-ssh/ssh-test-server.sh start
+
+# Or use a different port if 22 is in use:
+# SSH_PORT=2222 ./scripts/docker-ssh/ssh-test-server.sh start
+
+# Test credentials:
+# Host: localhost
+# Port: 22 (or SSH_PORT if overridden)
+# Username: testuser
+# Password: testpass
+
+# SSH key is auto-generated at:
+# scripts/docker-ssh/keys/test_key
+
+# Stop when done
+./scripts/docker-ssh/ssh-test-server.sh stop
+```
+
+### Local Mac SSH (Alternative)
 
 Enable on Mac: System Settings > General > Sharing > Remote Login
 

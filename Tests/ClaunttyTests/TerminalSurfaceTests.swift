@@ -59,4 +59,80 @@ final class TerminalSurfaceTests: XCTestCase {
         // View should exist, surface is nil (expected in unit tests)
         XCTAssertNotNil(view)
     }
+
+    // MARK: - SSH Data Flow Tests
+
+    func testOnTextInputCallback() {
+        let view = TerminalSurfaceView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), app: nil)
+
+        var receivedData: Data?
+        view.onTextInput = { data in
+            receivedData = data
+        }
+
+        // Simulate text input
+        view.insertText("hello")
+
+        XCTAssertEqual(receivedData, "hello".data(using: .utf8))
+    }
+
+    func testBackspaceGeneratesCorrectData() {
+        let view = TerminalSurfaceView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), app: nil)
+
+        var receivedData: Data?
+        view.onTextInput = { data in
+            receivedData = data
+        }
+
+        // Simulate backspace
+        view.deleteBackward()
+
+        // Should generate DEL (0x7F)
+        XCTAssertEqual(receivedData, Data([0x7F]))
+    }
+
+    func testWriteSSHOutputWithNoSurface() {
+        // Test that writeSSHOutput handles nil surface gracefully
+        let view = TerminalSurfaceView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), app: nil)
+
+        // Should not crash when writing with no surface
+        view.writeSSHOutput(Data("test data".utf8))
+
+        // View should still exist
+        XCTAssertNotNil(view)
+        XCTAssertNil(view.surface)
+    }
+
+    func testMultipleKeyInputs() {
+        let view = TerminalSurfaceView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), app: nil)
+
+        var allReceivedData = Data()
+        view.onTextInput = { data in
+            allReceivedData.append(data)
+        }
+
+        // Simulate multiple inputs
+        view.insertText("a")
+        view.insertText("b")
+        view.insertText("c")
+
+        XCTAssertEqual(allReceivedData, "abc".data(using: .utf8))
+    }
+
+    func testSpecialCharacterInput() {
+        let view = TerminalSurfaceView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), app: nil)
+
+        var receivedData: Data?
+        view.onTextInput = { data in
+            receivedData = data
+        }
+
+        // Test newline
+        view.insertText("\n")
+        XCTAssertEqual(receivedData, "\n".data(using: .utf8))
+
+        // Test tab
+        view.insertText("\t")
+        XCTAssertEqual(receivedData, "\t".data(using: .utf8))
+    }
 }

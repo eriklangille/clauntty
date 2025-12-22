@@ -124,14 +124,20 @@ struct ConnectionListView: View {
         appState.currentConnection = connection
         appState.connectionStatus = .connecting
 
-        // TODO: Actual SSH connection will be implemented in Phase 4
-        // For now, simulate connection
-        Task {
-            try? await Task.sleep(for: .seconds(1))
-            await MainActor.run {
-                appState.connectionStatus = .connected
-            }
-        }
+        // Create SSH connection (will be connected in TerminalView)
+        // Note: SSHAuthenticator gets password from Keychain using connection ID
+        let sshConnection = SSHConnection(
+            host: connection.host,
+            port: connection.port,
+            username: connection.username,
+            authMethod: connection.authMethod,
+            connectionId: connection.id
+        )
+
+        appState.sshConnection = sshConnection
+
+        // Navigate to terminal view (connection will be established there)
+        appState.connectionStatus = .connected
     }
 }
 

@@ -96,7 +96,7 @@ struct NewConnectionView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isEditing ? "Save" : "Add") {
+                    Button("Save") {
                         saveConnection()
                     }
                     .disabled(!isValid)

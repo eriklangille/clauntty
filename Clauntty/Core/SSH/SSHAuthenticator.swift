@@ -7,13 +7,15 @@ import Crypto
 class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
     private let username: String
     private let authMethod: AuthMethod
+    private let connectionId: UUID
 
     private var triedPassword = false
     private var triedKey = false
 
-    init(username: String, authMethod: AuthMethod) {
+    init(username: String, authMethod: AuthMethod, connectionId: UUID) {
         self.username = username
         self.authMethod = authMethod
+        self.connectionId = connectionId
     }
 
     func nextAuthenticationType(
@@ -78,9 +80,11 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
     // MARK: - Credential Loading
 
     private func getStoredPassword() throws -> String {
-        // TODO: Load from Keychain using the connection ID
-        // For now, throw an error
-        throw AuthError.passwordNotFound
+        // Load password from Keychain using the connection ID
+        guard let password = try? KeychainHelper.getPassword(for: connectionId) else {
+            throw AuthError.passwordNotFound
+        }
+        return password
     }
 
     private func loadPrivateKey(keyId: String) throws -> NIOSSHPrivateKey {

@@ -257,6 +257,7 @@ def main():
         print("  uv run scripts/parse_crash.py --latest [count]")
         print("  uv run scripts/parse_crash.py --origin [--latest]  # Show only non-panic frames")
         print("  uv run scripts/parse_crash.py --raw [--latest]     # Show raw top/bottom frames")
+        print("  uv run scripts/parse_crash.py --threads [--latest] # Show all threads (useful for recursive panics)")
         print()
         print("Examples:")
         print("  uv run scripts/parse_crash.py ~/Library/Logs/DiagnosticReports/Clauntty-2025-01-01-120000.ips")
@@ -264,15 +265,19 @@ def main():
         print("  uv run scripts/parse_crash.py --latest 3")
         print("  uv run scripts/parse_crash.py --origin --latest")
         print("  uv run scripts/parse_crash.py --raw --latest")
+        print("  uv run scripts/parse_crash.py --threads --latest")
         sys.exit(1)
 
     # Parse flags
     show_origin = '--origin' in args
     show_raw = '--raw' in args
+    show_threads = '--threads' in args
     if show_origin:
         args = [a for a in args if a != '--origin']
     if show_raw:
         args = [a for a in args if a != '--raw']
+    if show_threads:
+        args = [a for a in args if a != '--threads']
 
     filepaths = []
 
@@ -293,7 +298,59 @@ def main():
         try:
             data = parse_ips_file(str(filepath))
 
-            if show_raw:
+            if show_threads:
+                # Show all threads to find the actual crash cause
+                crash = data.get('crash', {})
+                threads = crash.get('threads', [])
+                used_images = crash.get('usedImages', [])
+
+                print(f"{'='*60}")
+                print(f"All Threads: {Path(filepath).name}")
+                print(f"Total threads: {len(threads)}")
+                print(f"{'='*60}")
+
+                # Skip panic symbols for cleaner output
+                panic_symbols = {'panicExtra', 'defaultPanic', 'SignalHandler', '_sigtramp',
+                                'pthread_kill', 'abort', '__ubsan_handle', 'breakpad'}
+
+                for t_idx, thread in enumerate(threads):
+                    frames = thread.get('frames', [])
+                    triggered = thread.get('triggered', False)
+                    thread_name = thread.get('name', '')
+                    thread_id = thread.get('id', t_idx)
+
+                    # Check if this thread has interesting (non-panic) frames
+                    interesting_frames = []
+                    for frame in frames[:30]:
+                        symbol = frame.get('symbol', '')
+                        is_panic = any(ps in symbol for ps in panic_symbols)
+                        if symbol and not is_panic:
+                            interesting_frames.append(frame)
+
+                    # Skip threads with only panic frames or no symbols
+                    if not interesting_frames and not triggered:
+                        continue
+
+                    marker = " <<< CRASHED" if triggered else ""
+                    print(f"\n--- Thread {thread_id}{' (' + thread_name + ')' if thread_name else ''}{marker} ---")
+                    print(f"    Frames: {len(frames)}, Interesting: {len(interesting_frames)}")
+
+                    # Show first few interesting frames
+                    for i, frame in enumerate(interesting_frames[:10]):
+                        symbol = frame.get('symbol', '<no symbol>')
+                        img_idx = frame.get('imageIndex', 0)
+                        if img_idx < len(used_images):
+                            img_name = Path(used_images[img_idx].get('path', '')).name
+                        else:
+                            img_name = f'image_{img_idx}'
+                        print(f"      [{i:2d}] {symbol[:70]}")
+                        if img_name:
+                            print(f"           ({img_name})")
+
+                    if len(interesting_frames) > 10:
+                        print(f"      ... {len(interesting_frames) - 10} more frames ...")
+
+            elif show_raw:
                 # Show all frames raw
                 crash = data.get('crash', {})
                 threads = crash.get('threads', [])

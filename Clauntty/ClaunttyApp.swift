@@ -63,10 +63,7 @@ class AppState: ObservableObject {
 
     @Published var currentConnection: SavedConnection?
     @Published var connectionStatus: ConnectionStatus = .disconnected
-    @Published var activeSession: SSHSession?
-}
 
-/// Placeholder for SSH session - will be implemented in Phase 4
-class SSHSession {
-    // TODO: Implement SSH session management
+    /// Active SSH connection (nil when disconnected)
+    var sshConnection: SSHConnection?
 }
