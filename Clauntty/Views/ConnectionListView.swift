@@ -3,6 +3,7 @@ import SwiftUI
 struct ConnectionListView: View {
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var sessionManager: SessionManager
     @State private var showingNewConnection = false
     @State private var connectionToEdit: SavedConnection?
     @State private var showingPasswordPrompt = false
@@ -86,7 +87,14 @@ struct ConnectionListView: View {
             #if DEBUG
             // Debug button to test terminal rendering without SSH
             Button("Test Terminal View") {
-                appState.connectionStatus = .connected
+                let testConfig = SavedConnection(
+                    name: "Test",
+                    host: "localhost",
+                    port: 22,
+                    username: "test",
+                    authMethod: .password
+                )
+                _ = sessionManager.createSession(for: testConfig)
             }
             .buttonStyle(.borderedProminent)
             .padding(.top, 20)
@@ -121,23 +129,12 @@ struct ConnectionListView: View {
         }
 
         connectionStore.updateLastConnected(connection)
-        appState.currentConnection = connection
-        appState.connectionStatus = .connecting
 
-        // Create SSH connection (will be connected in TerminalView)
-        // Note: SSHAuthenticator gets password from Keychain using connection ID
-        let sshConnection = SSHConnection(
-            host: connection.host,
-            port: connection.port,
-            username: connection.username,
-            authMethod: connection.authMethod,
-            connectionId: connection.id
-        )
+        // Create a new session - the session manager handles connection pooling
+        // and will reuse existing SSH connections when appropriate
+        _ = sessionManager.createSession(for: connection)
 
-        appState.sshConnection = sshConnection
-
-        // Navigate to terminal view (connection will be established there)
-        appState.connectionStatus = .connected
+        // Navigation happens automatically when sessionManager.hasSessions becomes true
     }
 }
 
@@ -174,5 +171,6 @@ struct ConnectionRow: View {
         ConnectionListView()
             .environmentObject(ConnectionStore())
             .environmentObject(AppState())
+            .environmentObject(SessionManager())
     }
 }

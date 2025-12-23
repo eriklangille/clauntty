@@ -173,6 +173,54 @@ class SSHConnection: ObservableObject {
         channelHandler?.sendToRemote(data)
     }
 
+    /// Check if connection is still active
+    var isConnected: Bool {
+        channel?.isActive ?? false
+    }
+
+    /// Create additional channel on existing connection (for multi-tab support)
+    /// Returns the channel and handler for the caller to manage
+    func createChannel(onDataReceived: @escaping (Data) -> Void) async throws -> (Channel, SSHChannelHandler) {
+        guard let channel = self.channel, channel.isActive else {
+            throw SSHError.notConnected
+        }
+
+        let handler = SSHChannelHandler(onDataReceived: onDataReceived)
+
+        let childChannel = try await channel.pipeline.handler(type: NIOSSHHandler.self).flatMap { sshHandler -> EventLoopFuture<Channel> in
+            let promise = channel.eventLoop.makePromise(of: Channel.self)
+
+            sshHandler.createChannel(promise) { childChannel, channelType in
+                guard channelType == .session else {
+                    return channel.eventLoop.makeFailedFuture(SSHError.invalidChannelType)
+                }
+                return childChannel.pipeline.addHandler(handler)
+            }
+
+            return promise.futureResult
+        }.get()
+
+        // Request PTY
+        let ptyRequest = SSHChannelRequestEvent.PseudoTerminalRequest(
+            wantReply: true,
+            term: "xterm-256color",
+            terminalCharacterWidth: 80,
+            terminalRowHeight: 24,
+            terminalPixelWidth: 0,
+            terminalPixelHeight: 0,
+            terminalModes: .init([:])
+        )
+
+        try await childChannel.triggerUserOutboundEvent(ptyRequest).get()
+
+        // Request shell
+        let shellRequest = SSHChannelRequestEvent.ShellRequest(wantReply: true)
+        try await childChannel.triggerUserOutboundEvent(shellRequest).get()
+
+        Logger.clauntty.info("SSH additional channel created")
+        return (childChannel, handler)
+    }
+
     /// Send terminal window size change to SSH server
     func sendWindowChange(rows: UInt16, columns: UInt16) {
         guard let childChannel = sshChildChannel else {

@@ -139,6 +139,16 @@ class KeyboardAccessoryView: UIView {
         isCtrlActive.toggle()
     }
 
+    /// Check if Ctrl is active and consume the state
+    /// Returns true if Ctrl was active (and clears it)
+    func consumeCtrlModifier() -> Bool {
+        if isCtrlActive {
+            isCtrlActive = false
+            return true
+        }
+        return false
+    }
+
     private func sendArrow(_ direction: ArrowNippleView.Direction) {
         let data: Data
         switch direction {
@@ -189,12 +199,19 @@ class ArrowNippleView: UIView {
     private let nipple = UIView()
     private var repeatTimer: Timer?
     private var currentDirection: Direction?
+    private var currentMagnitude: CGFloat = 0
 
-    /// Threshold for detecting direction (in points)
-    private let threshold: CGFloat = 8.0
+    /// Minimum threshold before any arrow is triggered (in points)
+    private let activationThreshold: CGFloat = 20.0
 
-    /// Repeat rate for held arrows
-    private let repeatInterval: TimeInterval = 0.08
+    /// Maximum drag distance for fastest repeat (in points)
+    private let maxDragDistance: CGFloat = 50.0
+
+    /// Slowest repeat interval (at activation threshold)
+    private let slowestRepeat: TimeInterval = 0.25
+
+    /// Fastest repeat interval (at max drag)
+    private let fastestRepeat: TimeInterval = 0.05
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -233,38 +250,49 @@ class ArrowNippleView: UIView {
         case .began, .changed:
             let translation = gesture.translation(in: self)
 
-            // Determine direction based on which axis has greater magnitude
+            // Calculate magnitude of drag
             let absX = abs(translation.x)
             let absY = abs(translation.y)
+            let magnitude = max(absX, absY)
 
-            var newDirection: Direction?
-
-            if absX > threshold || absY > threshold {
-                if absX > absY {
-                    newDirection = translation.x > 0 ? .right : .left
-                } else {
-                    newDirection = translation.y > 0 ? .down : .up
-                }
-            }
-
-            // If direction changed, send key and start/restart repeat
-            if let dir = newDirection {
-                if currentDirection != dir {
-                    currentDirection = dir
-                    onArrowInput?(dir)
-                    startRepeat()
-                }
-
-                // Animate nipple offset
-                let maxOffset: CGFloat = 6
+            // Only activate if past threshold
+            guard magnitude > activationThreshold else {
+                // Below threshold - just animate nipple, no arrow input
+                let maxOffset: CGFloat = 8
                 let offsetX = min(max(translation.x, -maxOffset), maxOffset)
                 let offsetY = min(max(translation.y, -maxOffset), maxOffset)
                 nipple.transform = CGAffineTransform(translationX: offsetX, y: offsetY)
+                return
             }
+
+            // Determine direction based on which axis has greater magnitude
+            let newDirection: Direction
+            if absX > absY {
+                newDirection = translation.x > 0 ? .right : .left
+            } else {
+                newDirection = translation.y > 0 ? .down : .up
+            }
+
+            // Update magnitude for repeat speed calculation
+            currentMagnitude = magnitude
+
+            // If direction changed or first activation, send key and start repeat
+            if currentDirection != newDirection {
+                currentDirection = newDirection
+                onArrowInput?(newDirection)
+                startRepeat()
+            }
+
+            // Animate nipple offset (cap at max visual offset)
+            let maxOffset: CGFloat = 10
+            let offsetX = min(max(translation.x, -maxOffset), maxOffset)
+            let offsetY = min(max(translation.y, -maxOffset), maxOffset)
+            nipple.transform = CGAffineTransform(translationX: offsetX, y: offsetY)
 
         case .ended, .cancelled:
             stopRepeat()
             currentDirection = nil
+            currentMagnitude = 0
 
             // Animate nipple back to center
             UIView.animate(withDuration: 0.15, delay: 0, options: .curveEaseOut) {
@@ -276,12 +304,28 @@ class ArrowNippleView: UIView {
         }
     }
 
+    /// Calculate repeat interval based on drag magnitude (further = faster)
+    private func repeatInterval() -> TimeInterval {
+        // Normalize magnitude to 0-1 range (activation threshold to max)
+        let normalizedMagnitude = min(
+            (currentMagnitude - activationThreshold) / (maxDragDistance - activationThreshold),
+            1.0
+        )
+        // Interpolate between slowest and fastest
+        return slowestRepeat - (normalizedMagnitude * (slowestRepeat - fastestRepeat))
+    }
+
     private func startRepeat() {
         stopRepeat()
-        repeatTimer = Timer.scheduledTimer(withTimeInterval: repeatInterval, repeats: true) { [weak self] _ in
-            if let dir = self?.currentDirection {
-                self?.onArrowInput?(dir)
-            }
+        scheduleNextRepeat()
+    }
+
+    private func scheduleNextRepeat() {
+        let interval = repeatInterval()
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            guard let self = self, let dir = self.currentDirection else { return }
+            self.onArrowInput?(dir)
+            self.scheduleNextRepeat()  // Schedule next with potentially new interval
         }
     }
 

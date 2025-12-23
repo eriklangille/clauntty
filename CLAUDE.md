@@ -259,6 +259,11 @@ This installs:
 # Screenshots
 ./scripts/sim.sh screenshot myshot  # Save to screenshots/myshot.png
 
+# Get UI element coordinates (uses IDB accessibility)
+./scripts/sim.sh ui                 # List all UI elements with tap coordinates
+./scripts/sim.sh ui button          # Filter to elements matching "button"
+./scripts/sim.sh ui "Docker"        # Filter to elements matching "Docker"
+
 # Test sequences (automated UI validation)
 ./scripts/sim.sh test-keyboard      # Screenshot keyboard accessory bar
 ./scripts/sim.sh test-connections   # Screenshot connection list

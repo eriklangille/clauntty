@@ -47,6 +47,7 @@ struct ClaunttyApp: App {
     @StateObject private var connectionStore = ConnectionStore()
     @StateObject private var appState: AppState
     @StateObject private var ghosttyApp: GhosttyApp
+    @StateObject private var sessionManager = SessionManager()
 
     static let previewMode = PreviewMode.fromArgs()
 
@@ -75,6 +76,7 @@ struct ClaunttyApp: App {
                 .environmentObject(connectionStore)
                 .environmentObject(appState)
                 .environmentObject(ghosttyApp)
+                .environmentObject(sessionManager)
         }
     }
 }

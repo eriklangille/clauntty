@@ -2,13 +2,14 @@ import SwiftUI
 import os.log
 
 struct TerminalView: View {
-    @EnvironmentObject var appState: AppState
     @EnvironmentObject var ghosttyApp: GhosttyApp
+    @EnvironmentObject var sessionManager: SessionManager
+
+    /// The session this terminal view is displaying
+    @ObservedObject var session: Session
 
     /// Reference to the terminal surface view for SSH data flow
     @State private var terminalSurface: TerminalSurfaceView?
-    @State private var isConnecting = false
-    @State private var connectionError: String?
 
     var body: some View {
         ZStack {
@@ -43,24 +44,26 @@ struct TerminalView: View {
                     .ignoresSafeArea()
 
                 // Terminal respects safe area
+                // Use .id(session.id) to ensure a new surface is created for each session
                 TerminalSurface(
                     ghosttyApp: ghosttyApp,
                     onTextInput: { data in
-                        // Send keyboard input to SSH
-                        appState.sshConnection?.sendData(data)
+                        // Send keyboard input to SSH via session
+                        session.sendData(data)
                     },
                     onTerminalSizeChanged: { rows, columns in
                         // Send window size change to SSH server
-                        appState.sshConnection?.sendWindowChange(rows: rows, columns: columns)
+                        session.sendWindowChange(rows: rows, columns: columns)
                     },
                     onSurfaceReady: { surface in
                         self.terminalSurface = surface
-                        connectSSH(surface: surface)
+                        connectSession(surface: surface)
                     }
                 )
+                .id(session.id)  // Force new surface per session
 
                 // Show connecting overlay
-                if isConnecting {
+                if session.state == .connecting {
                     Color.black.opacity(0.7)
                         .ignoresSafeArea()
                     VStack {
@@ -74,7 +77,7 @@ struct TerminalView: View {
                 }
 
                 // Show error overlay
-                if let error = connectionError {
+                if case .error(let errorMessage) = session.state {
                     Color.black.opacity(0.9)
                         .ignoresSafeArea()
                     VStack(spacing: 16) {
@@ -84,26 +87,16 @@ struct TerminalView: View {
                         Text("Connection Failed")
                             .foregroundColor(.white)
                             .font(.headline)
-                        Text(error)
+                        Text(errorMessage)
                             .foregroundColor(.gray)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
-                        Button("Dismiss") {
-                            disconnect()
+                        Button("Close Tab") {
+                            sessionManager.closeSession(session)
                         }
                         .buttonStyle(.borderedProminent)
                         .padding(.top)
                     }
-                }
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    disconnect()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.red)
                 }
             }
         }
@@ -113,62 +106,60 @@ struct TerminalView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
     }
 
-    private func connectSSH(surface: TerminalSurfaceView) {
-        guard let sshConnection = appState.sshConnection else {
-            Logger.clauntty.warning("No SSH connection configured")
+    private func connectSession(surface: TerminalSurfaceView) {
+        // Skip if already connected
+        guard session.state == .disconnected else {
+            // Already connecting or connected - just wire up display
+            if session.state == .connected {
+                wireSessionToSurface(surface: surface)
+            }
             return
         }
 
-        isConnecting = true
-        connectionError = nil
+        // Wire session data → terminal display
+        wireSessionToSurface(surface: surface)
 
-        // Wire SSH data received → terminal display
-        sshConnection.onDataReceived = { data in
+        // Start connection via SessionManager
+        Task {
+            do {
+                try await sessionManager.connect(session: session)
+                Logger.clauntty.info("Session connected: \(session.id.uuidString.prefix(8))")
+
+                // Replay any scrollback buffer that was accumulated
+                if !session.scrollbackBuffer.isEmpty {
+                    await MainActor.run {
+                        surface.writeSSHOutput(session.scrollbackBuffer)
+                    }
+                }
+            } catch {
+                Logger.clauntty.error("Session connection failed: \(error.localizedDescription)")
+                // Error state is already set by SessionManager
+            }
+        }
+    }
+
+    private func wireSessionToSurface(surface: TerminalSurfaceView) {
+        // Set up callback for session data → terminal display
+        session.onDataReceived = { data in
             DispatchQueue.main.async {
                 surface.writeSSHOutput(data)
             }
         }
-
-        // Start connection
-        Task {
-            do {
-                try await sshConnection.connect()
-                await MainActor.run {
-                    isConnecting = false
-                    Logger.clauntty.info("SSH connection established")
-                }
-            } catch {
-                await MainActor.run {
-                    isConnecting = false
-                    connectionError = error.localizedDescription
-                    Logger.clauntty.error("SSH connection failed: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-
-    private func disconnect() {
-        appState.sshConnection?.disconnect()
-        appState.sshConnection = nil
-        appState.connectionStatus = .disconnected
-        appState.currentConnection = nil
     }
 }
 
 #Preview {
-    NavigationStack {
-        TerminalView()
-            .environmentObject({
-                let state = AppState()
-                state.currentConnection = SavedConnection(
-                    name: "Test Server",
-                    host: "example.com",
-                    username: "user",
-                    authMethod: .password
-                )
-                state.connectionStatus = .connected
-                return state
-            }())
+    let config = SavedConnection(
+        name: "Test Server",
+        host: "example.com",
+        username: "user",
+        authMethod: .password
+    )
+    let session = Session(connectionConfig: config)
+
+    return NavigationStack {
+        TerminalView(session: session)
             .environmentObject(GhosttyApp())
+            .environmentObject(SessionManager())
     }
 }

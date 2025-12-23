@@ -308,6 +308,59 @@ EOF
         open "$SCREENSHOTS_DIR"
         ;;
 
+    ui)
+        # Dump UI element hierarchy with coordinates
+        udid=$(ensure_ready)
+        filter="${2:-}"
+        echo -e "${BLUE}Fetching UI elements...${NC}" >&2
+
+        # Get JSON and format it nicely
+        idb ui describe-all --udid "$udid" 2>/dev/null | python3 -c "
+import sys, json
+
+data = json.load(sys.stdin)
+filter_text = '$filter'.lower()
+
+print()
+print('UI Elements (tap coordinates = center of frame)')
+print('=' * 70)
+
+for el in data:
+    label = el.get('AXLabel') or el.get('title') or ''
+    el_type = el.get('type', '')
+    unique_id = el.get('AXUniqueId') or ''
+    frame = el.get('frame', {})
+
+    # Skip if filter provided and doesn't match
+    if filter_text:
+        searchable = f'{label} {el_type} {unique_id}'.lower()
+        if filter_text not in searchable:
+            continue
+
+    x = frame.get('x', 0)
+    y = frame.get('y', 0)
+    w = frame.get('width', 0)
+    h = frame.get('height', 0)
+
+    # Calculate center point for tapping
+    cx = int(x + w / 2)
+    cy = int(y + h / 2)
+
+    # Format output
+    if label:
+        name = f'{el_type}: \"{label}\"'
+    elif unique_id:
+        name = f'{el_type}: [{unique_id}]'
+    else:
+        name = el_type or '(unknown)'
+
+    print(f'{name}')
+    print(f'  tap: ({cx}, {cy})  frame: ({int(x)}, {int(y)}, {int(w)}x{int(h)})')
+    print()
+"
+        echo -e "${GREEN}Usage: ./scripts/sim.sh tap <x> <y>${NC}"
+        ;;
+
     logs)
         # Stream app logs
         echo -e "${BLUE}Streaming Clauntty logs (Ctrl+C to stop)...${NC}"
@@ -352,6 +405,7 @@ Test Sequences:
   test-flow                Full UI flow with screenshots
 
 Debugging:
+  ui [filter]              List UI elements with tap coordinates
   logs                     Stream app logs
 
 Examples:

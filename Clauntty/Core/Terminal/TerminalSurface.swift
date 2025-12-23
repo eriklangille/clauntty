@@ -185,7 +185,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Become first responder to show keyboard
         if !isFirstResponder {
-            becomeFirstResponder()
+            _ = becomeFirstResponder()
         }
 
         // Only show paste menu if tapping near the cursor and clipboard has content
@@ -422,6 +422,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             print("[Clauntty] didMoveToWindow: window scale=\(window!.screen.scale)")
             // Now we have access to correct screen scale - update everything
             sizeDidChange(self.bounds.size)
+
+            // Auto-show keyboard when terminal appears
+            // Delay slightly to ensure view hierarchy is ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                _ = self?.becomeFirstResponder()
+            }
         }
     }
 
@@ -503,6 +509,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     func insertText(_ text: String) {
+        // Check if Ctrl modifier is active from accessory bar
+        if accessoryBar.consumeCtrlModifier() {
+            // Convert character to control character (Ctrl+A = 0x01, Ctrl+C = 0x03, etc.)
+            if let char = text.lowercased().first,
+               let asciiValue = char.asciiValue,
+               asciiValue >= 97 && asciiValue <= 122 {  // a-z
+                let ctrlChar = UInt8(asciiValue - 96)  // a=1, b=2, ..., z=26
+                onTextInput?(Data([ctrlChar]))
+                Logger.clauntty.debug("Ctrl+\(char) sent as 0x\(String(format: "%02X", ctrlChar))")
+                return
+            }
+        }
+
         // Send text input to SSH (not directly to Ghostty)
         // SSH server will echo it back if needed, and we'll display via writeSSHOutput
         if let data = text.data(using: .utf8) {
