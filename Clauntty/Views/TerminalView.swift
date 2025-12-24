@@ -17,7 +17,7 @@ struct TerminalView: View {
 
     /// Whether this terminal is currently the active tab
     private var isActive: Bool {
-        session.id == sessionManager.activeSessionId
+        sessionManager.activeTab == .terminal(session.id)
     }
 
     var body: some View {

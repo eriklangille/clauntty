@@ -8,12 +8,16 @@
 
 /* Begin PBXBuildFile section */
 		1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */; };
+		733936A7CBE2B60407C98651 /* WebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */; };
 		7BFB27A8AEC758530B629ADA /* SSHConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */; };
+		7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28503FD938162D88F8B6A69F /* WebTabView.swift */; };
 		80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A3663E616FC97D48E5888C /* SessionPickerView.swift */; };
 		876C56362EFB1A6E00B28BC1 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = C8000000 /* NIOCore */; };
 		876C56372EFB1A6E00B28BC1 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = C8000001 /* NIOPosix */; };
 		876C56382EFB1A6E00B28BC1 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = C8000002 /* NIOSSH */; };
 		8D50D6A34930F5200F1440E2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7856CABCC7D9170DD7EF307F /* Foundation.framework */; };
+		8E8B63B583F4D2BF2E6F18FD /* PortScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */; };
+		8EE9D92CA010B003B254D7CA /* PortForwardingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */; };
 		C0000001 /* ClaunttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000001 /* ClaunttyApp.swift */; };
 		C0000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000002 /* ContentView.swift */; };
 		C0000003 /* SavedConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000003 /* SavedConnection.swift */; };
@@ -78,10 +82,14 @@
 
 /* Begin PBXFileReference section */
 		023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SSHConnectionTests.swift; path = ../Tests/ClaunttyTests/SSHConnectionTests.swift; sourceTree = "<group>"; };
+		28503FD938162D88F8B6A69F /* WebTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTabView.swift; sourceTree = "<group>"; };
+		2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortScanner.swift; sourceTree = "<group>"; };
 		59A3663E616FC97D48E5888C /* SessionPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionPickerView.swift; sourceTree = "<group>"; };
 		7856CABCC7D9170DD7EF307F /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		82281A22E5E692A251B06D6B /* ClaunttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaunttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortForwardingManager.swift; sourceTree = "<group>"; };
 		A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyBridgeTests.swift; path = ../Tests/ClaunttyTests/GhosttyBridgeTests.swift; sourceTree = "<group>"; };
+		BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTab.swift; sourceTree = "<group>"; };
 		C1000000 /* Clauntty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C1000001 /* ClaunttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaunttyApp.swift; sourceTree = "<group>"; };
 		C1000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -208,6 +216,8 @@
 				C1000013 /* SSHConnection.swift */,
 				C1000014 /* SSHAuthenticator.swift */,
 				C1000019 /* RtachDeployer.swift */,
+				2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */,
+				94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */,
 			);
 			path = SSH;
 			sourceTree = "<group>";
@@ -240,6 +250,7 @@
 				C1000015 /* KeyboardAccessoryView.swift */,
 				C1000018 /* SessionTabBar.swift */,
 				59A3663E616FC97D48E5888C /* SessionPickerView.swift */,
+				28503FD938162D88F8B6A69F /* WebTabView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -267,6 +278,7 @@
 				C1000016 /* Session.swift */,
 				C1000017 /* SessionManager.swift */,
 				C1000023 /* WordList.swift */,
+				BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */,
 			);
 			path = Session;
 			sourceTree = "<group>";
@@ -465,6 +477,10 @@
 				C0000018 /* SessionTabBar.swift in Sources */,
 				80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */,
 				C0000023 /* WordList.swift in Sources */,
+				8E8B63B583F4D2BF2E6F18FD /* PortScanner.swift in Sources */,
+				8EE9D92CA010B003B254D7CA /* PortForwardingManager.swift in Sources */,
+				733936A7CBE2B60407C98651 /* WebTab.swift in Sources */,
+				7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

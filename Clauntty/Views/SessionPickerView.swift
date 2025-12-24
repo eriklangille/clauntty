@@ -4,9 +4,12 @@ import SwiftUI
 struct SessionPickerView: View {
     let connection: SavedConnection
     @Binding var sessions: [RtachSession]
+    @Binding var ports: [RemotePort]
     let deployer: RtachDeployer?
     let onSelect: (String?) -> Void  // nil = new session, String = session ID
+    let onSelectPort: (RemotePort) -> Void  // Open web tab for port
     let onSwitchToTab: (Session) -> Void  // Switch to existing tab
+    let onSwitchToWebTab: (WebTab) -> Void  // Switch to existing web tab
 
     @EnvironmentObject var sessionManager: SessionManager
     @Environment(\.dismiss) private var dismiss
@@ -68,6 +71,14 @@ struct SessionPickerView: View {
                                     }
                                     .tint(.orange)
                                 }
+                        }
+                    }
+                }
+
+                if !ports.isEmpty {
+                    Section("Active Ports") {
+                        ForEach(ports) { port in
+                            portRow(port)
                         }
                     }
                 }
@@ -161,6 +172,67 @@ struct SessionPickerView: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
+    private func portRow(_ port: RemotePort) -> some View {
+        let existingWebTab = sessionManager.webTabForPort(port.port, config: connection)
+        let isOpenInTab = existingWebTab != nil
+
+        Button {
+            if let webTab = existingWebTab {
+                // Already open - switch to that tab
+                onSwitchToWebTab(webTab)
+                dismiss()
+            } else {
+                // Not open - create new web tab
+                onSelectPort(port)
+                dismiss()
+            }
+        } label: {
+            HStack {
+                Image(systemName: "globe")
+                    .foregroundColor(isOpenInTab ? .green : .blue)
+                    .font(.title2)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(":\(String(port.port))")
+                            .font(.headline)
+                            .fontDesign(.monospaced)
+
+                        if let process = port.process {
+                            Text(process)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        if isOpenInTab {
+                            Text("Open")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.green.opacity(0.2))
+                                .foregroundColor(.green)
+                                .clipShape(Capsule())
+                        }
+                    }
+
+                    Text(port.address)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: isOpenInTab ? "arrow.right.circle" : "chevron.right")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func deleteSession(_ session: RtachSession) {
         guard let deployer = deployer else { return }
 
@@ -232,9 +304,15 @@ struct SessionPickerView: View {
                 created: Date().addingTimeInterval(-172800)
             )
         ]),
+        ports: .constant([
+            RemotePort(id: 3000, port: 3000, process: "node", address: "127.0.0.1"),
+            RemotePort(id: 8080, port: 8080, process: "python", address: "0.0.0.0")
+        ]),
         deployer: nil,
         onSelect: { _ in },
-        onSwitchToTab: { _ in }
+        onSelectPort: { _ in },
+        onSwitchToTab: { _ in },
+        onSwitchToWebTab: { _ in }
     )
     .environmentObject(SessionManager())
 }

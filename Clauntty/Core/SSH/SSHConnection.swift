@@ -21,9 +21,9 @@ class SSHConnection: ObservableObject {
 
     // MARK: - Configuration
 
-    private let host: String
-    private let port: Int
-    private let username: String
+    let host: String
+    let port: Int
+    let username: String
     private let authMethod: AuthMethod
     private let connectionId: UUID
 
@@ -33,6 +33,12 @@ class SSHConnection: ObservableObject {
     private var channel: Channel?
     private var sshChildChannel: Channel?
     private var channelHandler: SSHChannelHandler?
+
+    /// Expose event loop group for port forwarding
+    var nioEventLoopGroup: EventLoopGroup? { eventLoopGroup }
+
+    /// Expose main SSH channel for port forwarding
+    var nioChannel: Channel? { channel }
 
     // MARK: - Data Flow Callbacks
 

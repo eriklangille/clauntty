@@ -3,21 +3,55 @@ import NIOCore
 import NIOSSH
 import os.log
 
-/// Manages all terminal sessions and connection pooling
+/// Manages all terminal sessions, web tabs, and connection pooling
 /// Reuses SSH connections when opening multiple tabs to the same server
 @MainActor
 class SessionManager: ObservableObject {
     // MARK: - Published State
 
-    /// All active sessions
+    /// All active terminal sessions
     @Published var sessions: [Session] = []
 
-    /// Currently active session ID (shown in terminal view)
-    @Published var activeSessionId: UUID?
+    /// All active web tabs
+    @Published var webTabs: [WebTab] = []
 
-    /// Currently active session
+    /// Currently active tab type and ID
+    enum ActiveTab: Equatable {
+        case terminal(UUID)
+        case web(UUID)
+    }
+
+    @Published var activeTab: ActiveTab?
+
+    /// Currently active terminal session (if a terminal is active)
     var activeSession: Session? {
-        sessions.first { $0.id == activeSessionId }
+        if case .terminal(let id) = activeTab {
+            return sessions.first { $0.id == id }
+        }
+        return nil
+    }
+
+    /// Currently active web tab (if a web tab is active)
+    var activeWebTab: WebTab? {
+        if case .web(let id) = activeTab {
+            return webTabs.first { $0.id == id }
+        }
+        return nil
+    }
+
+    /// Legacy compatibility - active session ID
+    var activeSessionId: UUID? {
+        get {
+            if case .terminal(let id) = activeTab {
+                return id
+            }
+            return nil
+        }
+        set {
+            if let id = newValue {
+                activeTab = .terminal(id)
+            }
+        }
     }
 
     // MARK: - Connection Pool
@@ -219,9 +253,109 @@ class SessionManager: ObservableObject {
 
     // MARK: - Convenience
 
-    /// Check if there are any active sessions
+    /// Check if there are any active sessions or web tabs
     var hasSessions: Bool {
-        !sessions.isEmpty
+        !sessions.isEmpty || !webTabs.isEmpty
+    }
+
+    /// Check if there are only terminal sessions (no web tabs)
+    var hasOnlyTerminals: Bool {
+        !sessions.isEmpty && webTabs.isEmpty
+    }
+
+    // MARK: - Web Tab Management
+
+    /// Scan for listening ports on a connection
+    func scanPorts(for config: SavedConnection) async throws -> [RemotePort] {
+        let poolKey = connectionKey(for: config)
+
+        guard let connection = connectionPool[poolKey], connection.isConnected else {
+            throw SessionError.notConnected
+        }
+
+        let scanner = PortScanner(connection: connection)
+        return try await scanner.listListeningPorts()
+    }
+
+    /// Create a web tab for a remote port
+    func createWebTab(for port: RemotePort, config: SavedConnection) async throws -> WebTab {
+        let poolKey = connectionKey(for: config)
+
+        // Get or create connection
+        let connection: SSHConnection
+        if let existing = connectionPool[poolKey], existing.isConnected {
+            connection = existing
+        } else {
+            connection = SSHConnection(
+                host: config.host,
+                port: config.port,
+                username: config.username,
+                authMethod: config.authMethod,
+                connectionId: config.id
+            )
+            try await connection.connect()
+            connectionPool[poolKey] = connection
+        }
+
+        let webTab = WebTab(remotePort: port, sshConnection: connection)
+        webTabs.append(webTab)
+
+        // Start port forwarding
+        try await webTab.startForwarding()
+
+        // Make it active
+        activeTab = .web(webTab.id)
+
+        Logger.clauntty.info("SessionManager: created web tab for port \(port.port)")
+        return webTab
+    }
+
+    /// Close a web tab
+    func closeWebTab(_ webTab: WebTab) {
+        Logger.clauntty.info("SessionManager: closing web tab for port \(webTab.remotePort.port)")
+
+        Task {
+            await webTab.close()
+        }
+
+        webTabs.removeAll { $0.id == webTab.id }
+
+        // If this was active, switch to another tab
+        if case .web(let id) = activeTab, id == webTab.id {
+            if let firstSession = sessions.first {
+                activeTab = .terminal(firstSession.id)
+            } else if let firstWebTab = webTabs.first {
+                activeTab = .web(firstWebTab.id)
+            } else {
+                activeTab = nil
+            }
+        }
+
+        cleanupUnusedConnections()
+    }
+
+    /// Switch to a web tab
+    func switchTo(_ webTab: WebTab) {
+        guard webTabs.contains(where: { $0.id == webTab.id }) else {
+            Logger.clauntty.warning("SessionManager: cannot switch to unknown web tab")
+            return
+        }
+        activeTab = .web(webTab.id)
+        Logger.clauntty.info("SessionManager: switched to web tab \(webTab.id.uuidString.prefix(8))")
+    }
+
+    /// Check if a port is already open in a web tab
+    func webTabForPort(_ port: Int, config: SavedConnection) -> WebTab? {
+        let poolKey = connectionKey(for: config)
+        return webTabs.first { tab in
+            tab.remotePort.port == port &&
+            tab.sshConnection != nil &&
+            connectionKey(for: tab.sshConnection!.host, tab.sshConnection!.port, tab.sshConnection!.username) == poolKey
+        }
+    }
+
+    private func connectionKey(for host: String, _ port: Int, _ username: String) -> String {
+        return "\(username)@\(host):\(port)"
     }
 
     /// Get session by ID

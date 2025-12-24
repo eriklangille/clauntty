@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Tab bar showing all active terminal sessions
+/// Tab bar showing all active terminal sessions and web tabs
 /// Uses macOS-style layout where tabs stretch to fill available space
 struct SessionTabBar: View {
     @EnvironmentObject var sessionManager: SessionManager
@@ -11,10 +11,15 @@ struct SessionTabBar: View {
     /// Minimum tab width before switching to scroll mode
     private let minTabWidth: CGFloat = 80
 
+    /// Total number of tabs (terminal + web)
+    private var totalTabCount: Int {
+        sessionManager.sessions.count + sessionManager.webTabs.count
+    }
+
     var body: some View {
         GeometryReader { geometry in
             let availableWidth = geometry.size.width - 44 - 4  // minus + button and padding
-            let tabCount = max(1, sessionManager.sessions.count)
+            let tabCount = max(1, totalTabCount)
             let tabWidth = availableWidth / CGFloat(tabCount)
             let useScrollMode = tabWidth < minTabWidth
 
@@ -23,12 +28,23 @@ struct SessionTabBar: View {
                     // Scroll mode for many tabs
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 2) {
+                            // Terminal tabs
                             ForEach(sessionManager.sessions) { session in
                                 SessionTab(
                                     session: session,
-                                    isActive: session.id == sessionManager.activeSessionId,
+                                    isActive: sessionManager.activeTab == .terminal(session.id),
                                     onSelect: { sessionManager.switchTo(session) },
                                     onClose: { sessionManager.closeSession(session) }
+                                )
+                                .frame(width: minTabWidth)
+                            }
+                            // Web tabs
+                            ForEach(sessionManager.webTabs) { webTab in
+                                WebTabItem(
+                                    webTab: webTab,
+                                    isActive: sessionManager.activeTab == .web(webTab.id),
+                                    onSelect: { sessionManager.switchTo(webTab) },
+                                    onClose: { sessionManager.closeWebTab(webTab) }
                                 )
                                 .frame(width: minTabWidth)
                             }
@@ -37,12 +53,23 @@ struct SessionTabBar: View {
                 } else {
                     // Stretch mode - tabs fill available space
                     HStack(spacing: 2) {
+                        // Terminal tabs
                         ForEach(sessionManager.sessions) { session in
                             SessionTab(
                                 session: session,
-                                isActive: session.id == sessionManager.activeSessionId,
+                                isActive: sessionManager.activeTab == .terminal(session.id),
                                 onSelect: { sessionManager.switchTo(session) },
                                 onClose: { sessionManager.closeSession(session) }
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        // Web tabs
+                        ForEach(sessionManager.webTabs) { webTab in
+                            WebTabItem(
+                                webTab: webTab,
+                                isActive: sessionManager.activeTab == .web(webTab.id),
+                                onSelect: { sessionManager.switchTo(webTab) },
+                                onClose: { sessionManager.closeWebTab(webTab) }
                             )
                             .frame(maxWidth: .infinity)
                         }
@@ -85,20 +112,20 @@ struct SessionTab: View {
             ZStack {
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 6, height: 6)
 
                 // Pulsing ring when waiting for input
                 if session.isWaitingForInput && !isActive {
                     Circle()
-                        .stroke(Color.blue, lineWidth: 2)
-                        .frame(width: 12, height: 12)
+                        .stroke(Color.blue, lineWidth: 1.5)
+                        .frame(width: 10, height: 10)
                         .opacity(isPulsing ? 0.3 : 1.0)
                         .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulsing)
                 }
             }
-            .frame(width: 20)
+            .frame(width: 14)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
 
             // Tab title - centered, truncates as needed
             Text(session.title)
@@ -107,18 +134,18 @@ struct SessionTab: View {
                 .truncationMode(.tail)
                 .foregroundColor(isActive ? .primary : .secondary)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
 
             // Close button
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
-            .frame(width: 20)
+            .frame(width: 14)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 4)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(isActive ? Color(.systemBackground) : Color(.systemGray5))
@@ -157,6 +184,76 @@ struct SessionTab: View {
     private func triggerInputNeededFeedback() {
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.impactOccurred()
+    }
+}
+
+/// Individual web tab
+struct WebTabItem: View {
+    @ObservedObject var webTab: WebTab
+    let isActive: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Globe indicator with loading state
+            ZStack {
+                if webTab.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.4)
+                        .frame(width: 6, height: 6)
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: 8))
+                        .foregroundColor(statusColor)
+                }
+            }
+            .frame(width: 14)
+
+            Spacer(minLength: 2)
+
+            // Tab title - show page title or port
+            Text(webTab.title)
+                .font(.system(size: 13))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundColor(isActive ? .primary : .secondary)
+
+            Spacer(minLength: 2)
+
+            // Close button
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 14)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(isActive ? Color(.systemBackground) : Color(.systemGray5))
+        .cornerRadius(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(isActive ? Color.accentColor : Color.clear, lineWidth: 1.5)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+    }
+
+    private var statusColor: Color {
+        switch webTab.state {
+        case .connected:
+            return .blue
+        case .connecting:
+            return .orange
+        case .error:
+            return .red
+        case .closed:
+            return .gray
+        }
     }
 }
 

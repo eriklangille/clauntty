@@ -12,20 +12,27 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             if sessionManager.hasSessions {
-                // Show tabs + terminal when there are active sessions
+                // Show tabs + content when there are active sessions or web tabs
                 VStack(spacing: 0) {
                     SessionTabBar(onNewTab: {
                         showingNewTabSheet = true
                     })
 
-                    // Keep ALL terminal views alive, but only show the active one.
+                    // Keep ALL views alive, but only show the active one.
                     // This preserves terminal state (font size, scrollback, etc.) across tab switches.
                     ZStack {
+                        // Terminal tabs
                         ForEach(sessionManager.sessions) { session in
                             TerminalView(session: session)
-                                .opacity(session.id == sessionManager.activeSessionId ? 1 : 0)
-                                // Disable user interaction for hidden tabs
-                                .allowsHitTesting(session.id == sessionManager.activeSessionId)
+                                .opacity(sessionManager.activeTab == .terminal(session.id) ? 1 : 0)
+                                .allowsHitTesting(sessionManager.activeTab == .terminal(session.id))
+                        }
+
+                        // Web tabs
+                        ForEach(sessionManager.webTabs) { webTab in
+                            WebTabView(webTab: webTab)
+                                .opacity(sessionManager.activeTab == .web(webTab.id) ? 1 : 0)
+                                .allowsHitTesting(sessionManager.activeTab == .web(webTab.id))
                         }
                     }
                 }
@@ -45,6 +52,12 @@ struct ContentView: View {
                 }
                 .onChange(of: sessionManager.sessions.count) { oldCount, newCount in
                     // Dismiss sheet when a new session is added
+                    if newCount > oldCount {
+                        showingNewTabSheet = false
+                    }
+                }
+                .onChange(of: sessionManager.webTabs.count) { oldCount, newCount in
+                    // Dismiss sheet when a new web tab is added
                     if newCount > oldCount {
                         showingNewTabSheet = false
                     }
