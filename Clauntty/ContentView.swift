@@ -9,6 +9,12 @@ struct ContentView: View {
     @State private var showingNewTabSheet = false
     @State private var hasCheckedAutoConnect = false
 
+    /// Edge swipe detection threshold (distance from edge to start gesture)
+    private let edgeThreshold: CGFloat = 30
+
+    /// Minimum swipe distance to trigger action
+    private let swipeThreshold: CGFloat = 80
+
     var body: some View {
         NavigationStack {
             if sessionManager.hasSessions {
@@ -20,19 +26,39 @@ struct ContentView: View {
 
                     // Keep ALL views alive, but only show the active one.
                     // This preserves terminal state (font size, scrollback, etc.) across tab switches.
-                    ZStack {
-                        // Terminal tabs
-                        ForEach(sessionManager.sessions) { session in
-                            TerminalView(session: session)
-                                .opacity(sessionManager.activeTab == .terminal(session.id) ? 1 : 0)
-                                .allowsHitTesting(sessionManager.activeTab == .terminal(session.id))
-                        }
+                    GeometryReader { geometry in
+                        ZStack {
+                            // Terminal tabs
+                            ForEach(sessionManager.sessions) { session in
+                                TerminalView(session: session)
+                                    .opacity(sessionManager.activeTab == .terminal(session.id) ? 1 : 0)
+                                    .allowsHitTesting(sessionManager.activeTab == .terminal(session.id))
+                            }
 
-                        // Web tabs
-                        ForEach(sessionManager.webTabs) { webTab in
-                            WebTabView(webTab: webTab)
-                                .opacity(sessionManager.activeTab == .web(webTab.id) ? 1 : 0)
-                                .allowsHitTesting(sessionManager.activeTab == .web(webTab.id))
+                            // Web tabs
+                            ForEach(sessionManager.webTabs) { webTab in
+                                WebTabView(webTab: webTab)
+                                    .opacity(sessionManager.activeTab == .web(webTab.id) ? 1 : 0)
+                                    .allowsHitTesting(sessionManager.activeTab == .web(webTab.id))
+                            }
+
+                            // Edge swipe gesture overlay
+                            EdgeSwipeGestureView(
+                                screenWidth: geometry.size.width,
+                                edgeThreshold: edgeThreshold,
+                                swipeThreshold: swipeThreshold,
+                                onSwipeLeft: {
+                                    // Swipe left from right edge → go to next tab waiting for input
+                                    if sessionManager.switchToNextWaitingTab() {
+                                        triggerHaptic()
+                                    }
+                                },
+                                onSwipeRight: {
+                                    // Swipe right from left edge → go to previous tab
+                                    sessionManager.switchToPreviousTab()
+                                    triggerHaptic()
+                                }
+                            )
                         }
                     }
                 }
@@ -109,6 +135,105 @@ struct ContentView: View {
                 Logger.clauntty.error("Auto-connect failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func triggerHaptic() {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+    }
+}
+
+// MARK: - Edge Swipe Gesture View
+
+/// Invisible view that detects edge swipes without blocking touch events in the center
+struct EdgeSwipeGestureView: UIViewRepresentable {
+    let screenWidth: CGFloat
+    let edgeThreshold: CGFloat
+    let swipeThreshold: CGFloat
+    let onSwipeLeft: () -> Void
+    let onSwipeRight: () -> Void
+
+    func makeUIView(context: Context) -> EdgeSwipeUIView {
+        let view = EdgeSwipeUIView()
+        view.screenWidth = screenWidth
+        view.edgeThreshold = edgeThreshold
+        view.swipeThreshold = swipeThreshold
+        view.onSwipeLeft = onSwipeLeft
+        view.onSwipeRight = onSwipeRight
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+        return view
+    }
+
+    func updateUIView(_ uiView: EdgeSwipeUIView, context: Context) {
+        uiView.screenWidth = screenWidth
+        uiView.edgeThreshold = edgeThreshold
+        uiView.swipeThreshold = swipeThreshold
+        uiView.onSwipeLeft = onSwipeLeft
+        uiView.onSwipeRight = onSwipeRight
+    }
+}
+
+/// UIView subclass that handles edge swipe gestures
+class EdgeSwipeUIView: UIView {
+    var screenWidth: CGFloat = 0
+    var edgeThreshold: CGFloat = 30
+    var swipeThreshold: CGFloat = 80
+    var onSwipeLeft: (() -> Void)?
+    var onSwipeRight: (() -> Void)?
+
+    private var touchStartX: CGFloat = 0
+    private var touchStartedFromEdge: Bool = false
+    private var isLeftEdge: Bool = false
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // Only handle touches that start near the edges
+        let isNearLeftEdge = point.x < edgeThreshold
+        let isNearRightEdge = point.x > bounds.width - edgeThreshold
+
+        if isNearLeftEdge || isNearRightEdge {
+            return self
+        }
+
+        // Pass through touches in the center
+        return nil
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        let location = touch.location(in: self)
+
+        touchStartX = location.x
+        isLeftEdge = location.x < edgeThreshold
+        touchStartedFromEdge = isLeftEdge || location.x > bounds.width - edgeThreshold
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // Optional: could add visual feedback here
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first, touchStartedFromEdge else {
+            touchStartedFromEdge = false
+            return
+        }
+
+        let location = touch.location(in: self)
+        let deltaX = location.x - touchStartX
+
+        if isLeftEdge && deltaX > swipeThreshold {
+            // Swiped right from left edge → go to previous tab
+            onSwipeRight?()
+        } else if !isLeftEdge && deltaX < -swipeThreshold {
+            // Swiped left from right edge → go to next waiting tab
+            onSwipeLeft?()
+        }
+
+        touchStartedFromEdge = false
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        touchStartedFromEdge = false
     }
 }
 

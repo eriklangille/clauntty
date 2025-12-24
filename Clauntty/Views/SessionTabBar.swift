@@ -1,4 +1,15 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// Represents a draggable tab item for reordering
+enum DraggableTab: Codable, Transferable, Equatable {
+    case terminal(UUID)
+    case web(UUID)
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(for: DraggableTab.self, contentType: .data)
+    }
+}
 
 /// Tab bar showing all active terminal sessions and web tabs
 /// Uses macOS-style layout where tabs stretch to fill available space
@@ -10,6 +21,9 @@ struct SessionTabBar: View {
 
     /// Minimum tab width before switching to scroll mode
     private let minTabWidth: CGFloat = 80
+
+    /// Currently dragged tab for visual feedback
+    @State private var draggedTab: DraggableTab?
 
     /// Total number of tabs (terminal + web)
     private var totalTabCount: Int {
@@ -30,23 +44,11 @@ struct SessionTabBar: View {
                         HStack(spacing: 2) {
                             // Terminal tabs
                             ForEach(sessionManager.sessions) { session in
-                                SessionTab(
-                                    session: session,
-                                    isActive: sessionManager.activeTab == .terminal(session.id),
-                                    onSelect: { sessionManager.switchTo(session) },
-                                    onClose: { sessionManager.closeSession(session) }
-                                )
-                                .frame(width: minTabWidth)
+                                draggableSessionTab(session: session, width: minTabWidth)
                             }
                             // Web tabs
                             ForEach(sessionManager.webTabs) { webTab in
-                                WebTabItem(
-                                    webTab: webTab,
-                                    isActive: sessionManager.activeTab == .web(webTab.id),
-                                    onSelect: { sessionManager.switchTo(webTab) },
-                                    onClose: { sessionManager.closeWebTab(webTab) }
-                                )
-                                .frame(width: minTabWidth)
+                                draggableWebTab(webTab: webTab, width: minTabWidth)
                             }
                         }
                     }
@@ -55,23 +57,11 @@ struct SessionTabBar: View {
                     HStack(spacing: 2) {
                         // Terminal tabs
                         ForEach(sessionManager.sessions) { session in
-                            SessionTab(
-                                session: session,
-                                isActive: sessionManager.activeTab == .terminal(session.id),
-                                onSelect: { sessionManager.switchTo(session) },
-                                onClose: { sessionManager.closeSession(session) }
-                            )
-                            .frame(maxWidth: .infinity)
+                            draggableSessionTab(session: session, width: nil)
                         }
                         // Web tabs
                         ForEach(sessionManager.webTabs) { webTab in
-                            WebTabItem(
-                                webTab: webTab,
-                                isActive: sessionManager.activeTab == .web(webTab.id),
-                                onSelect: { sessionManager.switchTo(webTab) },
-                                onClose: { sessionManager.closeWebTab(webTab) }
-                            )
-                            .frame(maxWidth: .infinity)
+                            draggableWebTab(webTab: webTab, width: nil)
                         }
                     }
                 }
@@ -93,6 +83,106 @@ struct SessionTabBar: View {
         }
         .frame(height: 44)
         .background(Color(.systemGray6))
+    }
+
+    @ViewBuilder
+    private func draggableSessionTab(session: Session, width: CGFloat?) -> some View {
+        let tabView = SessionTab(
+            session: session,
+            isActive: sessionManager.activeTab == .terminal(session.id),
+            onSelect: { sessionManager.switchTo(session) },
+            onClose: { sessionManager.closeSession(session) }
+        )
+
+        if let width = width {
+            tabView
+                .frame(width: width)
+                .opacity(draggedTab == .terminal(session.id) ? 0.5 : 1.0)
+                .draggable(DraggableTab.terminal(session.id)) {
+                    tabView.frame(width: width).opacity(0.8)
+                }
+                .dropDestination(for: DraggableTab.self) { items, _ in
+                    handleDrop(items: items, targetSessionIndex: sessionManager.sessions.firstIndex(where: { $0.id == session.id }))
+                } isTargeted: { isTargeted in
+                    if isTargeted { draggedTab = .terminal(session.id) } else if draggedTab == .terminal(session.id) { draggedTab = nil }
+                }
+        } else {
+            tabView
+                .frame(maxWidth: .infinity)
+                .opacity(draggedTab == .terminal(session.id) ? 0.5 : 1.0)
+                .draggable(DraggableTab.terminal(session.id)) {
+                    tabView.frame(width: 80).opacity(0.8)
+                }
+                .dropDestination(for: DraggableTab.self) { items, _ in
+                    handleDrop(items: items, targetSessionIndex: sessionManager.sessions.firstIndex(where: { $0.id == session.id }))
+                } isTargeted: { isTargeted in
+                    if isTargeted { draggedTab = .terminal(session.id) } else if draggedTab == .terminal(session.id) { draggedTab = nil }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func draggableWebTab(webTab: WebTab, width: CGFloat?) -> some View {
+        let tabView = WebTabItem(
+            webTab: webTab,
+            isActive: sessionManager.activeTab == .web(webTab.id),
+            onSelect: { sessionManager.switchTo(webTab) },
+            onClose: { sessionManager.closeWebTab(webTab) }
+        )
+
+        if let width = width {
+            tabView
+                .frame(width: width)
+                .opacity(draggedTab == .web(webTab.id) ? 0.5 : 1.0)
+                .draggable(DraggableTab.web(webTab.id)) {
+                    tabView.frame(width: width).opacity(0.8)
+                }
+                .dropDestination(for: DraggableTab.self) { items, _ in
+                    handleDrop(items: items, targetWebTabIndex: sessionManager.webTabs.firstIndex(where: { $0.id == webTab.id }))
+                } isTargeted: { isTargeted in
+                    if isTargeted { draggedTab = .web(webTab.id) } else if draggedTab == .web(webTab.id) { draggedTab = nil }
+                }
+        } else {
+            tabView
+                .frame(maxWidth: .infinity)
+                .opacity(draggedTab == .web(webTab.id) ? 0.5 : 1.0)
+                .draggable(DraggableTab.web(webTab.id)) {
+                    tabView.frame(width: 80).opacity(0.8)
+                }
+                .dropDestination(for: DraggableTab.self) { items, _ in
+                    handleDrop(items: items, targetWebTabIndex: sessionManager.webTabs.firstIndex(where: { $0.id == webTab.id }))
+                } isTargeted: { isTargeted in
+                    if isTargeted { draggedTab = .web(webTab.id) } else if draggedTab == .web(webTab.id) { draggedTab = nil }
+                }
+        }
+    }
+
+    private func handleDrop(items: [DraggableTab], targetSessionIndex: Int?) -> Bool {
+        guard let item = items.first, let targetIndex = targetSessionIndex else { return false }
+
+        switch item {
+        case .terminal(let id):
+            sessionManager.moveSession(id: id, toIndex: targetIndex)
+            draggedTab = nil
+            return true
+        case .web:
+            // Can't drop web tabs onto session positions (they stay in their section)
+            return false
+        }
+    }
+
+    private func handleDrop(items: [DraggableTab], targetWebTabIndex: Int?) -> Bool {
+        guard let item = items.first, let targetIndex = targetWebTabIndex else { return false }
+
+        switch item {
+        case .terminal:
+            // Can't drop session tabs onto web tab positions
+            return false
+        case .web(let id):
+            sessionManager.moveWebTab(id: id, toIndex: targetIndex)
+            draggedTab = nil
+            return true
+        }
     }
 }
 

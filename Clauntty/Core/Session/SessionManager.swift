@@ -23,6 +23,9 @@ class SessionManager: ObservableObject {
 
     @Published var activeTab: ActiveTab?
 
+    /// Previously active tab (for "go back" navigation)
+    private(set) var previousActiveTab: ActiveTab?
+
     /// Currently active terminal session (if a terminal is active)
     var activeSession: Session? {
         if case .terminal(let id) = activeTab {
@@ -203,6 +206,10 @@ class SessionManager: ObservableObject {
             Logger.clauntty.warning("SessionManager: cannot switch to unknown session")
             return
         }
+        // Track previous tab for "go back" navigation
+        if let current = activeTab, current != .terminal(session.id) {
+            previousActiveTab = current
+        }
         activeSessionId = session.id
         Logger.clauntty.info("SessionManager: switched to session \(session.id.uuidString.prefix(8))")
     }
@@ -340,6 +347,10 @@ class SessionManager: ObservableObject {
             Logger.clauntty.warning("SessionManager: cannot switch to unknown web tab")
             return
         }
+        // Track previous tab for "go back" navigation
+        if let current = activeTab, current != .web(webTab.id) {
+            previousActiveTab = current
+        }
         activeTab = .web(webTab.id)
         Logger.clauntty.info("SessionManager: switched to web tab \(webTab.id.uuidString.prefix(8))")
     }
@@ -367,6 +378,79 @@ class SessionManager: ObservableObject {
     /// Returns the Session if open, nil otherwise
     func sessionForRtach(_ rtachSessionId: String) -> Session? {
         sessions.first { $0.rtachSessionId == rtachSessionId }
+    }
+
+    // MARK: - Tab Reordering
+
+    /// Move a terminal session to a new index
+    func moveSession(from source: IndexSet, to destination: Int) {
+        sessions.move(fromOffsets: source, toOffset: destination)
+        Logger.clauntty.info("SessionManager: reordered sessions")
+    }
+
+    /// Move a terminal session by ID to a new index
+    func moveSession(id: UUID, toIndex destination: Int) {
+        guard let sourceIndex = sessions.firstIndex(where: { $0.id == id }) else { return }
+        let session = sessions.remove(at: sourceIndex)
+        let adjustedDestination = destination > sourceIndex ? destination - 1 : destination
+        sessions.insert(session, at: min(adjustedDestination, sessions.count))
+        Logger.clauntty.info("SessionManager: moved session to index \(adjustedDestination)")
+    }
+
+    /// Move a web tab to a new index
+    func moveWebTab(from source: IndexSet, to destination: Int) {
+        webTabs.move(fromOffsets: source, toOffset: destination)
+        Logger.clauntty.info("SessionManager: reordered web tabs")
+    }
+
+    /// Move a web tab by ID to a new index
+    func moveWebTab(id: UUID, toIndex destination: Int) {
+        guard let sourceIndex = webTabs.firstIndex(where: { $0.id == id }) else { return }
+        let webTab = webTabs.remove(at: sourceIndex)
+        let adjustedDestination = destination > sourceIndex ? destination - 1 : destination
+        webTabs.insert(webTab, at: min(adjustedDestination, webTabs.count))
+        Logger.clauntty.info("SessionManager: moved web tab to index \(adjustedDestination)")
+    }
+
+    // MARK: - Tab Navigation
+
+    /// Switch to the previous tab (for "go back" gesture)
+    func switchToPreviousTab() {
+        guard let previous = previousActiveTab else {
+            Logger.clauntty.info("SessionManager: no previous tab to switch to")
+            return
+        }
+
+        // Verify the tab still exists
+        switch previous {
+        case .terminal(let id):
+            if let session = sessions.first(where: { $0.id == id }) {
+                switchTo(session)
+            }
+        case .web(let id):
+            if let webTab = webTabs.first(where: { $0.id == id }) {
+                switchTo(webTab)
+            }
+        }
+    }
+
+    /// Find and switch to the next terminal session that is waiting for input
+    /// Returns true if a tab was found and switched to
+    @discardableResult
+    func switchToNextWaitingTab() -> Bool {
+        // Get sessions waiting for input, excluding the current one
+        let waitingSessions = sessions.filter { session in
+            session.isWaitingForInput && activeTab != .terminal(session.id)
+        }
+
+        if let nextSession = waitingSessions.first {
+            switchTo(nextSession)
+            Logger.clauntty.info("SessionManager: switched to waiting session \(nextSession.id.uuidString.prefix(8))")
+            return true
+        }
+
+        Logger.clauntty.info("SessionManager: no tabs waiting for input")
+        return false
     }
 }
 
