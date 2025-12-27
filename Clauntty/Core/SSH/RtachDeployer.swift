@@ -207,7 +207,7 @@ class RtachDeployer {
     /// Deploy helper scripts for port forwarding
     private func deployHelperScripts() async throws {
         // Deploy forward-port script (handles both "8000" and "http://localhost:8000")
-        // Output to stdout - escape sequence flows through Claude's output to terminal
+        // Uses RTACH_CMD_FD pipe to send commands to Clauntty
         _ = try await connection.executeCommand(
             "cat > ~/.clauntty/bin/forward-port << 'EOF'\n" +
             "#!/bin/bash\n" +
@@ -219,14 +219,19 @@ class RtachDeployer {
             "else\n" +
             "  port=\"$arg\"\n" +
             "fi\n" +
-            "printf '\\e]777;forward;%s\\a' \"$port\"\n" +
+            "if [ -n \"$RTACH_CMD_FD\" ]; then\n" +
+            "  echo \"forward;$port\" >&$RTACH_CMD_FD\n" +
+            "else\n" +
+            "  echo \"Error: RTACH_CMD_FD not set (not running in rtach session)\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
             "echo \"Port $port forwarded\"\n" +
             "EOF\n" +
             "chmod +x ~/.clauntty/bin/forward-port"
         )
 
         // Deploy open-tab script (handles both "8000" and "http://localhost:8000")
-        // Output to stdout - escape sequence flows through Claude's output to terminal
+        // Uses RTACH_CMD_FD pipe to send commands to Clauntty
         _ = try await connection.executeCommand(
             "cat > ~/.clauntty/bin/open-tab << 'EOF'\n" +
             "#!/bin/bash\n" +
@@ -238,7 +243,12 @@ class RtachDeployer {
             "else\n" +
             "  port=\"$arg\"\n" +
             "fi\n" +
-            "printf '\\e]777;open;%s\\a' \"$port\"\n" +
+            "if [ -n \"$RTACH_CMD_FD\" ]; then\n" +
+            "  echo \"open;$port\" >&$RTACH_CMD_FD\n" +
+            "else\n" +
+            "  echo \"Error: RTACH_CMD_FD not set (not running in rtach session)\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
             "echo \"Opened port $port\"\n" +
             "EOF\n" +
             "chmod +x ~/.clauntty/bin/open-tab"
@@ -321,7 +331,7 @@ class RtachDeployer {
 
         guard let data = try? JSONSerialization.data(
             withJSONObject: finalSettings,
-            options: [.prettyPrinted, .sortedKeys]
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         ) else {
             Logger.clauntty.error("Failed to serialize Claude settings")
             return

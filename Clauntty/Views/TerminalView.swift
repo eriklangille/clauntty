@@ -223,11 +223,11 @@ struct TerminalView: View {
         }
 
         // Set up callback for scroll-triggered scrollback loading
-        // When user scrolls near the top, request old scrollback
+        // When user scrolls near the top, request old scrollback (paginated)
         // Skip if on alternate screen (vim, less, Claude Code) - no scrollback there
         surface.onScrollNearTop = { [weak session, weak surface] offset in
             guard let surface = surface, !surface.isAlternateScreen else { return }
-            session?.requestScrollback()
+            session?.loadMoreScrollbackIfNeeded()
         }
     }
 }

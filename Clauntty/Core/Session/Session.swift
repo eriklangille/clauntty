@@ -222,7 +222,9 @@ class Session: ObservableObject, Identifiable {
     private enum ScrollbackState {
         case idle                          // Not requesting scrollback
         case waitingForHeader              // Sent request, waiting for 5-byte header
-        case receivingData(remaining: Int) // Receiving scrollback data
+        case receivingData(remaining: Int) // Receiving scrollback data (legacy type=1)
+        case waitingForPageMeta(dataLen: Int) // Waiting for 8-byte metadata (paginated type=3)
+        case receivingPageData(remaining: Int) // Receiving paginated scrollback data
     }
 
     /// Current scrollback request state
@@ -234,8 +236,28 @@ class Session: ObservableObject, Identifiable {
     /// Buffer for partial header (if header arrives split across packets)
     private var headerBuffer = Data()
 
+    /// Buffer for partial metadata (if metadata arrives split across packets)
+    private var metaBuffer = Data()
+
     /// Whether we've already requested scrollback for this session
     private var scrollbackRequested = false
+
+    // MARK: - Paginated Scrollback State
+
+    /// Page size for scrollback requests (16KB)
+    private let scrollbackPageSize = 16 * 1024
+
+    /// Current offset into scrollback (0 = oldest data)
+    private var scrollbackLoadedOffset: Int = 0
+
+    /// Total scrollback size (set when first page received)
+    private var scrollbackTotalSize: Int?
+
+    /// Whether we've finished loading all scrollback
+    private var scrollbackFullyLoaded: Bool = false
+
+    /// Whether a scrollback page request is currently in flight
+    private var scrollbackPageRequestPending: Bool = false
 
     // MARK: - Command Message State
 
@@ -536,24 +558,35 @@ class Session: ObservableObject, Identifiable {
                     Logger.clauntty.info("Scrollback header: type=\(type), length=\(length)")
 
                     if type == 1 && length > 0 {
-                        // Type 1 = scrollback, transition to receiving data
+                        // Type 1 = legacy scrollback, transition to receiving data
                         scrollbackState = .receivingData(remaining: Int(length))
                         scrollbackResponseBuffer.removeAll(keepingCapacity: true)
+                    } else if type == 3 && length > 8 {
+                        // Type 3 = paginated scrollback_page, need to read metadata first
+                        // length includes 8 bytes of metadata + data
+                        scrollbackState = .waitingForPageMeta(dataLen: Int(length) - 8)
+                        metaBuffer.removeAll()
+                    } else if type == 3 && length == 8 {
+                        // Type 3 with only metadata (no data) - empty page
+                        scrollbackState = .waitingForPageMeta(dataLen: 0)
+                        metaBuffer.removeAll()
                     } else if length == 0 {
                         // Empty scrollback response
                         Logger.clauntty.info("Scrollback response: empty (all data was in initial send)")
                         scrollbackState = .idle
-                        headerBuffer.removeAll()
+                        scrollbackPageRequestPending = false
+                        scrollbackFullyLoaded = true
                     } else {
                         // Unknown type, abort
                         Logger.clauntty.warning("Unknown scrollback response type: \(type)")
                         scrollbackState = .idle
-                        headerBuffer.removeAll()
+                        scrollbackPageRequestPending = false
                     }
                     headerBuffer.removeAll()
                 }
 
             case .receivingData(let remaining):
+                // Legacy scrollback response (type=1)
                 let toRead = min(remaining, remainingData.count)
                 scrollbackResponseBuffer.append(remainingData.prefix(toRead))
                 remainingData = remainingData.dropFirst(toRead)
@@ -572,6 +605,74 @@ class Session: ObservableObject, Identifiable {
                     self.onScrollbackReceived?(scrollbackData)
                 } else {
                     self.scrollbackState = .receivingData(remaining: newRemaining)
+                }
+
+            case .waitingForPageMeta(let dataLen):
+                // Accumulate 8 bytes for metadata
+                let metaSize = 8  // total_len (4) + offset (4)
+                let needed = metaSize - metaBuffer.count
+                let available = min(needed, remainingData.count)
+
+                metaBuffer.append(remainingData.prefix(available))
+                remainingData = remainingData.dropFirst(available)
+                processedAny = true
+
+                if metaBuffer.count >= metaSize {
+                    // Parse metadata: [total_len: 4 bytes LE][offset: 4 bytes LE]
+                    let totalLen = metaBuffer.withUnsafeBytes { ptr -> UInt32 in
+                        ptr.loadUnaligned(fromByteOffset: 0, as: UInt32.self)
+                    }
+                    let offset = metaBuffer.withUnsafeBytes { ptr -> UInt32 in
+                        ptr.loadUnaligned(fromByteOffset: 4, as: UInt32.self)
+                    }
+
+                    Logger.clauntty.info("Scrollback page meta: total=\(totalLen), offset=\(offset), dataLen=\(dataLen)")
+
+                    scrollbackTotalSize = Int(totalLen)
+
+                    if dataLen > 0 {
+                        scrollbackState = .receivingPageData(remaining: dataLen)
+                        scrollbackResponseBuffer.removeAll(keepingCapacity: true)
+                    } else {
+                        // Empty page - we've loaded everything
+                        scrollbackState = .idle
+                        scrollbackPageRequestPending = false
+                        scrollbackFullyLoaded = true
+                        Logger.clauntty.info("Scrollback fully loaded (empty page)")
+                    }
+                    metaBuffer.removeAll()
+                }
+
+            case .receivingPageData(let remaining):
+                // Paginated scrollback response (type=3)
+                let toRead = min(remaining, remainingData.count)
+                scrollbackResponseBuffer.append(remainingData.prefix(toRead))
+                remainingData = remainingData.dropFirst(toRead)
+                processedAny = true
+
+                let newRemaining = remaining - toRead
+                if newRemaining <= 0 {
+                    // Page complete!
+                    let byteCount = self.scrollbackResponseBuffer.count
+                    Logger.clauntty.info("Scrollback page complete: \(byteCount) bytes")
+                    let scrollbackData = self.scrollbackResponseBuffer
+                    self.scrollbackResponseBuffer.removeAll()
+                    self.scrollbackState = .idle
+                    self.scrollbackPageRequestPending = false
+
+                    // Update offset
+                    self.scrollbackLoadedOffset += byteCount
+
+                    // Check if fully loaded
+                    if let total = self.scrollbackTotalSize, self.scrollbackLoadedOffset >= total {
+                        self.scrollbackFullyLoaded = true
+                        Logger.clauntty.info("Scrollback fully loaded: \(total) bytes total")
+                    }
+
+                    // Deliver to callback
+                    self.onScrollbackReceived?(scrollbackData)
+                } else {
+                    self.scrollbackState = .receivingPageData(remaining: newRemaining)
                 }
             }
         }
@@ -655,8 +756,58 @@ class Session: ObservableObject, Identifiable {
 
     // MARK: - Scrollback Request
 
-    /// Request old scrollback from rtach (everything before the initial 16KB)
-    /// This is called after connection is established to load the full history.
+    /// Request a page of old scrollback from rtach (paginated)
+    /// This uses the new request_scrollback_page message type (6) which returns
+    /// scrollback in chunks to prevent iOS watchdog kills.
+    func requestScrollbackPage() {
+        guard !scrollbackFullyLoaded else {
+            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback already fully loaded")
+            return
+        }
+
+        guard !scrollbackPageRequestPending else {
+            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback page request already pending")
+            return
+        }
+
+        guard case .idle = scrollbackState else {
+            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback state not idle")
+            return
+        }
+
+        guard channelHandler != nil else {
+            Logger.clauntty.warning("Session \(self.id.uuidString.prefix(8)): cannot request scrollback, no channel")
+            return
+        }
+
+        scrollbackPageRequestPending = true
+        scrollbackState = .waitingForHeader
+        headerBuffer.removeAll()
+
+        // Build request: [type: 1 byte = 6][len: 1 byte = 8][offset: 4 bytes LE][limit: 4 bytes LE]
+        var packet = Data()
+        packet.append(6)  // MessageType.request_scrollback_page = 6
+        packet.append(8)  // Payload length = 8 bytes
+
+        var offset = UInt32(scrollbackLoadedOffset).littleEndian
+        var limit = UInt32(scrollbackPageSize).littleEndian
+        withUnsafeBytes(of: &offset) { packet.append(contentsOf: $0) }
+        withUnsafeBytes(of: &limit) { packet.append(contentsOf: $0) }
+
+        channelHandler?.sendToRemote(packet)
+
+        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): requesting scrollback page offset=\(self.scrollbackLoadedOffset) limit=\(self.scrollbackPageSize)")
+    }
+
+    /// Load more scrollback if user is scrolling near the top and more is available
+    /// Call this from TerminalView when user scrolls near the top of scrollback
+    func loadMoreScrollbackIfNeeded() {
+        requestScrollbackPage()
+    }
+
+    /// Legacy: Request all old scrollback at once (deprecated - use requestScrollbackPage instead)
+    /// This can cause watchdog kills on iOS with large scrollback buffers
+    @available(*, deprecated, message: "Use requestScrollbackPage() for paginated loading")
     func requestScrollback() {
         guard !scrollbackRequested else {
             Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback already requested")
@@ -672,12 +823,12 @@ class Session: ObservableObject, Identifiable {
         scrollbackState = .waitingForHeader
         headerBuffer.removeAll()
 
-        // Send rtach request_scrollback packet
+        // Send rtach request_scrollback packet (legacy)
         // Format: [type: 1 byte = 5][length: 1 byte = 0]
         let packet = Data([5, 0])  // MessageType.request_scrollback = 5, length = 0
         channelHandler?.sendToRemote(packet)
 
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): requested old scrollback from rtach")
+        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): requested old scrollback from rtach (legacy)")
     }
 
     // MARK: - Scrollback Persistence
