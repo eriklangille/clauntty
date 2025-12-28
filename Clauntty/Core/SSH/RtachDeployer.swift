@@ -12,9 +12,18 @@ struct SessionMetadata: Codable {
 struct RtachSession: Identifiable {
     let id: String          // Session ID (filename)
     var name: String        // Display name (from metadata or generated)
+    var title: String?      // Terminal title from OSC escape sequences (from .title file)
     let lastActive: Date    // Last modification time
     let socketPath: String  // Full path to socket
     let created: Date?      // Creation time from metadata
+
+    /// Display name for UI - prefer OSC title, fall back to verb-noun name
+    var displayName: String {
+        if let title = title, !title.isEmpty {
+            return title
+        }
+        return name
+    }
 
     /// Human-readable description of last activity
     var lastActiveDescription: String {
@@ -67,7 +76,9 @@ class RtachDeployer {
     /// 2.1.3 - Add PID to log prefix for multi-session debugging
     /// 2.1.4 - Fix: client.zig now forwards pause/resume packets to master
     /// 2.2.0 - Phase 2 network optimization complete: pause/resume/idle working
-    static let expectedVersion = "2.2.0"
+    /// 2.3.0 - OSC 0/1/2 title parsing: saves terminal title to .title file for session picker
+    /// 2.4.0 - Shell integration: bash/zsh/fish set title to current directory and running command
+    static let expectedVersion = "2.4.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -133,7 +144,9 @@ class RtachDeployer {
         var metadata = try await loadSessionMetadata()
         var metadataChanged = false
 
-        var sessions: [RtachSession] = []
+        // Collect session IDs first
+        var sessionIds: [String] = []
+        var sessionData: [(id: String, fullPath: String, epochTime: Double)] = []
 
         for line in output.split(separator: "\n") {
             let parts = line.split(separator: " ")
@@ -144,30 +157,58 @@ class RtachDeployer {
 
             let fullPath = String(parts[0..<(parts.count - 1)].joined(separator: " "))
             let sessionId = (fullPath as NSString).lastPathComponent
+            sessionIds.append(sessionId)
+            sessionData.append((id: sessionId, fullPath: fullPath, epochTime: epochTime))
+        }
 
+        // Read all .title files in one command (more efficient than per-session)
+        // Output format: sessionId<TAB>title (one per line)
+        var titles: [String: String] = [:]
+        if !sessionIds.isEmpty {
+            let titleOutput = try await connection.executeCommand(
+                "for f in \(Self.remoteSessionsPath)/*.title; do " +
+                "[ -f \"$f\" ] && echo -e \"$(basename \"$f\" .title)\\t$(cat \"$f\")\"; " +
+                "done 2>/dev/null || true"
+            )
+            for line in titleOutput.split(separator: "\n") {
+                let parts = line.split(separator: "\t", maxSplits: 1)
+                if parts.count == 2 {
+                    let sessionId = String(parts[0])
+                    let title = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !title.isEmpty {
+                        titles[sessionId] = title
+                    }
+                }
+            }
+        }
+
+        var sessions: [RtachSession] = []
+
+        for data in sessionData {
             // Get or create metadata for this session
             let sessionMeta: SessionMetadata
-            if let existing = metadata[sessionId] {
+            if let existing = metadata[data.id] {
                 sessionMeta = existing
             } else {
                 // Generate new name for sessions without metadata
                 sessionMeta = SessionMetadata(
                     name: SessionNameGenerator.generate(),
-                    created: Date(timeIntervalSince1970: epochTime),
+                    created: Date(timeIntervalSince1970: data.epochTime),
                     lastAccessed: nil
                 )
-                metadata[sessionId] = sessionMeta
+                metadata[data.id] = sessionMeta
                 metadataChanged = true
             }
 
             // Use lastAccessed from metadata if available, otherwise fall back to file mtime
-            let lastActiveDate = sessionMeta.lastAccessed ?? Date(timeIntervalSince1970: epochTime)
+            let lastActiveDate = sessionMeta.lastAccessed ?? Date(timeIntervalSince1970: data.epochTime)
 
             let session = RtachSession(
-                id: sessionId,
+                id: data.id,
                 name: sessionMeta.name,
+                title: titles[data.id],
                 lastActive: lastActiveDate,
-                socketPath: fullPath,
+                socketPath: data.fullPath,
                 created: sessionMeta.created
             )
             sessions.append(session)

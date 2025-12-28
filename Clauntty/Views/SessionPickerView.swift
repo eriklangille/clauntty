@@ -55,7 +55,7 @@ struct SessionPickerView: View {
                 }
 
                 if !sessions.isEmpty {
-                    Section("Existing Sessions") {
+                    Section("Active Sessions") {
                         ForEach(sessions) { session in
                             sessionRow(session)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -132,7 +132,7 @@ struct SessionPickerView: View {
                 deleteSession(session)
             }
         } message: { session in
-            Text("Delete '\(session.name)'? This will terminate the running shell.")
+            Text("Delete '\(session.displayName)'? This will terminate the running shell.")
         }
         .alert("Rename Session", isPresented: $showingRenameAlert, presenting: sessionToRename) { session in
             TextField("Session name", text: $newName)
@@ -169,7 +169,7 @@ struct SessionPickerView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(session.name)
+                    Text(session.displayName)
                         .font(.headline)
 
                     if isOpenInTab {
@@ -375,6 +375,7 @@ struct SessionPickerView: View {
             RtachSession(
                 id: "ABC12345-1234-1234-1234-123456789ABC",
                 name: "swift-falcon",
+                title: "vim ~/project/main.c",  // Has OSC title
                 lastActive: Date().addingTimeInterval(-3600),
                 socketPath: "~/.clauntty/sessions/ABC12345",
                 created: Date().addingTimeInterval(-86400)
@@ -382,6 +383,7 @@ struct SessionPickerView: View {
             RtachSession(
                 id: "DEF67890-5678-5678-5678-567890ABCDEF",
                 name: "bold-tiger",
+                title: nil,  // No title yet, will show verb-noun
                 lastActive: Date().addingTimeInterval(-86400),
                 socketPath: "~/.clauntty/sessions/DEF67890",
                 created: Date().addingTimeInterval(-172800)

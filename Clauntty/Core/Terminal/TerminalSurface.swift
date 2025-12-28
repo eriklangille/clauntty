@@ -167,6 +167,136 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     var smartDashesType: UITextSmartDashesType = .no
     var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
 
+    // MARK: - Software Keyboard Control
+
+    /// Whether the software keyboard is manually hidden (keeps first responder for hardware keyboard)
+    private var isSoftwareKeyboardHidden = false
+
+    /// Flag to ignore spurious keyboardWillHide during show transition
+    private var isShowingKeyboardTransition = false
+
+    /// Flag to ignore spurious keyboard notifications during rotation
+    private var isRotating = false
+
+    /// Empty view to replace keyboard when hidden (zero height to avoid gray bar)
+    private let emptyInputView: UIView = {
+        let view = UIView(frame: .zero)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.heightAnchor.constraint(equalToConstant: 0).isActive = true
+        return view
+    }()
+
+    /// Constraint for positioning accessory bar above keyboard
+    private var accessoryBarBottomConstraint: NSLayoutConstraint?
+
+    /// Override inputView to control software keyboard visibility
+    override var inputView: UIView? {
+        if isSoftwareKeyboardHidden {
+            return emptyInputView  // Empty view = no keyboard
+        }
+        return nil  // nil = default keyboard
+    }
+
+    /// Hide the software keyboard without resigning first responder
+    func hideSoftwareKeyboard() {
+        Logger.clauntty.info("[KB] hideSoftwareKeyboard() called, isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden)")
+        guard !isSoftwareKeyboardHidden else { return }
+        isSoftwareKeyboardHidden = true
+        reloadInputViews()
+        accessoryBar.setKeyboardVisible(false)
+        keyboardHeight = 0
+        updateSizeForKeyboard()
+        updateAccessoryBarPosition(keyboardVisible: false, keyboardHeight: 0)
+        Logger.clauntty.info("[KB] hideSoftwareKeyboard() - set flag=true, accessoryBar COLLAPSED")
+    }
+
+    /// Show the software keyboard
+    func showSoftwareKeyboard() {
+        Logger.clauntty.info("[KB] showSoftwareKeyboard() called, isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), barShown=\(self.accessoryBar.isKeyboardShown)")
+
+        // Allow show if keyboard was manually hidden OR if bar is collapsed (e.g., after Cmd+K)
+        guard isSoftwareKeyboardHidden || !accessoryBar.isKeyboardShown else {
+            Logger.clauntty.info("[KB] showSoftwareKeyboard() skipped - keyboard already shown")
+            return
+        }
+
+        isSoftwareKeyboardHidden = false
+        isShowingKeyboardTransition = true  // Ignore spurious hide notifications
+
+        // Tell iOS to reload input views BEFORE becoming first responder
+        // This ensures inputView returns nil (default keyboard) instead of emptyInputView
+        reloadInputViews()
+
+        // Force keyboard to appear by resigning and re-becoming first responder
+        // This is necessary after Cmd+K or other external keyboard dismissal
+        if isFirstResponder {
+            Logger.clauntty.info("[KB] showSoftwareKeyboard() - resigning and re-becoming first responder")
+            _ = resignFirstResponder()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                _ = self?.becomeFirstResponder()
+                // Reload input views again after becoming first responder to be sure
+                self?.reloadInputViews()
+            }
+        } else {
+            // Not first responder - just become it
+            _ = becomeFirstResponder()
+            reloadInputViews()
+        }
+        Logger.clauntty.info("[KB] showSoftwareKeyboard() - waiting for keyboardWillShow")
+
+        // Timeout: if keyboard doesn't show within 0.5s, reset state
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            if self.isShowingKeyboardTransition {
+                Logger.clauntty.info("[KB] showSoftwareKeyboard timeout - keyboard didn't appear, resetting state")
+                self.isShowingKeyboardTransition = false
+                self.isSoftwareKeyboardHidden = true
+                self.accessoryBar.setKeyboardVisible(false)
+                self.updateAccessoryBarPosition(keyboardVisible: false, keyboardHeight: 0)
+            }
+        }
+    }
+
+    /// Set up accessory bar in the window (so it appears above keyboard)
+    /// Called from didMoveToWindow when we have a window
+    private func setupAccessoryBarInWindow() {
+        guard let window = window else { return }
+
+        // Only set up once
+        guard accessoryBar.superview == nil else { return }
+
+        accessoryBar.translatesAutoresizingMaskIntoConstraints = false
+        window.addSubview(accessoryBar)
+
+        accessoryBarBottomConstraint = accessoryBar.bottomAnchor.constraint(equalTo: window.bottomAnchor, constant: -8)
+
+        NSLayoutConstraint.activate([
+            // Full width spanning the window (minus safe area handled inside the view)
+            accessoryBar.leadingAnchor.constraint(equalTo: window.leadingAnchor),
+            accessoryBar.trailingAnchor.constraint(equalTo: window.trailingAnchor),
+            accessoryBar.heightAnchor.constraint(equalToConstant: 60),
+            accessoryBarBottomConstraint!
+        ])
+        Logger.clauntty.info("[KB] Added accessory bar to window")
+    }
+
+    /// Update accessory bar position based on keyboard state
+    private func updateAccessoryBarPosition(keyboardVisible: Bool, keyboardHeight: CGFloat) {
+        // Position bar above keyboard when visible, at bottom when hidden
+        let bottomOffset: CGFloat
+        if keyboardVisible && keyboardHeight > 0 {
+            // Above keyboard (keyboard height from bottom of window)
+            bottomOffset = -keyboardHeight
+        } else {
+            // At bottom of screen (above safe area)
+            let safeBottom = window?.safeAreaInsets.bottom ?? 0
+            bottomOffset = -safeBottom - 8
+        }
+
+        accessoryBarBottomConstraint?.constant = bottomOffset
+        Logger.clauntty.info("[KB] updateAccessoryBarPosition: keyboardVisible=\(keyboardVisible), kbHeight=\(Int(keyboardHeight)), bottomOffset=\(Int(bottomOffset))")
+    }
+
     // MARK: - SSH Data Flow
 
     /// Callback for keyboard input - send this data to SSH
@@ -178,17 +308,31 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     /// Keyboard accessory bar with terminal keys
-    private let accessoryBar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 48))
+    private let accessoryBar: KeyboardAccessoryView = {
+        let bar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 60))
+        return bar
+    }()
 
-    override var inputAccessoryView: UIView? {
-        return accessoryBar
+    /// Set up accessory bar keyboard callbacks
+    private func setupAccessoryBarCallbacks() {
+        accessoryBar.onDismissKeyboard = { [weak self] in
+            self?.hideSoftwareKeyboard()
+        }
+        accessoryBar.onShowKeyboard = { [weak self] in
+            self?.showSoftwareKeyboard()
+        }
     }
+
+    // We don't use inputAccessoryView - we manage the accessory bar as our own subview
+    // This gives us full control over positioning and avoids iOS ownership issues
 
     // MARK: - Initialization
 
     init(frame: CGRect, app: ghostty_app_t?) {
         super.init(frame: frame)
         setupView()
+        setupAccessoryBarCallbacks()
+        // Accessory bar setup happens in didMoveToWindow when we have a window
 
         guard let app = app else {
             Logger.clauntty.error("TerminalSurfaceView: No app provided")
@@ -240,16 +384,22 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupView()
+        setupAccessoryBarCallbacks()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupView()
+        setupAccessoryBarCallbacks()
     }
 
     deinit {
         NotificationCenter.default.removeObserver(self)
         powerModeObserver?.cancel()
+
+        // Remove accessory bar from window
+        accessoryBar.removeFromSuperview()
+
         if let surface = self.surface {
             // Unregister from static registry
             let ptr = UnsafeRawPointer(surface)
@@ -285,33 +435,116 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             return
         }
 
-        // Get keyboard height relative to our view
-        let keyboardFrameInView = convert(keyboardFrame, from: nil)
-        let intersection = bounds.intersection(keyboardFrameInView)
-        let newKeyboardHeight = intersection.height
+        // Track keyboard frame height for accessory bar positioning
+        // Note: We don't use this to subtract from terminal size because the terminal view
+        // doesn't extend to the keyboard area (SwiftUI handles the layout)
+        let keyboardFrameHeight = keyboardFrame.height
 
-        if newKeyboardHeight != keyboardHeight {
-            keyboardHeight = newKeyboardHeight
-            Logger.clauntty.info("Keyboard shown, height: \(newKeyboardHeight)")
+        Logger.clauntty.info("[KB] keyboardWillShow: kbFrame=\(Int(keyboardFrame.width))x\(Int(keyboardFrame.height)), bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden)")
+
+        // Only treat as "real" keyboard if the keyboard height is substantial (>100 = actual keyboard, not just accessory bar)
+        let isRealKeyboard = keyboardFrameHeight > 100
+
+        // Track if keyboard is visible (for accessory bar state) - don't use for terminal size
+        let wasKeyboardVisible = keyboardHeight > 0
+        if isRealKeyboard {
+            keyboardHeight = keyboardFrameHeight  // Store for accessory bar positioning
+        }
+
+        // Update terminal size if keyboard visibility changed (affects accessory bar reserve)
+        if wasKeyboardVisible != isRealKeyboard {
+            Logger.clauntty.info("[KB] Keyboard visibility changed: \(wasKeyboardVisible) -> \(isRealKeyboard)")
             updateSizeForKeyboard()
+        }
+
+        // Only expand accessory bar for real keyboard, not just accessory bar height changes
+        if isRealKeyboard {
+            // Clear the transition flag - keyboard successfully shown
+            isShowingKeyboardTransition = false
+
+            // If user had manually hidden keyboard (via button), but iOS is now showing
+            // a real keyboard (via Cmd+K or other), respect that and clear our flag
+            if isSoftwareKeyboardHidden {
+                Logger.clauntty.info("[KB] Real keyboard appeared while flag=hidden, clearing flag (Cmd+K case)")
+                isSoftwareKeyboardHidden = false
+            }
+
+            accessoryBar.setKeyboardVisible(true)
+            updateAccessoryBarPosition(keyboardVisible: true, keyboardHeight: keyboardFrame.height)
+            Logger.clauntty.info("[KB] accessoryBar.setKeyboardVisible(true) - EXPANDED")
+        } else {
+            Logger.clauntty.info("[KB] Skipping expand - not real keyboard (height=\(Int(keyboardFrameHeight)))")
         }
     }
 
     @objc private func keyboardWillHide(_ notification: Notification) {
-        if keyboardHeight != 0 {
-            keyboardHeight = 0
-            Logger.clauntty.info("Keyboard hidden")
-            updateSizeForKeyboard()
+        Logger.clauntty.info("[KB] keyboardWillHide: bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), isShowingTransition=\(self.isShowingKeyboardTransition), isRotating=\(self.isRotating)")
+
+        // Ignore spurious hide notifications during show transition
+        if isShowingKeyboardTransition {
+            Logger.clauntty.info("[KB] keyboardWillHide IGNORED - in show transition")
+            return
+        }
+
+        // Ignore spurious hide notifications during rotation
+        if isRotating {
+            Logger.clauntty.info("[KB] keyboardWillHide IGNORED - during rotation")
+            return
+        }
+
+        // Ignore if we've manually hidden the keyboard (we already handled it)
+        if isSoftwareKeyboardHidden {
+            Logger.clauntty.info("[KB] keyboardWillHide IGNORED - already manually hidden")
+            return
+        }
+
+        // Keyboard was hidden externally (e.g., Cmd+K)
+        // Only collapse bar if it's currently expanded
+        if accessoryBar.isKeyboardShown {
+            if keyboardHeight != 0 {
+                keyboardHeight = 0
+                Logger.clauntty.info("[KB] Keyboard height changed: 0")
+                updateSizeForKeyboard()
+            }
+            accessoryBar.setKeyboardVisible(false)
+            updateAccessoryBarPosition(keyboardVisible: false, keyboardHeight: 0)
+            Logger.clauntty.info("[KB] accessoryBar.setKeyboardVisible(false) - COLLAPSED (external hide)")
+        } else {
+            Logger.clauntty.info("[KB] keyboardWillHide IGNORED - bar already collapsed")
         }
     }
 
+    /// Height to reserve for accessory bar when keyboard is visible (expanded bar)
+    /// The bar is positioned above the keyboard but still within our view bounds
+    private let expandedAccessoryBarHeight: CGFloat = 68  // 60pt bar + 8pt top padding
+
+    /// Height to reserve for accessory bar when keyboard is hidden (collapsed bar)
+    /// Includes safe area margin since bar is at bottom of screen
+    private let collapsedAccessoryBarHeight: CGFloat = 76  // 60pt bar + 16pt margin for safe area
+
     private func updateSizeForKeyboard() {
-        // Recalculate size accounting for keyboard
-        // The effective height is reduced by keyboard height
+        // Recalculate size accounting for accessory bar position
+        //
+        // The accessory bar is ALWAYS within our view bounds (it's a window subview
+        // positioned above the keyboard or at the bottom of screen).
+        // We must ALWAYS reserve space for it, just different amounts:
+        //
+        // When keyboard is VISIBLE:
+        //   - SwiftUI adjusts our bounds to be the space ABOVE the keyboard
+        //   - The accessory bar is positioned just above the keyboard, within our bounds
+        //   - Reserve space for the expanded bar
+        //
+        // When keyboard is HIDDEN:
+        //   - Our bounds are nearly full screen
+        //   - The accessory bar is at the bottom of screen, within our bounds
+        //   - Reserve space for the collapsed bar (includes safe area margin)
+        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
         let effectiveSize = CGSize(
             width: bounds.width,
-            height: bounds.height - keyboardHeight
+            height: bounds.height - accessoryBarReserve
         )
+        let safeInsets = safeAreaInsets
+        Logger.clauntty.info("[KB] updateSizeForKeyboard: bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), kbVisible=\(self.keyboardHeight > 0), barReserve=\(Int(accessoryBarReserve)), effectiveSize=\(Int(effectiveSize.width))x\(Int(effectiveSize.height)), safeArea=(t:\(Int(safeInsets.top)),b:\(Int(safeInsets.bottom)),l:\(Int(safeInsets.left)),r:\(Int(safeInsets.right)))")
         sizeDidChange(effectiveSize)
     }
 
@@ -706,7 +939,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Immediately trigger size update with current bounds
         // This ensures the sublayer gets the correct size even if layoutSubviews hasn't run yet
-        sizeDidChange(self.bounds.size)
+        // Always reserve space - different amounts for expanded vs collapsed bar
+        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+        let effectiveSize = CGSize(
+            width: bounds.width,
+            height: bounds.height - accessoryBarReserve
+        )
+        sizeDidChange(effectiveSize)
     }
 
     /// Reference to Ghostty's IOSurfaceLayer for frame updates
@@ -726,18 +965,32 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let rotated = detectRotation(from: lastBounds, to: bounds)
         lastBounds = bounds
 
-        // Account for keyboard when calculating effective size
+        // Account for accessory bar when calculating effective size
+        // Always reserve space - different amounts for expanded vs collapsed bar
+        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
         let effectiveSize = CGSize(
             width: bounds.width,
-            height: bounds.height - keyboardHeight
+            height: bounds.height - accessoryBarReserve
         )
         Logger.clauntty.debugOnly("layoutSubviews: effectiveSize=\(Int(effectiveSize.width))x\(Int(effectiveSize.height)), rotated=\(rotated)")
         sizeDidChange(effectiveSize)
 
         // After rotation, force aggressive refresh to fix viewport position
         if rotated {
-            Logger.clauntty.debugOnly("Rotation detected, scheduling viewport reset")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            let safeInsets = safeAreaInsets
+            Logger.clauntty.info("[ROTATE] Rotation detected! bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), kbHeight=\(Int(self.keyboardHeight)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), safeArea=(t:\(Int(safeInsets.top)),b:\(Int(safeInsets.bottom)),l:\(Int(safeInsets.left)),r:\(Int(safeInsets.right)))")
+
+            // Set rotation flag to ignore spurious keyboard notifications
+            isRotating = true
+
+            // Re-enforce keyboard hidden state during rotation
+            // iOS may send spurious keyboard notifications during rotation
+            if isSoftwareKeyboardHidden {
+                Logger.clauntty.info("[ROTATE] Re-enforcing keyboard hidden state via reloadInputViews()")
+                reloadInputViews()
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.handleRotationComplete()
             }
         }
@@ -755,6 +1008,10 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Handle rotation completion - reset viewport and force redraw
     private func handleRotationComplete() {
         guard let surface = self.surface else { return }
+
+        // Clear rotation flag
+        isRotating = false
+        Logger.clauntty.info("[ROTATE] Rotation complete, cleared isRotating flag")
 
         let gridSize = ghostty_surface_size(surface)
         let scrollOffset = ghostty_surface_scrollback_offset(surface)
@@ -783,13 +1040,18 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil {
+            // Set up accessory bar in window (so it appears above keyboard)
+            setupAccessoryBarInWindow()
+
             let scale = window!.screen.scale
             Logger.clauntty.debugOnly("didMoveToWindow: window scale=\(scale), bounds=\(NSCoder.string(for: self.bounds))")
 
-            // Account for keyboard when calculating effective size
+            // Account for accessory bar when calculating effective size
+            // Always reserve space - different amounts for expanded vs collapsed bar
+            let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
             let effectiveSize = CGSize(
                 width: bounds.width,
-                height: bounds.height - keyboardHeight
+                height: bounds.height - accessoryBarReserve
             )
             sizeDidChange(effectiveSize)
 
@@ -801,6 +1063,10 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                     _ = self.becomeFirstResponder()
                 }
             }
+        } else {
+            // View removed from window - clean up accessory bar
+            accessoryBar.removeFromSuperview()
+            Logger.clauntty.debugOnly("didMoveToWindow: removed from window, cleaned up accessory bar")
         }
     }
 
@@ -870,8 +1136,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         defer { isForceRedrawing = false }
 
         let scale = window?.screen.scale ?? UIScreen.main.scale
-        // Use effective height (accounting for keyboard) to avoid size mismatch
-        let effectiveHeight = bounds.height - keyboardHeight
+        // Always reserve space for accessory bar - different amounts for expanded vs collapsed
+        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+        let effectiveHeight = bounds.height - accessoryBarReserve
         let w = UInt32(bounds.width * scale)
         let h = UInt32(effectiveHeight * scale)
 
@@ -912,9 +1179,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             focusDidChange(true)
 
             // Force size update to ensure Metal layer frame is correct after tab switch
+            // Always reserve space - different amounts for expanded vs collapsed bar
+            let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
             let effectiveSize = CGSize(
                 width: bounds.width,
-                height: bounds.height - keyboardHeight
+                height: bounds.height - accessoryBarReserve
             )
             sizeDidChange(effectiveSize)
 
