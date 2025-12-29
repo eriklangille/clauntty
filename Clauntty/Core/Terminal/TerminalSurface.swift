@@ -107,11 +107,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     // MARK: - Surface Registry (for routing Ghostty callbacks)
 
     /// Registry to look up surfaces by pointer (for routing Ghostty action callbacks)
+    /// Access must be synchronized via registryLock since Ghostty callbacks may come from any thread
     private static var surfaceRegistry: [UnsafeRawPointer: TerminalSurfaceView] = [:]
+    private static let registryLock = NSLock()
 
-    /// Look up surface view by Ghostty surface pointer
+    /// Look up surface view by Ghostty surface pointer (thread-safe)
     static func find(surface: ghostty_surface_t) -> TerminalSurfaceView? {
         let ptr = UnsafeRawPointer(surface)
+        registryLock.lock()
+        defer { registryLock.unlock() }
         return surfaceRegistry[ptr]
     }
 
@@ -371,9 +375,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             view.onTextInput?(inputData)
         }
 
-        // Register in static registry for Ghostty callback routing
+        // Register in static registry for Ghostty callback routing (thread-safe)
         let ptr = UnsafeRawPointer(surface)
+        Self.registryLock.lock()
         Self.surfaceRegistry[ptr] = self
+        Self.registryLock.unlock()
 
         // Set initial power mode
         updatePowerMode(PowerManager.shared.currentMode)
@@ -401,9 +407,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         accessoryBar.removeFromSuperview()
 
         if let surface = self.surface {
-            // Unregister from static registry
+            // Unregister from static registry (thread-safe)
             let ptr = UnsafeRawPointer(surface)
+            Self.registryLock.lock()
             Self.surfaceRegistry.removeValue(forKey: ptr)
+            Self.registryLock.unlock()
 
             ghostty_surface_free(surface)
         }
@@ -692,31 +700,41 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     private func increaseFontSize(surface: ghostty_surface_t) {
         let action = "increase_font_size:1"
-        let success = ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
-        if success {
-            currentFontSize = min(currentFontSize + 1, 36)
-            FontSizePreference.save(currentFontSize)
-            Logger.clauntty.debugOnly("Font size increased to \(self.currentFontSize)")
-            // Notify SSH of new terminal size after font change
-            notifyTerminalSizeChanged(surface: surface)
-            // Update selection handles after font change (positions change)
-            // Use delayed update to ensure Ghostty has recalculated positions
-            scheduleSelectionHandleUpdate()
+        // Dispatch to background queue to avoid potential main thread blocking
+        terminalIOQueue.async { [weak self] in
+            let success = ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+            if success {
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.currentFontSize = min(self.currentFontSize + 1, 36)
+                    FontSizePreference.save(self.currentFontSize)
+                    Logger.clauntty.debugOnly("Font size increased to \(self.currentFontSize)")
+                    // Notify SSH of new terminal size after font change
+                    self.notifyTerminalSizeChanged(surface: surface)
+                    // Update selection handles after font change (positions change)
+                    self.scheduleSelectionHandleUpdate()
+                }
+            }
         }
     }
 
     private func decreaseFontSize(surface: ghostty_surface_t) {
         let action = "decrease_font_size:1"
-        let success = ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
-        if success {
-            currentFontSize = max(currentFontSize - 1, 6)
-            FontSizePreference.save(currentFontSize)
-            Logger.clauntty.debugOnly("Font size decreased to \(self.currentFontSize)")
-            // Notify SSH of new terminal size after font change
-            notifyTerminalSizeChanged(surface: surface)
-            // Update selection handles after font change (positions change)
-            // Use delayed update to ensure Ghostty has recalculated positions
-            scheduleSelectionHandleUpdate()
+        // Dispatch to background queue to avoid potential main thread blocking
+        terminalIOQueue.async { [weak self] in
+            let success = ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+            if success {
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.currentFontSize = max(self.currentFontSize - 1, 6)
+                    FontSizePreference.save(self.currentFontSize)
+                    Logger.clauntty.debugOnly("Font size decreased to \(self.currentFontSize)")
+                    // Notify SSH of new terminal size after font change
+                    self.notifyTerminalSizeChanged(surface: surface)
+                    // Update selection handles after font change (positions change)
+                    self.scheduleSelectionHandleUpdate()
+                }
+            }
         }
     }
 
@@ -724,13 +742,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     func resetFontSize() {
         guard let surface = self.surface else { return }
         let action = "reset_font_size"
-        let success = ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
-        if success {
-            currentFontSize = 11.0
-            FontSizePreference.reset()
-            Logger.clauntty.info("Font size reset to default")
-            // Notify SSH of new terminal size after font change
-            notifyTerminalSizeChanged(surface: surface)
+        // Dispatch to background queue to avoid potential main thread blocking
+        terminalIOQueue.async { [weak self] in
+            let success = ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+            if success {
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.currentFontSize = 11.0
+                    FontSizePreference.reset()
+                    Logger.clauntty.info("Font size reset to default")
+                    // Notify SSH of new terminal size after font change
+                    self.notifyTerminalSizeChanged(surface: surface)
+                }
+            }
         }
     }
 

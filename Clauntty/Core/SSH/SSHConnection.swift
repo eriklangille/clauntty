@@ -431,12 +431,12 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
         }
 
         // Get bytes and send to terminal for display
+        // Note: We don't dispatch to main here - the callback is responsible for its own threading.
+        // SessionManager wraps in Task { @MainActor }, and writeSSHOutput dispatches to terminalIOQueue.
         if let bytes = buffer.getBytes(at: buffer.readerIndex, length: buffer.readableBytes) {
             let data = Data(bytes)
-            Logger.clauntty.verbose("channelRead: received \(data.count) bytes from SSH")
-            DispatchQueue.main.async { [weak self] in
-                self?.onDataReceived?(data)
-            }
+            Logger.clauntty.info("channelRead: received \(data.count) bytes from SSH")
+            onDataReceived?(data)
         }
     }
 

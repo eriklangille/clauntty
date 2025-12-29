@@ -239,23 +239,17 @@ struct TerminalView: View {
         Logger.clauntty.debugOnly("wireSessionToSurface called for session \(session.id.uuidString.prefix(8))")
 
         // Set up callback for session data → terminal display
-        // Capture surface strongly - it's safe because session doesn't own the view
+        // This is called from Session.processTerminalData which is @MainActor isolated.
+        // writeSSHOutput internally dispatches to terminalIOQueue, so no threading needed here.
         session.onDataReceived = { data in
-            if Thread.isMainThread {
-                surface.writeSSHOutput(data)
-            } else {
-                DispatchQueue.main.async {
-                    surface.writeSSHOutput(data)
-                }
-            }
+            surface.writeSSHOutput(data)
         }
 
         // Set up callback for old scrollback → prepend to terminal
+        // Called from Session's RtachSessionDelegate which dispatches via Task { @MainActor }.
         session.onScrollbackReceived = { [weak surface] data in
             guard let surface = surface else { return }
-            DispatchQueue.main.async {
-                surface.prependScrollback(data)
-            }
+            surface.prependScrollback(data)
         }
 
         // Set up callback for terminal title changes → session title
