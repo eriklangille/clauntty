@@ -96,6 +96,7 @@ enum LaunchArgs {
 @main
 struct ClaunttyApp: App {
     @StateObject private var connectionStore = ConnectionStore()
+    @StateObject private var sshKeyStore = SSHKeyStore()
     @StateObject private var appState: AppState
     @StateObject private var ghosttyApp: GhosttyApp
     @StateObject private var sessionManager = SessionManager()
@@ -129,6 +130,7 @@ struct ClaunttyApp: App {
         WindowGroup {
             AppContentView(sessionManager: sessionManager)
                 .environmentObject(connectionStore)
+                .environmentObject(sshKeyStore)
                 .environmentObject(appState)
                 .environmentObject(ghosttyApp)
                 .environmentObject(sessionManager)

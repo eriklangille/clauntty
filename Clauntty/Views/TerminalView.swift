@@ -70,6 +70,10 @@ struct TerminalView: View {
                         Logger.clauntty.verbose("[INPUT] onTextInput called with \(data.count) bytes: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
                         session.sendData(data)
                     },
+                    onImagePaste: { image in
+                        // Upload image to remote and paste file path
+                        session.uploadImageAndPaste(image)
+                    },
                     onTerminalSizeChanged: { rows, columns in
                         // Send window size change to SSH server
                         session.sendWindowChange(rows: rows, columns: columns)

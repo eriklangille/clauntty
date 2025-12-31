@@ -354,9 +354,14 @@ class SessionManager: ObservableObject {
         // Remove from sessions list
         sessions.removeAll { $0.id == session.id }
 
-        // If this was the active session, switch to another
+        // If this was the active session, switch to previous or fallback to first
         if activeSessionId == session.id {
-            activeSessionId = sessions.first?.id
+            switchToTabAfterClose(closedTab: .terminal(session.id))
+        }
+
+        // Clear previousActiveTab if it was the closed session
+        if case .terminal(let id) = previousActiveTab, id == session.id {
+            previousActiveTab = nil
         }
 
         // Check if connection should be closed (no more sessions using it)
@@ -554,15 +559,14 @@ class SessionManager: ObservableObject {
 
         webTabs.removeAll { $0.id == webTab.id }
 
-        // If this was active, switch to another tab
+        // If this was active, switch to previous or fallback
         if case .web(let id) = activeTab, id == webTab.id {
-            if let firstSession = sessions.first {
-                activeTab = .terminal(firstSession.id)
-            } else if let firstWebTab = webTabs.first {
-                activeTab = .web(firstWebTab.id)
-            } else {
-                activeTab = nil
-            }
+            switchToTabAfterClose(closedTab: .web(webTab.id))
+        }
+
+        // Clear previousActiveTab if it was the closed web tab
+        if case .web(let id) = previousActiveTab, id == webTab.id {
+            previousActiveTab = nil
         }
 
         // Persist web tabs
@@ -725,6 +729,36 @@ class SessionManager: ObservableObject {
             } catch {
                 Logger.clauntty.error("SessionManager: failed to open tab for port \(port): \(error)")
             }
+        }
+    }
+
+    /// Switch to an appropriate tab after closing one
+    /// Prefers previousActiveTab if valid, otherwise falls back to first available
+    private func switchToTabAfterClose(closedTab: ActiveTab) {
+        // Try to switch to previous tab if it exists and is not the closed tab
+        if let previous = previousActiveTab, previous != closedTab {
+            switch previous {
+            case .terminal(let id):
+                if let session = sessions.first(where: { $0.id == id }) {
+                    activeTab = .terminal(session.id)
+                    session.resumeOutput()
+                    return
+                }
+            case .web(let id):
+                if webTabs.contains(where: { $0.id == id }) {
+                    activeTab = .web(id)
+                    return
+                }
+            }
+        }
+
+        // Fallback: switch to first available tab
+        if let firstSession = sessions.first {
+            activeTab = .terminal(firstSession.id)
+        } else if let firstWebTab = webTabs.first {
+            activeTab = .web(firstWebTab.id)
+        } else {
+            activeTab = nil
         }
     }
 
@@ -1060,6 +1094,14 @@ class SessionManager: ObservableObject {
 
             // 2. Auto-create tabs for sessions not in local persistence
             for serverSession in serverSessions where !localRtachIds.contains(serverSession.id) {
+                // Check if this rtach session exists under a DIFFERENT connection (e.g., IP vs DNS for same host)
+                if let existingSession = sessionForRtach(serverSession.id) {
+                    // Update existing session to use the new connection
+                    existingSession.connectionConfig = config
+                    Logger.clauntty.info("SessionManager: updated connection for existing rtach session \(serverSession.id.prefix(8)) from different host")
+                    continue
+                }
+
                 let session = Session(connectionConfig: config)
                 session.rtachSessionId = serverSession.id
                 session.dynamicTitle = serverSession.title

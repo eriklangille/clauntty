@@ -47,6 +47,9 @@ struct TerminalSurface: UIViewRepresentable {
     /// Callback for keyboard input - send this data to SSH
     var onTextInput: ((Data) -> Void)?
 
+    /// Callback for image paste - upload image and paste path
+    var onImagePaste: ((UIImage) -> Void)?
+
     /// Callback when terminal grid size changes (rows, columns)
     var onTerminalSizeChanged: ((UInt16, UInt16) -> Void)?
 
@@ -61,6 +64,7 @@ struct TerminalSurface: UIViewRepresentable {
         // Start with zero frame - SwiftUI will size it properly via layoutSubviews
         let view = TerminalSurfaceView(frame: .zero, app: app)
         view.onTextInput = onTextInput
+        view.onImagePaste = onImagePaste
         view.onTerminalSizeChanged = onTerminalSizeChanged
         view.edgeGestureCoordinator = edgeGestureCoordinator
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -76,6 +80,7 @@ struct TerminalSurface: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalSurfaceView, context: Context) {
         // Update callbacks if they changed
         uiView.onTextInput = onTextInput
+        uiView.onImagePaste = onImagePaste
         uiView.onTerminalSizeChanged = onTerminalSizeChanged
 
         // Handle focus changes when active state changes
@@ -329,6 +334,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             accessoryBar.onKeyInput = onTextInput
         }
     }
+
+    /// Callback for image paste - upload image and paste path
+    var onImagePaste: ((UIImage) -> Void)?
 
     /// Keyboard accessory bar with terminal keys
     private let accessoryBar: KeyboardAccessoryView = {
@@ -853,8 +861,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             _ = becomeFirstResponder()
         }
 
-        // Only show paste menu if tapping near the cursor and clipboard has content
-        if isNearCursor(location) && UIPasteboard.general.hasStrings {
+        // Show paste menu if clipboard has content (tap anywhere to paste)
+        let hasContent = UIPasteboard.general.hasStrings || UIPasteboard.general.hasImages
+        if hasContent {
             showEditMenu(at: location)
         }
     }
@@ -1177,7 +1186,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             return surface != nil && ghostty_surface_has_selection(surface!)
         }
         if action == #selector(paste(_:)) {
-            return UIPasteboard.general.hasStrings
+            return UIPasteboard.general.hasStrings || UIPasteboard.general.hasImages
         }
         if action == #selector(selectAll(_:)) {
             return true
@@ -1203,10 +1212,21 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     @objc override func paste(_ sender: Any?) {
-        guard let string = UIPasteboard.general.string else { return }
-        if let data = string.data(using: .utf8) {
-            onTextInput?(data)
-            Logger.clauntty.info("Pasted \(data.count) bytes from clipboard")
+        // Try text first
+        if let string = UIPasteboard.general.string {
+            // Convert newlines for terminal compatibility (same as insertText)
+            let terminalText = string.replacingOccurrences(of: "\n", with: "\r")
+            if let data = terminalText.data(using: .utf8) {
+                onTextInput?(data)
+                Logger.clauntty.info("Pasted \(data.count) bytes from clipboard")
+            }
+            return
+        }
+
+        // Try images - upload to remote and paste file path
+        if let image = UIPasteboard.general.image {
+            Logger.clauntty.info("Pasting image from clipboard")
+            onImagePaste?(image)
         }
     }
 

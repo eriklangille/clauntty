@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NewConnectionView: View {
     @EnvironmentObject var connectionStore: ConnectionStore
+    @EnvironmentObject var sshKeyStore: SSHKeyStore
     @Environment(\.dismiss) private var dismiss
 
     // Form state
@@ -12,10 +13,8 @@ struct NewConnectionView: View {
     @State private var authType: AuthType = .password
     @State private var password: String = ""
     @State private var savePassword: Bool = true
-    @State private var sshKeyId: String = ""
-    @State private var sshKeyContent: String = ""
-    @State private var showingKeyImporter = false
-    @State private var keyImported = false
+    @State private var selectedKeyId: String?
+    @State private var showingKeyImportSheet = false
 
     // Validation
     @State private var showingValidationError = false
@@ -42,7 +41,7 @@ struct NewConnectionView: View {
                 _authType = State(initialValue: .password)
             case .sshKey(let keyId):
                 _authType = State(initialValue: .sshKey)
-                _sshKeyId = State(initialValue: keyId)
+                _selectedKeyId = State(initialValue: keyId)
             }
         } else {
             _name = State(initialValue: "")
@@ -84,54 +83,13 @@ struct NewConnectionView: View {
                         SecureField("Password", text: $password)
                         Toggle("Save password", isOn: $savePassword)
                     case .sshKey:
-                        if keyImported {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                                Text("SSH Key imported")
-                                Spacer()
-                                Button("Change") {
-                                    keyImported = false
-                                    sshKeyContent = ""
-                                }
-                                .foregroundColor(.blue)
-                            }
-                        } else {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Paste your private key (Ed25519):")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-
-                                TextEditor(text: $sshKeyContent)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .frame(minHeight: 120)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                                    )
-
-                                if !sshKeyContent.isEmpty {
-                                    Button("Import Key") {
-                                        importSSHKey()
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                }
-                            }
-
-                            Button {
-                                showingKeyImporter = true
-                            } label: {
-                                Label("Import from Files", systemImage: "doc")
-                            }
-                        }
+                        sshKeySection
                     }
                 }
-                .fileImporter(
-                    isPresented: $showingKeyImporter,
-                    allowedContentTypes: [.data, .text],
-                    allowsMultipleSelection: false
-                ) { result in
-                    handleFileImport(result)
+            }
+            .sheet(isPresented: $showingKeyImportSheet) {
+                SSHKeyImportSheet(sshKeyStore: sshKeyStore) { key in
+                    selectedKeyId = key.id
                 }
             }
             .navigationTitle(isEditing ? "Edit Server" : "New Server")
@@ -157,69 +115,62 @@ struct NewConnectionView: View {
         }
     }
 
+    // MARK: - SSH Key Section
+
+    @ViewBuilder
+    private var sshKeySection: some View {
+        if sshKeyStore.keys.isEmpty {
+            // No existing keys - prompt to add one
+            VStack(alignment: .leading, spacing: 8) {
+                Text("No SSH keys saved")
+                    .foregroundColor(.secondary)
+
+                Button {
+                    showingKeyImportSheet = true
+                } label: {
+                    Label("Add SSH Key", systemImage: "plus.circle")
+                }
+            }
+        } else {
+            // Show picker with existing keys
+            Picker("SSH Key", selection: $selectedKeyId) {
+                Text("Select a key...").tag(nil as String?)
+                ForEach(sshKeyStore.keys) { key in
+                    Text(key.label).tag(key.id as String?)
+                }
+            }
+
+            // Show selected key info or add button
+            if let keyId = selectedKeyId, let key = sshKeyStore.key(withId: keyId) {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text(key.label)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Button {
+                showingKeyImportSheet = true
+            } label: {
+                Label("Add New Key", systemImage: "plus")
+            }
+        }
+    }
+
+    // MARK: - Validation
+
     private var isValid: Bool {
-        !host.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !username.trimmingCharacters(in: .whitespaces).isEmpty &&
-        (Int(port) ?? 0) > 0 && (Int(port) ?? 0) <= 65535
-    }
+        let baseValid = !host.trimmingCharacters(in: .whitespaces).isEmpty &&
+            !username.trimmingCharacters(in: .whitespaces).isEmpty &&
+            (Int(port) ?? 0) > 0 && (Int(port) ?? 0) <= 65535
 
-    private func importSSHKey() {
-        let trimmedKey = sshKeyContent.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Validate key format
-        guard trimmedKey.contains("BEGIN OPENSSH PRIVATE KEY") else {
-            validationError = "Invalid SSH key format. Only OpenSSH Ed25519 keys are supported."
-            showingValidationError = true
-            return
+        // For SSH key auth, require a key to be selected
+        if authType == .sshKey {
+            return baseValid && selectedKeyId != nil
         }
 
-        // Generate a key ID if we don't have one
-        if sshKeyId.isEmpty {
-            sshKeyId = UUID().uuidString
-        }
-
-        // Save to Keychain
-        guard let keyData = trimmedKey.data(using: .utf8) else {
-            validationError = "Failed to encode SSH key"
-            showingValidationError = true
-            return
-        }
-
-        do {
-            try KeychainHelper.saveSSHKey(id: sshKeyId, privateKey: keyData)
-            keyImported = true
-        } catch {
-            validationError = "Failed to save SSH key: \(error.localizedDescription)"
-            showingValidationError = true
-        }
-    }
-
-    private func handleFileImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-
-            // Start accessing the security-scoped resource
-            guard url.startAccessingSecurityScopedResource() else {
-                validationError = "Cannot access file"
-                showingValidationError = true
-                return
-            }
-            defer { url.stopAccessingSecurityScopedResource() }
-
-            do {
-                let keyContent = try String(contentsOf: url, encoding: .utf8)
-                sshKeyContent = keyContent
-                importSSHKey()
-            } catch {
-                validationError = "Failed to read file: \(error.localizedDescription)"
-                showingValidationError = true
-            }
-
-        case .failure(let error):
-            validationError = "Failed to import file: \(error.localizedDescription)"
-            showingValidationError = true
-        }
+        return baseValid
     }
 
     private func saveConnection() {
@@ -250,7 +201,12 @@ struct NewConnectionView: View {
         case .password:
             authMethod = .password
         case .sshKey:
-            authMethod = .sshKey(keyId: sshKeyId.isEmpty ? UUID().uuidString : sshKeyId)
+            guard let keyId = selectedKeyId else {
+                validationError = "Please select an SSH key"
+                showingValidationError = true
+                return
+            }
+            authMethod = .sshKey(keyId: keyId)
         }
 
         let connection = SavedConnection(
@@ -288,4 +244,5 @@ struct NewConnectionView: View {
 #Preview {
     NewConnectionView()
         .environmentObject(ConnectionStore())
+        .environmentObject(SSHKeyStore())
 }

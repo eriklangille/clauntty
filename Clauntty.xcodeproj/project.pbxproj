@@ -7,10 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		06E63D06C52859FA31DA95C7 /* SSHKeyImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */; };
 		1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */; };
 		3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */; };
 		431B348146F6153B8D328E91 /* PersistedTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */; };
-		C0000029 /* PersistedWebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000029 /* PersistedWebTab.swift */; };
 		570C2F179E1D3237D5566647 /* TabBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DDF3950FD48E767BF27175 /* TabBubble.swift */; };
 		70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297EA9CE961BFF920036934A /* SelectionHandleView.swift */; };
 		733936A7CBE2B60407C98651 /* WebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */; };
@@ -24,6 +24,7 @@
 		8E8B63B583F4D2BF2E6F18FD /* PortScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */; };
 		8EE9D92CA010B003B254D7CA /* PortForwardingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */; };
 		ADA5806394E7136002E7FE76 /* ServerPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CD476298B71607D9BDB445C /* ServerPickerView.swift */; };
+		B5D69205D0E4B34BFD5D6F2A /* SSHKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4F41052A28ACE836DF03B /* SSHKeyStore.swift */; };
 		C0000001 /* ClaunttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000001 /* ClaunttyApp.swift */; };
 		C0000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000002 /* ContentView.swift */; };
 		C0000003 /* SavedConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000003 /* SavedConnection.swift */; };
@@ -49,10 +50,12 @@
 		C0000023 /* WordList.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000023 /* WordList.swift */; };
 		C0000024 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000024 /* NotificationManager.swift */; };
 		C0000025 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000025 /* SettingsView.swift */; };
-		C0000028 /* PortsSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000028 /* PortsSheetView.swift */; };
 		C0000026 /* PowerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000026 /* PowerManager.swift */; };
 		C0000027 /* EdgeGestureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000027 /* EdgeGestureCoordinator.swift */; };
+		C0000028 /* PortsSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000028 /* PortsSheetView.swift */; };
+		C0000029 /* PersistedWebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000029 /* PersistedWebTab.swift */; };
 		C80A313220D32B0F645D406F /* LiquidGlassTabBarRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA3DCC2DFC28098F2BC7C70 /* LiquidGlassTabBarRepresentable.swift */; };
+		CC4B62670E3311459A29FF4C /* SSHKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F66C88A0644682800154EE25 /* SSHKey.swift */; };
 		D1000001 /* GhosttyAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* GhosttyAppTests.swift */; };
 		D1000002 /* TerminalSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000002 /* TerminalSurfaceTests.swift */; };
 		D1000003 /* KeyboardAccessoryViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000003 /* KeyboardAccessoryViewTests.swift */; };
@@ -100,11 +103,13 @@
 		28503FD938162D88F8B6A69F /* WebTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTabView.swift; sourceTree = "<group>"; };
 		297EA9CE961BFF920036934A /* SelectionHandleView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionHandleView.swift; sourceTree = "<group>"; };
 		2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortScanner.swift; sourceTree = "<group>"; };
+		55E4F41052A28ACE836DF03B /* SSHKeyStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHKeyStore.swift; sourceTree = "<group>"; };
 		59A3663E616FC97D48E5888C /* SessionPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionPickerView.swift; sourceTree = "<group>"; };
 		620BF993225325AE2636ED6D /* ExpandedTabOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExpandedTabOverlay.swift; sourceTree = "<group>"; };
 		66B1CA5D0C2290DD8C5A6A5B /* FullTabSelector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FullTabSelector.swift; sourceTree = "<group>"; };
 		7856CABCC7D9170DD7EF307F /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		82281A22E5E692A251B06D6B /* ClaunttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaunttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHKeyImportSheet.swift; sourceTree = "<group>"; };
 		90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquidGlassTabBar.swift; sourceTree = "<group>"; };
 		94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortForwardingManager.swift; sourceTree = "<group>"; };
 		A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyBridgeTests.swift; path = ../Tests/ClaunttyTests/GhosttyBridgeTests.swift; sourceTree = "<group>"; };
@@ -136,11 +141,11 @@
 		C1000023 /* WordList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordList.swift; sourceTree = "<group>"; };
 		C1000024 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		C1000025 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		C1000028 /* PortsSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortsSheetView.swift; sourceTree = "<group>"; };
 		C1000026 /* PowerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerManager.swift; sourceTree = "<group>"; };
 		C1000027 /* EdgeGestureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeGestureCoordinator.swift; sourceTree = "<group>"; };
-		CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PersistedTab.swift; sourceTree = "<group>"; };
+		C1000028 /* PortsSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortsSheetView.swift; sourceTree = "<group>"; };
 		C1000029 /* PersistedWebTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedWebTab.swift; sourceTree = "<group>"; };
+		CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PersistedTab.swift; sourceTree = "<group>"; };
 		D2000001 /* GhosttyAppTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyAppTests.swift; path = ../Tests/ClaunttyTests/GhosttyAppTests.swift; sourceTree = "<group>"; };
 		D2000002 /* TerminalSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TerminalSurfaceTests.swift; path = ../Tests/ClaunttyTests/TerminalSurfaceTests.swift; sourceTree = "<group>"; };
 		D2000003 /* KeyboardAccessoryViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = KeyboardAccessoryViewTests.swift; path = ../Tests/ClaunttyTests/KeyboardAccessoryViewTests.swift; sourceTree = "<group>"; };
@@ -149,6 +154,7 @@
 		E2000001 /* SSHConnectionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnectionUITests.swift; sourceTree = "<group>"; };
 		E2000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		E2000003 /* ClaunttyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaunttyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F66C88A0644682800154EE25 /* SSHKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHKey.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -268,6 +274,7 @@
 			children = (
 				C1000004 /* ConnectionStore.swift */,
 				C1000005 /* KeychainHelper.swift */,
+				55E4F41052A28ACE836DF03B /* SSHKeyStore.swift */,
 			);
 			path = Storage;
 			sourceTree = "<group>";
@@ -287,6 +294,7 @@
 				297EA9CE961BFF920036934A /* SelectionHandleView.swift */,
 				DFCD20EE71377F3F8FBB4C5E /* LiquidGlassTabBar */,
 				0CD476298B71607D9BDB445C /* ServerPickerView.swift */,
+				8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -295,6 +303,7 @@
 			isa = PBXGroup;
 			children = (
 				C1000003 /* SavedConnection.swift */,
+				F66C88A0644682800154EE25 /* SSHKey.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -564,6 +573,9 @@
 				431B348146F6153B8D328E91 /* PersistedTab.swift in Sources */,
 				C0000029 /* PersistedWebTab.swift in Sources */,
 				ADA5806394E7136002E7FE76 /* ServerPickerView.swift in Sources */,
+				CC4B62670E3311459A29FF4C /* SSHKey.swift in Sources */,
+				B5D69205D0E4B34BFD5D6F2A /* SSHKeyStore.swift in Sources */,
+				06E63D06C52859FA31DA95C7 /* SSHKeyImportSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

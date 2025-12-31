@@ -229,8 +229,48 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
             let ed25519Key = try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
             return NIOSSHPrivateKey(ed25519Key: ed25519Key)
 
+        case "ecdsa-sha2-nistp256":
+            // ECDSA P-256: public key + private key scalar
+            guard let _ = privReader.readString() else {  // curve name "nistp256"
+                throw AuthError.invalidKeyData
+            }
+            guard let _ = privReader.readLengthPrefixedData() else {  // public key
+                throw AuthError.invalidKeyData
+            }
+            guard let privateKeyBytes = privReader.readLengthPrefixedData() else {
+                throw AuthError.invalidKeyData
+            }
+            let p256Key = try P256.Signing.PrivateKey(rawRepresentation: privateKeyBytes)
+            return NIOSSHPrivateKey(p256Key: p256Key)
+
+        case "ecdsa-sha2-nistp384":
+            guard let _ = privReader.readString() else {
+                throw AuthError.invalidKeyData
+            }
+            guard let _ = privReader.readLengthPrefixedData() else {
+                throw AuthError.invalidKeyData
+            }
+            guard let privateKeyBytes = privReader.readLengthPrefixedData() else {
+                throw AuthError.invalidKeyData
+            }
+            let p384Key = try P384.Signing.PrivateKey(rawRepresentation: privateKeyBytes)
+            return NIOSSHPrivateKey(p384Key: p384Key)
+
+        case "ecdsa-sha2-nistp521":
+            guard let _ = privReader.readString() else {
+                throw AuthError.invalidKeyData
+            }
+            guard let _ = privReader.readLengthPrefixedData() else {
+                throw AuthError.invalidKeyData
+            }
+            guard let privateKeyBytes = privReader.readLengthPrefixedData() else {
+                throw AuthError.invalidKeyData
+            }
+            let p521Key = try P521.Signing.PrivateKey(rawRepresentation: privateKeyBytes)
+            return NIOSSHPrivateKey(p521Key: p521Key)
+
         default:
-            throw AuthError.unsupportedKeyFormat("Key type '\(keyType)' not supported. Use Ed25519.")
+            throw AuthError.unsupportedKeyFormat("Key type '\(keyType)' not supported. Use Ed25519 or ECDSA.")
         }
     }
 

@@ -15,5 +15,11 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Allow microphone access for web pages that request audio input</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Allow camera access for web pages that request video input</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Allow location access for web pages that request your location</string>
 </dict>
 </plist>
