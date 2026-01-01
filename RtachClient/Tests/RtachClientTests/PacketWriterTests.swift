@@ -93,9 +93,11 @@ final class PacketWriterTests: XCTestCase {
     func testUpgrade() {
         let packet = PacketWriter.upgrade()
 
-        XCTAssertEqual(packet.count, 2)
+        // Upgrade packet requests compression: [type=7][len=1][compression_type=1]
+        XCTAssertEqual(packet.count, 3)
         XCTAssertEqual(packet[0], MessageType.upgrade.rawValue) // type = 7
-        XCTAssertEqual(packet[1], 0) // len = 0
+        XCTAssertEqual(packet[1], 1) // len = 1 (payload has compression type)
+        XCTAssertEqual(packet[2], ProtocolConstants.compressionZlib) // compression = zlib (0x01)
     }
 
     // MARK: - Attach/Detach Tests

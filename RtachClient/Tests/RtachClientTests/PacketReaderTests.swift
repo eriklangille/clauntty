@@ -1,4 +1,5 @@
 import XCTest
+import Compression
 @testable import RtachClient
 
 final class PacketReaderTests: XCTestCase {
@@ -291,6 +292,167 @@ final class PacketReaderTests: XCTestCase {
             XCTAssertEqual(data.count, 65536)
         } else {
             XCTFail("Expected terminalData response")
+        }
+    }
+
+    // MARK: - Compression Tests
+
+    /// Compress data using raw deflate (RFC 1951) - same format rtach uses
+    func compressRawDeflate(_ input: Data) -> Data? {
+        let maxOutputSize = input.count + 64
+        var output = Data(count: maxOutputSize)
+
+        let compressedSize = output.withUnsafeMutableBytes { outputPtr -> Int in
+            input.withUnsafeBytes { inputPtr -> Int in
+                guard let src = inputPtr.baseAddress,
+                      let dst = outputPtr.baseAddress else { return 0 }
+                return compression_encode_buffer(
+                    dst.assumingMemoryBound(to: UInt8.self),
+                    maxOutputSize,
+                    src.assumingMemoryBound(to: UInt8.self),
+                    input.count,
+                    nil,
+                    COMPRESSION_ZLIB
+                )
+            }
+        }
+
+        guard compressedSize > 0 else { return nil }
+        output.count = compressedSize
+        return output
+    }
+
+    /// Make a compressed frame (type byte has 0x80 flag set)
+    func makeCompressedFrame(type: ResponseType, uncompressedPayload: Data) -> Data? {
+        guard let compressed = compressRawDeflate(uncompressedPayload) else { return nil }
+
+        var frame = Data(capacity: 5 + compressed.count)
+        // Type byte with compression flag (0x80)
+        frame.append(type.rawValue | ProtocolConstants.compressionFlag)
+        withUnsafeBytes(of: UInt32(compressed.count).littleEndian) { frame.append(contentsOf: $0) }
+        frame.append(compressed)
+        return frame
+    }
+
+    func testCompressedTerminalData() {
+        // Create repetitive data that compresses well
+        let originalPayload = Data(repeating: 0x41, count: 200) // "AAAA..."
+
+        guard let frame = makeCompressedFrame(type: .terminalData, uncompressedPayload: originalPayload) else {
+            XCTFail("Failed to create compressed frame")
+            return
+        }
+
+        let responses = reader.process(frame)
+
+        XCTAssertEqual(responses.count, 1)
+        if case .terminalData(let data) = responses[0] {
+            XCTAssertEqual(data, originalPayload)
+        } else {
+            XCTFail("Expected terminalData response")
+        }
+    }
+
+    func testCompressedTerminalDataWithAnsiEscapes() {
+        // Realistic terminal output with ANSI escapes
+        let terminalOutput = Data("""
+            \u{1B}[0m\u{1B}[32muser@host\u{1B}[0m:\u{1B}[34m~/projects\u{1B}[0m$ ls -la\r
+            total 48\r
+            drwxr-xr-x  12 user user 4096 Jan  1 12:00 .\r
+            drwxr-xr-x   5 user user 4096 Jan  1 12:00 ..\r
+            -rw-r--r--   1 user user  220 Jan  1 12:00 .bashrc\r
+            -rw-r--r--   1 user user  807 Jan  1 12:00 .profile\r
+            """.utf8)
+
+        guard let frame = makeCompressedFrame(type: .terminalData, uncompressedPayload: terminalOutput) else {
+            XCTFail("Failed to create compressed frame")
+            return
+        }
+
+        let responses = reader.process(frame)
+
+        XCTAssertEqual(responses.count, 1)
+        if case .terminalData(let data) = responses[0] {
+            XCTAssertEqual(data, terminalOutput)
+        } else {
+            XCTFail("Expected terminalData response")
+        }
+    }
+
+    func testCompressionFlagDetection() {
+        // Uncompressed frame (type = 0x00)
+        let uncompressedFrame = makeFrame(type: .terminalData, payload: Data([0x41, 0x42]))
+        XCTAssertEqual(uncompressedFrame[0], 0x00) // No compression flag
+
+        // Compressed frame (type = 0x80)
+        let compressedPayload = Data(repeating: 0x58, count: 100)
+        guard let compressedFrame = makeCompressedFrame(type: .terminalData, uncompressedPayload: compressedPayload) else {
+            XCTFail("Failed to create compressed frame")
+            return
+        }
+        XCTAssertEqual(compressedFrame[0], 0x80) // Has compression flag
+    }
+
+    func testCompressedScrollback() {
+        let scrollbackData = Data(repeating: 0x20, count: 500) // Spaces
+
+        guard let frame = makeCompressedFrame(type: .scrollback, uncompressedPayload: scrollbackData) else {
+            XCTFail("Failed to create compressed frame")
+            return
+        }
+
+        // Type should be scrollback (0x01) | compression (0x80) = 0x81
+        XCTAssertEqual(frame[0], 0x81)
+
+        let responses = reader.process(frame)
+
+        XCTAssertEqual(responses.count, 1)
+        if case .scrollback(let data) = responses[0] {
+            XCTAssertEqual(data, scrollbackData)
+        } else {
+            XCTFail("Expected scrollback response")
+        }
+    }
+
+    func testMixedCompressedAndUncompressed() {
+        // First frame: uncompressed
+        let frame1 = makeFrame(type: .terminalData, payload: Data([0x41]))
+
+        // Second frame: compressed
+        let largePayload = Data(repeating: 0x42, count: 200)
+        guard let frame2 = makeCompressedFrame(type: .terminalData, uncompressedPayload: largePayload) else {
+            XCTFail("Failed to create compressed frame")
+            return
+        }
+
+        // Third frame: uncompressed
+        let frame3 = makeFrame(type: .terminalData, payload: Data([0x43]))
+
+        var combined = Data()
+        combined.append(frame1)
+        combined.append(frame2)
+        combined.append(frame3)
+
+        let responses = reader.process(combined)
+
+        XCTAssertEqual(responses.count, 3)
+
+        if case .terminalData(let data) = responses[0] {
+            XCTAssertEqual(data, Data([0x41]))
+        } else {
+            XCTFail("Expected first frame")
+        }
+
+        if case .terminalData(let data) = responses[1] {
+            XCTAssertEqual(data, largePayload)
+        } else {
+            XCTFail("Expected second (compressed) frame")
+        }
+
+        if case .terminalData(let data) = responses[2] {
+            XCTAssertEqual(data, Data([0x43]))
+        } else {
+            XCTFail("Expected third frame")
         }
     }
 }

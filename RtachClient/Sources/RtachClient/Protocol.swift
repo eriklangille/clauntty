@@ -41,7 +41,7 @@ public enum ResponseType: UInt8, Sendable {
     /// Shell is idle (waiting for input, no PTY output for 2s)
     case idle = 4
     /// Protocol handshake
-    case handshake = 255
+    case handshake = 5
 }
 
 // MARK: - Protocol Constants
@@ -59,6 +59,14 @@ public enum ProtocolConstants {
     /// Current protocol version
     public static let protocolVersionMajor: UInt8 = 2
     public static let protocolVersionMinor: UInt8 = 0
+
+    /// Compression flag (high bit of response type byte)
+    /// When set, payload is zlib-compressed
+    public static let compressionFlag: UInt8 = 0x80
+
+    /// Compression types for upgrade packet payload
+    public static let compressionNone: UInt8 = 0x00
+    public static let compressionZlib: UInt8 = 0x01
 
     /// Response header size (type: 1 + len: 4)
     public static let responseHeaderSize: Int = 5

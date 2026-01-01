@@ -131,9 +131,14 @@ final class RtachSessionTests: XCTestCase {
         let largeInput = Data(repeating: 0x58, count: 300)
         session.sendKeyboardInput(largeInput)
 
-        XCTAssertEqual(delegate.sentData.count, 2) // Two packets
-        XCTAssertEqual(delegate.sentData[0][1], 255) // First chunk: 255 bytes
-        XCTAssertEqual(delegate.sentData[1][1], 45) // Second chunk: 45 bytes
+        // Session combines multiple packets into one atomic write
+        XCTAssertEqual(delegate.sentData.count, 1)
+        let combined = delegate.sentData[0]
+        // First packet: [type=0][len=255][255 bytes] = 257 bytes
+        // Second packet: [type=0][len=45][45 bytes] = 47 bytes
+        XCTAssertEqual(combined.count, 257 + 47) // Total 304 bytes
+        XCTAssertEqual(combined[1], 255) // First chunk len
+        XCTAssertEqual(combined[257 + 1], 45) // Second chunk len (after first packet)
     }
 
     func testSendKeyboardWhenDisconnected() {

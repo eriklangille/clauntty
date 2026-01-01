@@ -196,7 +196,19 @@ struct TerminalView: View {
             guard isActive, let surface = surfaceHolder.surface else { return }
             handleCaptureTerminalText(surface: surface)
         }
-        .onChange(of: isActive) { wasActive, nowActive in
+        .onChange(of: sessionManager.activeTab) { oldTab, newTab in
+            // Compute active state from the actual tab change
+            // (Can't use .onChange on computed `isActive` - SwiftUI doesn't track it)
+            let wasActive = oldTab == .terminal(session.id)
+            let nowActive = newTab == .terminal(session.id)
+
+            guard wasActive != nowActive else { return }
+
+            // Update surface active state when tab visibility changes
+            if let surface = surfaceHolder.surface {
+                surface.setActive(nowActive)
+            }
+
             // Capture screenshot when switching away from this tab
             if wasActive && !nowActive, let surface = surfaceHolder.surface {
                 session.cachedScreenshot = surface.captureScreenshot()

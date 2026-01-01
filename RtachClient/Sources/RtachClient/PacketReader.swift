@@ -1,4 +1,8 @@
 import Foundation
+import Compression
+import os.log
+
+private let decompressionLog = OSLog(subsystem: "com.clauntty", category: "decompress")
 
 /// Parsed response from rtach server
 public enum RtachResponse: Sendable, Equatable {
@@ -24,7 +28,7 @@ public final class PacketReader {
     /// Parser state
     public enum State: Sendable, Equatable {
         case waitingForHeader
-        case waitingForPayload(type: ResponseType, remaining: Int)
+        case waitingForPayload(type: ResponseType, remaining: Int, compressed: Bool)
     }
 
     private var _state: State = .waitingForHeader
@@ -66,8 +70,12 @@ public final class PacketReader {
                 let start = _buffer.startIndex
 
                 // Parse header: [type: 1][len: 4 LE]
+                // High bit (0x80) indicates zlib compression
                 let typeRaw = _buffer[start]
-                guard let responseType = ResponseType(rawValue: typeRaw) else {
+                let isCompressed = (typeRaw & ProtocolConstants.compressionFlag) != 0
+                let actualType = typeRaw & ~ProtocolConstants.compressionFlag
+
+                guard let responseType = ResponseType(rawValue: actualType) else {
                     // Unknown type - skip this byte and try again
                     _buffer = Data(_buffer.dropFirst())
                     continue
@@ -89,17 +97,28 @@ public final class PacketReader {
                     }
                     // Stay in waitingForHeader state
                 } else {
-                    _state = .waitingForPayload(type: responseType, remaining: Int(len))
+                    _state = .waitingForPayload(type: responseType, remaining: Int(len), compressed: isCompressed)
                 }
 
-            case .waitingForPayload(let responseType, let remaining):
+            case .waitingForPayload(let responseType, let remaining, let isCompressed):
                 guard _buffer.count >= remaining else {
                     return responses
                 }
 
                 // Extract payload
-                let payload = Data(_buffer.prefix(remaining))
+                var payload = Data(_buffer.prefix(remaining))
                 _buffer = Data(_buffer.dropFirst(remaining))
+
+                // Decompress if needed
+                if isCompressed {
+                    if let decompressed = decompress(payload) {
+                        payload = decompressed
+                    } else {
+                        // Decompression failed - skip this packet
+                        _state = .waitingForHeader
+                        continue
+                    }
+                }
 
                 if let response = buildResponse(type: responseType, payload: payload) {
                     responses.append(response)
@@ -108,6 +127,44 @@ public final class PacketReader {
                 _state = .waitingForHeader
             }
         }
+    }
+
+    /// Decompress zlib-compressed data
+    private func decompress(_ data: Data) -> Data? {
+        // Use ZLIB algorithm (includes header)
+        let algorithm = COMPRESSION_ZLIB
+
+        // Allocate output buffer - start with 4x input size, expand if needed
+        let maxOutputSize = max(data.count * 8, 32768)
+        var outputBuffer = Data(count: maxOutputSize)
+
+        let decompressedSize = outputBuffer.withUnsafeMutableBytes { outputPtr -> Int in
+            data.withUnsafeBytes { inputPtr -> Int in
+                guard let input = inputPtr.baseAddress,
+                      let output = outputPtr.baseAddress else {
+                    os_log(.error, log: decompressionLog, "Failed to get buffer pointers")
+                    return 0
+                }
+                let result = compression_decode_buffer(
+                    output.assumingMemoryBound(to: UInt8.self),
+                    maxOutputSize,
+                    input.assumingMemoryBound(to: UInt8.self),
+                    data.count,
+                    nil,
+                    algorithm
+                )
+                os_log(.info, log: decompressionLog, "input=%d bytes, output=%d bytes", data.count, result)
+                return result
+            }
+        }
+
+        guard decompressedSize > 0 else {
+            os_log(.error, log: decompressionLog, "FAILED: decompressedSize=%d", decompressedSize)
+            return nil
+        }
+
+        outputBuffer.count = decompressedSize
+        return outputBuffer
     }
 
     /// Build response from type and payload
@@ -159,7 +216,7 @@ extension PacketReader {
         switch currentState {
         case .waitingForHeader:
             return bufferedCount < ProtocolConstants.responseHeaderSize
-        case .waitingForPayload(_, let remaining):
+        case .waitingForPayload(_, let remaining, _):
             return bufferedCount < remaining
         }
     }

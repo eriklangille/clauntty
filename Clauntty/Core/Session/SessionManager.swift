@@ -101,6 +101,7 @@ class SessionManager: ObservableObject {
     /// UserDefaults key for persisted tabs
     private let persistedTabsKey = "clauntty_persisted_tabs"
     private let persistedWebTabsKey = "clauntty_persisted_web_tabs"
+    private let activeTabIdKey = "clauntty_active_tab_id"
 
     /// Cached persisted tabs (loaded once on startup)
     private var persistedTabs: [PersistedTab] = []
@@ -931,6 +932,14 @@ class SessionManager: ObservableObject {
         do {
             let data = try JSONEncoder().encode(tabs)
             UserDefaults.standard.set(data, forKey: persistedTabsKey)
+
+            // Also persist the active tab ID
+            if case .terminal(let id) = activeTab {
+                UserDefaults.standard.set(id.uuidString, forKey: activeTabIdKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: activeTabIdKey)
+            }
+
             Logger.clauntty.debugOnly("SessionManager: persisted \(tabs.count) tabs")
         } catch {
             Logger.clauntty.error("SessionManager: failed to persist tabs: \(error.localizedDescription)")
@@ -972,8 +981,13 @@ class SessionManager: ObservableObject {
                 self.sessions.append(session)
             }
 
-            // Set first session as active if we have any
-            if let first = self.sessions.first {
+            // Restore the previously active tab, or fall back to first session
+            if let activeIdString = UserDefaults.standard.string(forKey: activeTabIdKey),
+               let activeId = UUID(uuidString: activeIdString),
+               self.sessions.contains(where: { $0.id == activeId }) {
+                self.activeTab = .terminal(activeId)
+                Logger.clauntty.info("SessionManager: restored active tab \(activeIdString.prefix(8))")
+            } else if let first = self.sessions.first {
                 self.activeTab = .terminal(first.id)
             }
 

@@ -92,6 +92,12 @@ class LiquidGlassTabBar: UIView {
     /// Direction of expanded tab transition (true = next/left, false = previous/right)
     private var transitionToNext: Bool = true
 
+    /// Track if we have tabs pending layout (when bounds were 0)
+    private var hasPendingLayout: Bool = false
+
+    /// Previous container width to detect when bounds become valid
+    private var previousContainerWidth: CGFloat = 0
+
     // MARK: - Views
 
     /// Container for tab bubbles (allows centering)
@@ -117,7 +123,7 @@ class LiquidGlassTabBar: UIView {
 
     private let plusIconView: UIImageView = {
         let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-        let image = UIImage(systemName: "plus", withConfiguration: config)
+        let image = UIImage(systemName: "square.on.square", withConfiguration: config)
         let imageView = UIImageView(image: image)
         imageView.tintColor = .label
         imageView.contentMode = .scaleAspectFit
@@ -156,6 +162,15 @@ class LiquidGlassTabBar: UIView {
 
         setupConstraints()
         setupGestures()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // When view is added to window, force layout if we have pending tabs
+        if window != nil && !allTabs.isEmpty && bubbleViews.isEmpty {
+            setNeedsLayout()
+            layoutIfNeeded()
+        }
     }
 
     private func setupPlusButton() {
@@ -200,7 +215,7 @@ class LiquidGlassTabBar: UIView {
     @objc private func handlePlusTap() {
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.impactOccurred()
-        onNewTab?()
+        onShowTabSelector?()
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -397,7 +412,19 @@ class LiquidGlassTabBar: UIView {
 
         let containerWidth = bubblesContainer.bounds.width
         let containerHeight = bubblesContainer.bounds.height
-        guard containerWidth > 0 else { return }
+
+        // Track if bounds became valid after being 0
+        if containerWidth > 0 && previousContainerWidth == 0 && hasPendingLayout {
+            Logger.clauntty.debugOnly("LiquidGlassTabBar: bounds now valid, laying out \(allTabs.count) pending tabs")
+            hasPendingLayout = false
+        }
+        previousContainerWidth = containerWidth
+
+        guard containerWidth > 0 else {
+            // Mark that we have tabs waiting for valid bounds
+            hasPendingLayout = true
+            return
+        }
 
         // If expanded, show only the active tab at full width
         if isExpanded, let activeId = activeTabId, let activeTab = allTabs.first(where: { $0.id == activeId }) {
@@ -899,6 +926,15 @@ class LiquidGlassTabBar: UIView {
         }
 
         setNeedsLayout()
+
+        // If bounds are not yet valid, schedule a retry after the view is laid out
+        // This handles the case where update() is called before the view has valid bounds
+        if bubblesContainer.bounds.width == 0 && !allTabs.isEmpty {
+            DispatchQueue.main.async { [weak self] in
+                self?.setNeedsLayout()
+                self?.layoutIfNeeded()
+            }
+        }
     }
 
     // MARK: - Hit Testing

@@ -56,7 +56,13 @@ struct ContentView: View {
                         VStack(spacing: 0) {
                             LiquidGlassTabBarRepresentable(
                                 onNewTab: { showingNewTabSheet = true },
-                                onShowTabSelector: { showingFullTabSelector = true },
+                                onShowTabSelector: {
+                                    UIApplication.shared.sendAction(
+                                        #selector(UIResponder.resignFirstResponder),
+                                        to: nil, from: nil, for: nil
+                                    )
+                                    showingFullTabSelector = true
+                                },
                                 onShowPorts: { session in
                                     Logger.clauntty.info("ContentView: onShowPorts called for session \(session.id.uuidString.prefix(8))")
                                     portsSheetSession = session

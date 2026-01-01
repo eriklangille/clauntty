@@ -79,7 +79,11 @@ class RtachDeployer {
     /// 2.5.0 - FIFO command pipe: use RTACH_CMD_PIPE instead of RTACH_CMD_FD (fixes Claude Code subprocess issue)
     ///         Versioned binary path: allows updates without killing existing sessions
     /// 2.5.1 - Fix: client.zig stdin buffer 256→4096 bytes + partial packet buffering (fixes multiline paste)
-    static let expectedVersion = "2.5.1"
+    /// 2.5.2 - Fix: writeTitleToFile uses cwd-relative file ops (fixes panic with relative socket path)
+    /// 2.5.3 - Per-session log files ({socket}.log), ReleaseFast default build
+    /// 2.6.0 - Compression: terminal_data payloads are zlib-compressed when beneficial (30-60% bandwidth savings)
+    /// 2.6.1 - Fix: client.zig forwards iOS upgrade packet to master for compression handshake
+    static let expectedVersion = "2.6.1"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app

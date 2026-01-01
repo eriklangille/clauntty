@@ -39,11 +39,13 @@ public enum PacketWriter {
 
     // MARK: - Control Packets
 
-    /// Create an upgrade packet to switch rtach to framed mode
+    /// Create an upgrade packet to switch rtach to framed mode with compression
+    /// Payload: [compression_type: 1 byte] where 0x01 = zlib
     public static func upgrade() -> Data {
-        var packet = Data(capacity: ProtocolConstants.clientHeaderSize)
+        var packet = Data(capacity: ProtocolConstants.clientHeaderSize + 1)
         packet.append(MessageType.upgrade.rawValue)
-        packet.append(0) // No payload
+        packet.append(1) // Payload length: 1 byte
+        packet.append(ProtocolConstants.compressionZlib) // Request zlib compression
         return packet
     }
 

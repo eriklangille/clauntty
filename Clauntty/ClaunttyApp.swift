@@ -205,6 +205,8 @@ struct AppContentView: View {
             // Request background time to continue processing SSH data
             // This gives us ~30 seconds to detect when Claude finishes
             NotificationManager.shared.startBackgroundTask()
+            // Save current tab state (including active tab) before backgrounding
+            sessionManager.savePersistence()
             // Pause ALL sessions when app goes to background (battery optimization)
             // rtach will buffer output and send idle notifications
             for session in sessionManager.sessions {

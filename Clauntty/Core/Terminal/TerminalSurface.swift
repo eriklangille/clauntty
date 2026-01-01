@@ -81,7 +81,6 @@ struct TerminalSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalSurfaceView, context: Context) {
-        Logger.clauntty.info("updateUIView called, isActive=\(isActive)")
         // Update callbacks if they changed
         uiView.onTextInput = onTextInput
         uiView.onImagePaste = onImagePaste
@@ -1563,11 +1562,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Set whether this terminal surface is the active tab
     /// Inactive surfaces don't render their cursor and lose keyboard focus
     func setActive(_ active: Bool) {
-        Logger.clauntty.info("setActive(\(active)) called, isActiveTab=\(isActiveTab)")
-        guard active != isActiveTab else {
-            Logger.clauntty.info("setActive: skipped (already \(active))")
-            return
-        }
+        guard active != isActiveTab else { return }
         isActiveTab = active
 
         // Notify about active state change (for power management)
