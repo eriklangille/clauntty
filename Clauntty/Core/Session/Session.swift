@@ -65,6 +65,9 @@ class Session: ObservableObject, Identifiable {
     /// Cached screenshot for tab selector (captured when switching away)
     var cachedScreenshot: UIImage?
 
+    /// Font size for this session (nil = use global default)
+    var fontSize: Float?
+
     /// Dynamic title set by terminal escape sequences (OSC 0/1/2)
     @Published var dynamicTitle: String? {
         didSet {
@@ -598,7 +601,7 @@ class Session: ObservableObject, Identifiable {
     /// Send window size change
     func sendWindowChange(rows: UInt16, columns: UInt16) {
         guard let channel = sshChannel else {
-            Logger.clauntty.warning("Session \(self.id.uuidString.prefix(8)): cannot send window change, no channel")
+            // Expected during connection setup - size will be sent after channel is established
             return
         }
 
@@ -814,24 +817,29 @@ extension Session: RtachClient.RtachSessionDelegate {
     }
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, sendData data: Data) {
+        // Log at entry point for paste debugging - show first few bytes to identify packet type
+        let preview = data.prefix(10).map { String(format: "%02X", $0) }.joined(separator: " ")
+        Logger.clauntty.info("[PASTE] rtachSession entry: \(data.count) bytes, isMain=\(Thread.isMainThread), preview=\(preview)")
+
         // Must run synchronously to maintain packet order
         // The upgrade packet must be sent BEFORE we start framing keyboard input
         if Thread.isMainThread {
             MainActor.assumeIsolated {
                 if let handler = self.channelHandler {
+                    Logger.clauntty.info("[PASTE] sending sync: \(data.count) bytes")
                     handler.sendToRemote(data)
-                    Logger.clauntty.info("rtachSession.sendData: sent \(data.count) bytes via channelHandler")
                 } else {
-                    Logger.clauntty.warning("rtachSession.sendData: channelHandler is nil! Dropping \(data.count) bytes")
+                    Logger.clauntty.warning("[PASTE] channelHandler nil! Dropping \(data.count) bytes")
                 }
             }
         } else {
+            Logger.clauntty.warning("[PASTE] async dispatch! \(data.count) bytes - may cause ordering issues")
             Task { @MainActor in
                 if let handler = self.channelHandler {
+                    Logger.clauntty.info("[PASTE] sending async: \(data.count) bytes")
                     handler.sendToRemote(data)
-                    Logger.clauntty.info("rtachSession.sendData (async): sent \(data.count) bytes via channelHandler")
                 } else {
-                    Logger.clauntty.warning("rtachSession.sendData (async): channelHandler is nil! Dropping \(data.count) bytes")
+                    Logger.clauntty.warning("[PASTE] channelHandler nil (async)! Dropping \(data.count) bytes")
                 }
             }
         }

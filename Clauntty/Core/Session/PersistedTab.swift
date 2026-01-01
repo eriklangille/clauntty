@@ -26,4 +26,7 @@ struct PersistedTab: Codable, Identifiable {
 
     /// Order index for tab ordering
     var orderIndex: Int
+
+    /// Font size for this tab (nil = use global default)
+    var fontSize: Float?
 }

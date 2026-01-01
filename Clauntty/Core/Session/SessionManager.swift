@@ -922,7 +922,8 @@ class SessionManager: ObservableObject {
                 lastActiveAt: Date(),
                 cachedTitle: session.title,
                 cachedDynamicTitle: session.dynamicTitle,
-                orderIndex: index
+                orderIndex: index,
+                fontSize: session.fontSize
             )
             tabs.append(tab)
         }
@@ -960,6 +961,7 @@ class SessionManager: ObservableObject {
                 let session = Session(connectionConfig: config)
                 session.rtachSessionId = persisted.rtachSessionId
                 session.dynamicTitle = persisted.cachedDynamicTitle
+                session.fontSize = persisted.fontSize
                 // Note: state is already .disconnected by default
 
                 // Set up state change callback

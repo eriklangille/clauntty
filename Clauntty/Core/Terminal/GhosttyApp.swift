@@ -81,8 +81,23 @@ class GhosttyApp: ObservableObject {
         }
     }
 
+    /// Current theme ID (persisted via UserDefaults)
+    @Published var currentThemeId: String {
+        didSet {
+            UserDefaults.standard.set(currentThemeId, forKey: "selectedThemeId")
+        }
+    }
+
+    /// Current theme (computed from ID)
+    var currentTheme: Theme? {
+        ThemeManager.shared.theme(withId: currentThemeId)
+    }
+
     init() {
         Logger.clauntty.info("GhosttyApp initializing...")
+
+        // Load saved theme ID or use empty string for first-launch default
+        self.currentThemeId = UserDefaults.standard.string(forKey: "selectedThemeId") ?? ""
 
         // Create configuration
         guard let cfg = ghostty_config_new() else {
@@ -91,7 +106,10 @@ class GhosttyApp: ObservableObject {
             return
         }
 
-        // Finalize config to get defaults (iOS doesn't load config files)
+        // Apply theme before finalization
+        applyInitialTheme(to: cfg)
+
+        // Finalize config
         ghostty_config_finalize(cfg)
         self.config = cfg
 
@@ -116,11 +134,81 @@ class GhosttyApp: ObservableObject {
 
         self.app = app
 
-        // Set dark color scheme for proper terminal colors
-        ghostty_app_set_color_scheme(app, GHOSTTY_COLOR_SCHEME_DARK)
+        // Set color scheme based on theme
+        let colorScheme: ghostty_color_scheme_e = currentTheme?.isLight == true
+            ? GHOSTTY_COLOR_SCHEME_LIGHT
+            : GHOSTTY_COLOR_SCHEME_DARK
+        ghostty_app_set_color_scheme(app, colorScheme)
 
         self.readiness = .ready
-        Logger.clauntty.info("GhosttyApp initialized successfully")
+        Logger.clauntty.info("GhosttyApp initialized successfully with theme: \(self.currentTheme?.name ?? "default")")
+    }
+
+    // MARK: - Theme Management
+
+    /// Apply initial theme to config (called during init)
+    private func applyInitialTheme(to config: ghostty_config_t) {
+        let themeManager = ThemeManager.shared
+        let theme: Theme
+
+        if currentThemeId.isEmpty {
+            // First launch - pick default based on system appearance
+            let systemStyle = UITraitCollection.current.userInterfaceStyle
+            if let defaultTheme = themeManager.defaultTheme(for: systemStyle) {
+                theme = defaultTheme
+                currentThemeId = theme.id
+            } else {
+                Logger.clauntty.warning("No themes available, using ghostty defaults")
+                return
+            }
+        } else if let savedTheme = themeManager.theme(withId: currentThemeId) {
+            theme = savedTheme
+        } else {
+            // Saved theme not found, pick a default
+            let systemStyle = UITraitCollection.current.userInterfaceStyle
+            if let defaultTheme = themeManager.defaultTheme(for: systemStyle) {
+                theme = defaultTheme
+                currentThemeId = theme.id
+            } else {
+                Logger.clauntty.warning("Saved theme not found and no defaults available")
+                return
+            }
+        }
+
+        themeManager.applyTheme(theme, to: config)
+    }
+
+    /// Change to a new theme (updates config and notifies observers)
+    func setTheme(_ theme: Theme) {
+        currentThemeId = theme.id
+
+        // Create new config with theme applied
+        guard let cfg = ghostty_config_new() else {
+            Logger.clauntty.error("Failed to create new config for theme change")
+            return
+        }
+
+        ThemeManager.shared.applyTheme(theme, to: cfg)
+        ghostty_config_finalize(cfg)
+
+        // Update app config
+        if let app = self.app {
+            ghostty_app_update_config(app, cfg)
+
+            // Update color scheme
+            let colorScheme: ghostty_color_scheme_e = theme.isLight
+                ? GHOSTTY_COLOR_SCHEME_LIGHT
+                : GHOSTTY_COLOR_SCHEME_DARK
+            ghostty_app_set_color_scheme(app, colorScheme)
+        }
+
+        // Store new config (old one is freed via didSet)
+        self.config = cfg
+
+        Logger.clauntty.info("Theme changed to: \(theme.name)")
+
+        // Post notification for views that need to update
+        NotificationCenter.default.post(name: .themeDidChange, object: theme)
     }
 
     // NOTE: deinit removed due to Swift actor isolation constraints
@@ -256,4 +344,5 @@ class GhosttyApp: ObservableObject {
 
 extension Notification.Name {
     static let ghosttySurfaceClosed = Notification.Name("ghosttySurfaceClosed")
+    static let themeDidChange = Notification.Name("themeDidChange")
 }

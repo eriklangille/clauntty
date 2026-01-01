@@ -78,7 +78,8 @@ class RtachDeployer {
     /// 2.4.0 - Shell integration: bash/zsh/fish set title to current directory and running command
     /// 2.5.0 - FIFO command pipe: use RTACH_CMD_PIPE instead of RTACH_CMD_FD (fixes Claude Code subprocess issue)
     ///         Versioned binary path: allows updates without killing existing sessions
-    static let expectedVersion = "2.5.0"
+    /// 2.5.1 - Fix: client.zig stdin buffer 256→4096 bytes + partial packet buffering (fixes multiline paste)
+    static let expectedVersion = "2.5.1"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app

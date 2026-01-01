@@ -1,14 +1,45 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject var ghosttyApp: GhosttyApp
+    @ObservedObject var themeManager = ThemeManager.shared
     @ObservedObject var notificationManager = NotificationManager.shared
     @ObservedObject var powerManager = PowerManager.shared
     @AppStorage("sessionManagementEnabled") private var sessionManagementEnabled = true
+    @State private var fontSize: Float = FontSizePreference.current
     @Environment(\.dismiss) var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    NavigationLink {
+                        ThemePickerView()
+                    } label: {
+                        HStack {
+                            Text("Theme")
+                            Spacer()
+                            Text(ghosttyApp.currentTheme?.name ?? "Default")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    HStack {
+                        Text("Font Size")
+                        Spacer()
+                        Text("\(Int(fontSize))pt")
+                            .foregroundColor(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        Stepper("", value: $fontSize, in: 6...36, step: 1)
+                            .labelsHidden()
+                            .onChange(of: fontSize) { _, newValue in
+                                FontSizePreference.save(newValue)
+                            }
+                    }
+                } header: {
+                    Text("Appearance")
+                }
+
                 Section {
                     Toggle("Session Management", isOn: $sessionManagementEnabled)
                 } header: {
@@ -73,4 +104,5 @@ struct SettingsView: View {
 
 #Preview {
     SettingsView()
+        .environmentObject(GhosttyApp())
 }

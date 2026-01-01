@@ -1,10 +1,6 @@
 import SwiftUI
 import os.log
 
-/// Terminal background color matching Ghostty's default theme (#282C34)
-/// From ghostty/src/config/Config.zig: background: Color = .{ .r = 0x28, .g = 0x2C, .b = 0x34 }
-private let terminalBackgroundColor = Color(red: 40/255.0, green: 44/255.0, blue: 52/255.0) // #282C34
-
 /// Wrapper class to hold terminal surface reference (works with SwiftUI @StateObject)
 @MainActor
 class TerminalSurfaceHolder: ObservableObject {
@@ -14,12 +10,22 @@ class TerminalSurfaceHolder: ObservableObject {
 struct TerminalView: View {
     @EnvironmentObject var ghosttyApp: GhosttyApp
     @EnvironmentObject var sessionManager: SessionManager
+    @ObservedObject var themeManager = ThemeManager.shared
 
     /// The session this terminal view is displaying
     @ObservedObject var session: Session
 
     /// Reference to the terminal surface view for SSH data flow (wrapped in class for SwiftUI)
     @StateObject private var surfaceHolder = TerminalSurfaceHolder()
+
+    /// Background color from current theme
+    private var terminalBackgroundColor: Color {
+        if let theme = themeManager.theme(withId: ghosttyApp.currentThemeId) {
+            return theme.backgroundColor
+        }
+        // Fallback to Ghostty's default (#282C34)
+        return Color(red: 40/255.0, green: 44/255.0, blue: 52/255.0)
+    }
 
     /// Whether this terminal is currently the active tab
     private var isActive: Bool {
@@ -63,6 +69,7 @@ struct TerminalView: View {
                 TerminalSurface(
                     ghosttyApp: ghosttyApp,
                     isActive: isActive,
+                    initialFontSize: session.fontSize,
                     onTextInput: { data in
                         // Send keyboard input to SSH via session
                         Logger.clauntty.verbose("[INPUT] onTextInput called with \(data.count) bytes: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
@@ -75,6 +82,10 @@ struct TerminalView: View {
                     onTerminalSizeChanged: { rows, columns in
                         // Send window size change to SSH server
                         session.sendWindowChange(rows: rows, columns: columns)
+                    },
+                    onFontSizeChanged: { newSize in
+                        // Persist font size for this session
+                        session.fontSize = newSize
                     },
                     onSurfaceReady: { surface in
                         Logger.clauntty.debugOnly("onSurfaceReady called for session \(session.id.uuidString.prefix(8)), state=\(String(describing: session.state))")

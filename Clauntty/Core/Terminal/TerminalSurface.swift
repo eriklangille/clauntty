@@ -41,6 +41,9 @@ struct TerminalSurface: UIViewRepresentable {
     /// Whether this terminal is currently the active tab
     var isActive: Bool = true
 
+    /// Initial font size for this session (nil = use global default)
+    var initialFontSize: Float?
+
     /// Callback for keyboard input - send this data to SSH
     var onTextInput: ((Data) -> Void)?
 
@@ -49,6 +52,9 @@ struct TerminalSurface: UIViewRepresentable {
 
     /// Callback when terminal grid size changes (rows, columns)
     var onTerminalSizeChanged: ((UInt16, UInt16) -> Void)?
+
+    /// Callback when font size changes (for persisting per-session)
+    var onFontSizeChanged: ((Float) -> Void)?
 
     /// Callback to provide SSH output writer to the view
     var onSurfaceReady: ((TerminalSurfaceView) -> Void)?
@@ -59,10 +65,11 @@ struct TerminalSurface: UIViewRepresentable {
             return TerminalSurfaceView(frame: .zero, app: nil)
         }
         // Start with zero frame - SwiftUI will size it properly via layoutSubviews
-        let view = TerminalSurfaceView(frame: .zero, app: app)
+        let view = TerminalSurfaceView(frame: .zero, app: app, initialFontSize: initialFontSize)
         view.onTextInput = onTextInput
         view.onImagePaste = onImagePaste
         view.onTerminalSizeChanged = onTerminalSizeChanged
+        view.onFontSizeChanged = onFontSizeChanged
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
         // Store in coordinator so we can call onSurfaceReady in updateUIView
@@ -74,10 +81,12 @@ struct TerminalSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalSurfaceView, context: Context) {
+        Logger.clauntty.info("updateUIView called, isActive=\(isActive)")
         // Update callbacks if they changed
         uiView.onTextInput = onTextInput
         uiView.onImagePaste = onImagePaste
         uiView.onTerminalSizeChanged = onTerminalSizeChanged
+        uiView.onFontSizeChanged = onFontSizeChanged
 
         // Handle focus changes when active state changes
         uiView.setActive(isActive)
@@ -160,6 +169,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Current font size in points (tracked for persistence)
     private var currentFontSize: Float = FontSizePreference.current
+
+    /// Callback when font size changes (for per-session persistence)
+    var onFontSizeChanged: ((Float) -> Void)?
 
     // MARK: - Power Management
 
@@ -340,8 +352,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     // MARK: - Initialization
 
-    init(frame: CGRect, app: ghostty_app_t?) {
+    init(frame: CGRect, app: ghostty_app_t?, initialFontSize: Float? = nil) {
         super.init(frame: frame)
+
+        // Set font size from session preference, or fall back to global default
+        let fontSize = initialFontSize ?? FontSizePreference.current
+        self.currentFontSize = fontSize
+
         setupView()
         setupAccessoryBarCallbacks()
         // Accessory bar setup happens in didMoveToWindow when we have a window
@@ -359,8 +376,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             uiview: Unmanaged.passUnretained(self).toOpaque()
         ))
         config.scale_factor = UIScreen.main.scale
-        // Use saved font size preference, or default if not set
-        config.font_size = FontSizePreference.current
+        // Use session's font size
+        config.font_size = fontSize
 
         // Create the surface
         guard let surface = ghostty_surface_new(app, &config) else {
@@ -372,15 +389,21 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Set up the PTY input callback for iOS
         // This routes mouse events and other PTY input through to SSH
+        // IMPORTANT: This callback is called from Ghostty's internal thread,
+        // so we must dispatch to main thread for Session (which is @MainActor)
         ghostty_surface_set_pty_input_callback(surface) { (userdata, data, len) in
             guard let userdata = userdata else { return }
             let view = Unmanaged<TerminalSurfaceView>.fromOpaque(userdata).takeUnretainedValue()
             guard len > 0, let data = data else { return }
             let inputData = Data(bytes: data, count: Int(len))
-            // Verbose: expensive hex conversion, only when CLAUNTTY_VERBOSE=1
-            Logger.clauntty.verbose("[PTY_INPUT] \(inputData.count) bytes: \(inputData.map { String(format: "%02X", $0) }.joined(separator: " "))")
+            // Log PTY input - show first 50 bytes hex for debugging paste
+            let hexPreview = inputData.prefix(50).map { String(format: "%02X", $0) }.joined(separator: " ")
+            Logger.clauntty.info("[PTY_INPUT] \(inputData.count) bytes, first 50: \(hexPreview)")
             // Forward to SSH via the same callback as keyboard input
-            view.onTextInput?(inputData)
+            // Must dispatch to main thread since Session is @MainActor
+            DispatchQueue.main.async {
+                view.onTextInput?(inputData)
+            }
         }
 
         // Register in static registry for Ghostty callback routing (thread-safe)
@@ -565,9 +588,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     private func setupView() {
-        // Configure for Metal rendering - use Ghostty's default background color (#282C34)
-        // From ghostty/src/config/Config.zig: background: Color = .{ .r = 0x28, .g = 0x2C, .b = 0x34 }
-        backgroundColor = UIColor(red: 40/255.0, green: 44/255.0, blue: 52/255.0, alpha: 1.0) // #282C34
+        // Set background color from current theme
+        updateBackgroundColor()
 
         // Enable user interaction for keyboard
         isUserInteractionEnabled = true
@@ -577,6 +599,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Listen for app lifecycle to stop rendering when backgrounded
         setupAppLifecycleNotifications()
+
+        // Listen for theme changes to update background color
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(themeDidChange(_:)),
+            name: .themeDidChange,
+            object: nil
+        )
 
         // Add tap gesture for keyboard and paste menu
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
@@ -666,6 +696,27 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         Logger.clauntty.info("Terminal power mode updated: \(String(describing: mode))")
     }
 
+    // MARK: - Theme
+
+    /// Update background color to match current theme
+    private func updateBackgroundColor() {
+        if let theme = ThemeManager.shared.theme(withId: UserDefaults.standard.string(forKey: "selectedThemeId") ?? "") {
+            backgroundColor = UIColor(theme.backgroundColor)
+        } else if let defaultTheme = ThemeManager.shared.defaultTheme(for: UITraitCollection.current.userInterfaceStyle) {
+            backgroundColor = UIColor(defaultTheme.backgroundColor)
+        } else {
+            // Fallback to Ghostty's default background color (#282C34)
+            backgroundColor = UIColor(red: 40/255.0, green: 44/255.0, blue: 52/255.0, alpha: 1.0)
+        }
+    }
+
+    @objc private func themeDidChange(_ notification: Notification) {
+        if let theme = notification.object as? Theme {
+            backgroundColor = UIColor(theme.backgroundColor)
+            Logger.clauntty.info("Terminal background updated for theme: \(theme.name)")
+        }
+    }
+
     // MARK: - Pinch to Zoom (Font Resize)
 
     /// Accumulated scale for pinch gesture
@@ -716,6 +767,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                     guard let self = self else { return }
                     self.currentFontSize = min(self.currentFontSize + 1, 36)
                     FontSizePreference.save(self.currentFontSize)
+                    self.onFontSizeChanged?(self.currentFontSize)
                     Logger.clauntty.debugOnly("Font size increased to \(self.currentFontSize)")
                     // Notify SSH of new terminal size after font change
                     self.notifyTerminalSizeChanged(surface: surface)
@@ -736,6 +788,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                     guard let self = self else { return }
                     self.currentFontSize = max(self.currentFontSize - 1, 6)
                     FontSizePreference.save(self.currentFontSize)
+                    self.onFontSizeChanged?(self.currentFontSize)
                     Logger.clauntty.debugOnly("Font size decreased to \(self.currentFontSize)")
                     // Notify SSH of new terminal size after font change
                     self.notifyTerminalSizeChanged(surface: surface)
@@ -756,8 +809,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             if success {
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    self.currentFontSize = 11.0
+                    self.currentFontSize = 9.0  // Use actual default
                     FontSizePreference.reset()
+                    self.onFontSizeChanged?(self.currentFontSize)
                     Logger.clauntty.info("Font size reset to default")
                     // Notify SSH of new terminal size after font change
                     self.notifyTerminalSizeChanged(surface: surface)
@@ -1152,15 +1206,39 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     @objc override func paste(_ sender: Any?) {
+        Logger.clauntty.info("[PASTE] paste() called")
+
         // Try text first
         if let string = UIPasteboard.general.string {
-            // Convert newlines for terminal compatibility (same as insertText)
+            Logger.clauntty.info("[PASTE] clipboard has string: \(string.count) chars, \(string.utf8.count) bytes")
+
+            // Convert newlines to carriage returns for terminal
             let terminalText = string.replacingOccurrences(of: "\n", with: "\r")
-            if let data = terminalText.data(using: .utf8) {
-                onTextInput?(data)
-                Logger.clauntty.info("Pasted \(data.count) bytes from clipboard")
+
+            // Check if paste contains multiple lines (needs bracketed paste)
+            let isMultiline = string.contains("\n") || string.contains("\r")
+
+            if isMultiline {
+                // Wrap with bracketed paste for multi-line content
+                // This ensures apps like Claude Code, vim, etc. handle it atomically
+                // ESC[200~ = start bracketed paste, ESC[201~ = end bracketed paste
+                let bracketStart = "\u{1B}[200~"
+                let bracketEnd = "\u{1B}[201~"
+                let wrappedText = bracketStart + terminalText + bracketEnd
+                Logger.clauntty.info("[PASTE] multi-line, sending with bracketed paste wrapper")
+                if let data = wrappedText.data(using: .utf8) {
+                    onTextInput?(data)
+                }
+            } else {
+                // Single line - send directly without bracketed paste
+                Logger.clauntty.info("[PASTE] single-line, sending directly")
+                if let data = terminalText.data(using: .utf8) {
+                    onTextInput?(data)
+                }
             }
             return
+        } else {
+            Logger.clauntty.info("[PASTE] clipboard has no string")
         }
 
         // Try images - upload to remote and paste file path
@@ -1485,7 +1563,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Set whether this terminal surface is the active tab
     /// Inactive surfaces don't render their cursor and lose keyboard focus
     func setActive(_ active: Bool) {
-        guard active != isActiveTab else { return }
+        Logger.clauntty.info("setActive(\(active)) called, isActiveTab=\(isActiveTab)")
+        guard active != isActiveTab else {
+            Logger.clauntty.info("setActive: skipped (already \(active))")
+            return
+        }
         isActiveTab = active
 
         // Notify about active state change (for power management)
@@ -1507,6 +1589,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             }
             focusDidChange(true)
 
+            // Resume rendering for this tab FIRST (before redraw attempts)
+            // Must un-occlude before forceRedraw() or the render won't happen
+            if let surface = self.surface, !isAppBackgrounded {
+                ghostty_surface_set_occlusion(surface, true)
+                Logger.clauntty.debugOnly("Tab active: surface visible")
+            }
+
             // Force size update to ensure Metal layer frame is correct after tab switch
             // Always reserve space - different amounts for expanded vs collapsed bar
             let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
@@ -1526,12 +1615,6 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                 guard let self = self else { return }
                 self.onTerminalSizeChanged?(self.terminalSize.rows, self.terminalSize.columns)
                 Logger.clauntty.debugOnly("Tab active: sent SIGWINCH to force remote redraw")
-            }
-
-            // Resume rendering for this tab (unless app is backgrounded)
-            if let surface = self.surface, !isAppBackgrounded {
-                ghostty_surface_set_occlusion(surface, true)
-                Logger.clauntty.debugOnly("Tab active: surface visible")
             }
         } else {
             // Becoming inactive - lose focus to hide cursor and accessory bar

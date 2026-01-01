@@ -443,11 +443,13 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
     /// Send data to the remote SSH server
     func sendToRemote(_ data: Data) {
         guard let context = context else {
-            Logger.clauntty.error("sendToRemote: no context!")
+            Logger.clauntty.error("[PASTE] sendToRemote: no context!")
             return
         }
 
-        Logger.clauntty.verbose("sendToRemote: sending \(data.count) bytes to SSH: \(data.map { String(format: "%02X", $0) }.joined(separator: " "))")
+        let preview = data.prefix(10).map { String(format: "%02X", $0) }.joined(separator: " ")
+        Logger.clauntty.info("[PASTE] sendToRemote: \(data.count) bytes, preview=\(preview)")
+        Logger.clauntty.verbose("sendToRemote full: \(data.map { String(format: "%02X", $0) }.joined(separator: " "))")
 
         // IMPORTANT: NIO operations must be on the event loop thread
         context.eventLoop.execute {
@@ -455,7 +457,16 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
             buffer.writeBytes(data)
 
             let channelData = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
-            context.writeAndFlush(self.wrapOutboundOut(channelData), promise: nil)
+            let promise = context.eventLoop.makePromise(of: Void.self)
+            promise.futureResult.whenComplete { result in
+                switch result {
+                case .success:
+                    Logger.clauntty.info("[PASTE] writeAndFlush SUCCESS: \(data.count) bytes")
+                case .failure(let error):
+                    Logger.clauntty.error("[PASTE] writeAndFlush FAILED: \(data.count) bytes, error: \(error)")
+                }
+            }
+            context.writeAndFlush(self.wrapOutboundOut(channelData), promise: promise)
         }
     }
 

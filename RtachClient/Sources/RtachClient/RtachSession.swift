@@ -254,9 +254,18 @@ public final class RtachSession {
 
         case .framedMode:
             // Framed mode - wrap in push packet(s)
+            // IMPORTANT: Coalesce all packets into a single write to prevent
+            // packets from being lost in the SSH channel buffering
             let packets = PacketWriter.pushChunked(data)
-            for packet in packets {
-                delegate?.rtachSession(self, sendData: packet)
+            if packets.count == 1 {
+                delegate?.rtachSession(self, sendData: packets[0])
+            } else {
+                // Combine all packets into one Data for atomic write
+                var combined = Data()
+                for packet in packets {
+                    combined.append(packet)
+                }
+                delegate?.rtachSession(self, sendData: combined)
             }
         }
     }
