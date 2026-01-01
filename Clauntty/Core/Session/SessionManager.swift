@@ -29,6 +29,10 @@ class SessionManager: ObservableObject {
     /// Version counter incremented when session states change (for SwiftUI updates)
     @Published var sessionStateVersion: Int = 0
 
+    /// Global tab ordering - list of tab IDs in display order
+    /// Contains all terminal session IDs and web tab IDs mixed together
+    @Published var tabOrder: [UUID] = []
+
     /// Previously active tab (for "go back" navigation)
     private(set) var previousActiveTab: ActiveTab?
 
@@ -82,6 +86,10 @@ class SessionManager: ObservableObject {
 
         sessions.append(session)
 
+        // Add to global tab order
+        tabOrder.append(session.id)
+        saveTabOrder()
+
         // Always make new session active (user just opened it)
         activeSessionId = session.id
 
@@ -102,6 +110,7 @@ class SessionManager: ObservableObject {
     private let persistedTabsKey = "clauntty_persisted_tabs"
     private let persistedWebTabsKey = "clauntty_persisted_web_tabs"
     private let activeTabIdKey = "clauntty_active_tab_id"
+    private let tabOrderKey = "clauntty_tab_order"
 
     /// Cached persisted tabs (loaded once on startup)
     private var persistedTabs: [PersistedTab] = []
@@ -355,6 +364,10 @@ class SessionManager: ObservableObject {
         // Remove from sessions list
         sessions.removeAll { $0.id == session.id }
 
+        // Remove from global tab order
+        tabOrder.removeAll { $0 == session.id }
+        saveTabOrder()
+
         // If this was the active session, switch to previous or fallback to first
         if activeSessionId == session.id {
             switchToTabAfterClose(closedTab: .terminal(session.id))
@@ -535,6 +548,10 @@ class SessionManager: ObservableObject {
         let webTab = WebTab(remotePort: port, connectionConfig: config, sshConnection: connection)
         webTabs.append(webTab)
 
+        // Add to global tab order
+        tabOrder.append(webTab.id)
+        saveTabOrder()
+
         // Start port forwarding
         try await webTab.startForwarding()
 
@@ -559,6 +576,10 @@ class SessionManager: ObservableObject {
         }
 
         webTabs.removeAll { $0.id == webTab.id }
+
+        // Remove from global tab order
+        tabOrder.removeAll { $0 == webTab.id }
+        saveTabOrder()
 
         // If this was active, switch to previous or fallback
         if case .web(let id) = activeTab, id == webTab.id {
@@ -689,6 +710,139 @@ class SessionManager: ObservableObject {
         let adjustedDestination = destination > sourceIndex ? destination - 1 : destination
         webTabs.insert(webTab, at: min(adjustedDestination, webTabs.count))
         Logger.clauntty.info("SessionManager: moved web tab to index \(adjustedDestination)")
+    }
+
+    // MARK: - Global Tab Ordering
+
+    /// Get all tabs in global display order
+    /// Returns tabs in the order specified by tabOrder, with any unordered tabs appended at the end
+    func orderedTabs() -> [TabItem] {
+        var result: [TabItem] = []
+        var orderedIds = Set<UUID>()
+
+        // First, add tabs in the specified order
+        for id in tabOrder {
+            if let session = sessions.first(where: { $0.id == id }) {
+                result.append(.terminal(session))
+                orderedIds.insert(id)
+            } else if let webTab = webTabs.first(where: { $0.id == id }) {
+                result.append(.web(webTab))
+                orderedIds.insert(id)
+            }
+            // Skip IDs that no longer exist
+        }
+
+        // Append any tabs not in the order (newly created)
+        for session in sessions where !orderedIds.contains(session.id) {
+            result.append(.terminal(session))
+        }
+        for webTab in webTabs where !orderedIds.contains(webTab.id) {
+            result.append(.web(webTab))
+        }
+
+        return result
+    }
+
+    /// Move a tab from one global index to another
+    /// Handles both terminal and web tabs in a unified order
+    func moveTab(from sourceIndex: Int, to destinationIndex: Int) {
+        guard sourceIndex >= 0, sourceIndex < tabOrder.count else { return }
+        guard sourceIndex != destinationIndex else { return }  // No-op if same position
+
+        let movedId = tabOrder.remove(at: sourceIndex)
+        // Insert at destination index (clamped to valid range)
+        // No adjustment needed - destinationIndex is where we want the item to end up
+        let insertIndex = min(max(destinationIndex, 0), tabOrder.count)
+        tabOrder.insert(movedId, at: insertIndex)
+
+        saveTabOrder()
+        Logger.clauntty.info("SessionManager: moved tab from index \(sourceIndex) to \(insertIndex)")
+    }
+
+    /// Move a tab by ID to a specific global index
+    func moveTab(id: UUID, toGlobalIndex destination: Int) {
+        // Ensure tabOrder is complete before moving
+        ensureTabOrderComplete()
+
+        guard let sourceIndex = tabOrder.firstIndex(of: id) else {
+            Logger.clauntty.warning("SessionManager: tab \(id) not found in tabOrder after sync")
+            return
+        }
+
+        moveTab(from: sourceIndex, to: destination)
+    }
+
+    /// Move a tab to the end of the order
+    func moveTabToEnd(id: UUID) {
+        // Ensure tabOrder is complete before moving
+        ensureTabOrderComplete()
+
+        // Remove from current position (if present)
+        tabOrder.removeAll { $0 == id }
+        // Append to end
+        tabOrder.append(id)
+        saveTabOrder()
+        Logger.clauntty.info("SessionManager: moved tab to end")
+    }
+
+    /// Ensure tabOrder contains all current tabs (rebuilds if incomplete)
+    private func ensureTabOrderComplete() {
+        let allIds = Set(sessions.map { $0.id } + webTabs.map { $0.id })
+        let orderedIds = Set(tabOrder)
+
+        // Check if tabOrder is missing any tabs
+        let missingIds = allIds.subtracting(orderedIds)
+        if !missingIds.isEmpty {
+            Logger.clauntty.info("SessionManager: tabOrder missing \(missingIds.count) tabs, rebuilding")
+            // Append missing tabs (preserves existing order)
+            for session in sessions where missingIds.contains(session.id) {
+                tabOrder.append(session.id)
+            }
+            for webTab in webTabs where missingIds.contains(webTab.id) {
+                tabOrder.append(webTab.id)
+            }
+            saveTabOrder()
+        }
+
+        // Also remove any stale IDs that no longer exist
+        let staleIds = orderedIds.subtracting(allIds)
+        if !staleIds.isEmpty {
+            tabOrder.removeAll { staleIds.contains($0) }
+            saveTabOrder()
+        }
+    }
+
+    /// Save tab order to UserDefaults
+    func saveTabOrder() {
+        let orderStrings = tabOrder.map { $0.uuidString }
+        UserDefaults.standard.set(orderStrings, forKey: tabOrderKey)
+        Logger.clauntty.debugOnly("SessionManager: saved tab order with \(tabOrder.count) tabs")
+    }
+
+    /// Load tab order from UserDefaults
+    func loadTabOrder() {
+        guard let orderStrings = UserDefaults.standard.stringArray(forKey: tabOrderKey) else {
+            Logger.clauntty.info("SessionManager: no saved tab order found, will migrate from existing tabs")
+            migrateToGlobalTabOrder()
+            return
+        }
+        tabOrder = orderStrings.compactMap { UUID(uuidString: $0) }
+        Logger.clauntty.info("SessionManager: loaded tab order with \(self.tabOrder.count) tabs")
+    }
+
+    /// Migrate from per-type ordering to global tab order
+    /// Called when no tabOrder exists but we have tabs (first launch after update)
+    private func migrateToGlobalTabOrder() {
+        // Only migrate if we have tabs
+        guard !sessions.isEmpty || !webTabs.isEmpty else { return }
+
+        Logger.clauntty.info("SessionManager: migrating to global tab order")
+
+        // Build initial order: terminals first (in their array order), then web tabs
+        tabOrder = sessions.map { $0.id } + webTabs.map { $0.id }
+
+        saveTabOrder()
+        Logger.clauntty.info("SessionManager: migrated \(self.tabOrder.count) tabs to global order")
     }
 
     // MARK: - Tab Navigation
@@ -1129,10 +1283,12 @@ class SessionManager: ObservableObject {
                 }
 
                 sessions.append(session)
+                tabOrder.append(session.id)  // Add to global tab order
                 Logger.clauntty.info("SessionManager: auto-created tab for remote session \(serverSession.id.prefix(8))")
             }
 
             savePersistence()
+            saveTabOrder()
         } catch {
             Logger.clauntty.error("SessionManager: failed to sync sessions with server: \(error.localizedDescription)")
         }

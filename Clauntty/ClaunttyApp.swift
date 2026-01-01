@@ -188,6 +188,7 @@ struct AppContentView: View {
                     hasLoadedPersistedTabs = true
                     sessionManager.loadPersistedTabs(connectionStore: connectionStore)
                     sessionManager.loadPersistedWebTabs(connectionStore: connectionStore)
+                    sessionManager.loadTabOrder()  // Load or migrate global tab order
                 }
             }
             .onChange(of: scenePhase) { _, newPhase in

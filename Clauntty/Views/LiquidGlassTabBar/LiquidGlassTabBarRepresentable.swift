@@ -106,10 +106,9 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         // Store reference for coordinator
         context.coordinator.sessionManager = sessionManager
 
-        // Update bar with current state
+        // Update bar with current state (using global tab order)
         bar.update(
-            sessions: sessionManager.sessions,
-            webTabs: sessionManager.webTabs,
+            orderedTabs: sessionManager.orderedTabs(),
             activeTab: sessionManager.activeTab
         )
     }

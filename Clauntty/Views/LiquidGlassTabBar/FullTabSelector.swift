@@ -13,6 +13,9 @@ struct FullTabSelector: View {
         GridItem(.flexible(), spacing: 16)
     ]
 
+    /// Currently dragging tab (for visual feedback)
+    @State private var draggingTab: TabItem?
+
     var body: some View {
         ZStack {
             // Dimmed background
@@ -46,7 +49,7 @@ struct FullTabSelector: View {
                     VStack(spacing: 24) {
                         // Tabs grid
                         LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(allTabs, id: \.id) { tab in
+                            ForEach(Array(allTabs.enumerated()), id: \.element.id) { index, tab in
                                 TabCard(
                                     tab: tab,
                                     isActive: isActive(tab),
@@ -57,15 +60,48 @@ struct FullTabSelector: View {
                                         closeTab(tab)
                                     }
                                 )
+                                .opacity(draggingTab?.id == tab.id ? 0.5 : 1.0)
+                                .scaleEffect(draggingTab?.id == tab.id ? 1.05 : 1.0)
+                                .draggable(DraggableTab.from(tab)) {
+                                    // Drag preview
+                                    TabCard(
+                                        tab: tab,
+                                        isActive: false,
+                                        onSelect: {},
+                                        onClose: {}
+                                    )
+                                    .frame(width: 120, height: 200)
+                                    .opacity(0.8)
+                                }
+                                .dropDestination(for: DraggableTab.self) { droppedItems, _ in
+                                    guard let dropped = droppedItems.first else { return false }
+                                    return handleDrop(dropped, atIndex: index)
+                                } isTargeted: { isTargeted in
+                                    // Could add hover highlight here if desired
+                                }
                             }
 
-                            // New tab button
+                            // New tab button (also acts as drop target to move tab to end)
                             NewTabCard(onTap: {
                                 onDismiss()
                                 // Trigger new tab sheet after dismissing
                                 onNewTab?()
                             })
+                            .dropDestination(for: DraggableTab.self) { droppedItems, _ in
+                                guard let dropped = droppedItems.first else { return false }
+                                // Move to end of list
+                                let droppedId: UUID
+                                switch dropped {
+                                case .terminal(let id): droppedId = id
+                                case .web(let id): droppedId = id
+                                }
+                                sessionManager.moveTabToEnd(id: droppedId)
+                                let generator = UIImpactFeedbackGenerator(style: .medium)
+                                generator.impactOccurred()
+                                return true
+                            } isTargeted: { _ in }
                         }
+                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: allTabs.map { $0.id })
 
                         // Forwarded ports section
                         if !sessionManager.forwardedPorts.isEmpty {
@@ -98,9 +134,7 @@ struct FullTabSelector: View {
     // MARK: - Computed Properties
 
     private var allTabs: [TabItem] {
-        var tabs: [TabItem] = sessionManager.sessions.map { .terminal($0) }
-        tabs.append(contentsOf: sessionManager.webTabs.map { .web($0) })
-        return tabs
+        sessionManager.orderedTabs()
     }
 
     private func isActive(_ tab: TabItem) -> Bool {
@@ -137,6 +171,38 @@ struct FullTabSelector: View {
         // If no more tabs, dismiss
         if sessionManager.sessions.isEmpty && sessionManager.webTabs.isEmpty {
             onDismiss()
+        }
+    }
+
+    /// Handle a tab drop at the specified index
+    private func handleDrop(_ dropped: DraggableTab, atIndex targetIndex: Int) -> Bool {
+        let droppedId: UUID
+        switch dropped {
+        case .terminal(let id): droppedId = id
+        case .web(let id): droppedId = id
+        }
+
+        // Move in the global order
+        sessionManager.moveTab(id: droppedId, toGlobalIndex: targetIndex)
+
+        // Trigger haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+
+        return true
+    }
+}
+
+// MARK: - DraggableTab Extension
+
+extension DraggableTab {
+    /// Create a DraggableTab from a TabItem
+    static func from(_ tabItem: TabItem) -> DraggableTab {
+        switch tabItem {
+        case .terminal(let session):
+            return .terminal(session.id)
+        case .web(let webTab):
+            return .web(webTab.id)
         }
     }
 }

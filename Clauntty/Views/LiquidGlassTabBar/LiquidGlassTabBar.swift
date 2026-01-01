@@ -882,11 +882,12 @@ class LiquidGlassTabBar: UIView {
     // MARK: - Public Update
 
     /// Update the tab bar with current state
-    func update(sessions: [Session], webTabs: [WebTab], activeTab: SessionManager.ActiveTab?) {
-        // Build unified tab list (terminal tabs first, then web tabs)
-        var tabs: [TabItem] = sessions.map { .terminal($0) }
-        tabs.append(contentsOf: webTabs.map { .web($0) })
-        allTabs = tabs
+    /// - Parameters:
+    ///   - orderedTabs: All tabs in display order (supports intersplicing terminal and web tabs)
+    ///   - activeTab: The currently active tab
+    func update(orderedTabs: [TabItem], activeTab: SessionManager.ActiveTab?) {
+        // Use the pre-ordered tabs directly
+        allTabs = orderedTabs
 
         // Update active tab ID
         switch activeTab {
@@ -899,7 +900,7 @@ class LiquidGlassTabBar: UIView {
         }
 
         // Remove bubbles for tabs that no longer exist
-        let currentIds = Set(tabs.map { $0.id })
+        let currentIds = Set(orderedTabs.map { $0.id })
         for (id, bubble) in bubbleViews {
             if !currentIds.contains(id) {
                 bubble.removeFromSuperview()
@@ -909,14 +910,16 @@ class LiquidGlassTabBar: UIView {
 
         // Force re-configure existing bubbles with current state
         // This ensures status colors and titles are updated when session state changes
-        for session in sessions {
-            if let bubble = bubbleViews[session.id] {
-                bubble.configure(session: session)
-            }
-        }
-        for webTab in webTabs {
-            if let bubble = bubbleViews[webTab.id] {
-                bubble.configure(webTab: webTab)
+        for tab in orderedTabs {
+            switch tab {
+            case .terminal(let session):
+                if let bubble = bubbleViews[session.id] {
+                    bubble.configure(session: session)
+                }
+            case .web(let webTab):
+                if let bubble = bubbleViews[webTab.id] {
+                    bubble.configure(webTab: webTab)
+                }
             }
         }
 
