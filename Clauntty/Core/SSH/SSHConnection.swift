@@ -29,13 +29,13 @@ class SSHConnection: ObservableObject {
 
     // MARK: - NIO Components
 
-    private var eventLoopGroup: MultiThreadedEventLoopGroup?
     private var channel: Channel?
     private var sshChildChannel: Channel?
     private var channelHandler: SSHChannelHandler?
 
     /// Expose event loop group for port forwarding
-    var nioEventLoopGroup: EventLoopGroup? { eventLoopGroup }
+    /// Uses the global singleton - never creates/destroys threads on reconnect
+    var nioEventLoopGroup: EventLoopGroup { MultiThreadedEventLoopGroup.singleton }
 
     /// Expose main SSH channel for port forwarding
     var nioChannel: Channel? { channel }
@@ -72,11 +72,9 @@ class SSHConnection: ObservableObject {
         Logger.clauntty.debugOnly("SSH connecting to \(self.host):\(self.port)")
 
         do {
-            // Create event loop group
-            eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-            guard let group = eventLoopGroup else {
-                throw SSHError.internalError("Failed to create event loop group")
-            }
+            // Use global singleton event loop group - never creates new threads on reconnect
+            // This is the recommended pattern for iOS apps per SwiftNIO best practices
+            let group = MultiThreadedEventLoopGroup.singleton
 
             // Capture values for closure
             let username = self.username
@@ -388,8 +386,8 @@ class SSHConnection: ObservableObject {
         sshChildChannel = nil
         channelHandler = nil
 
-        eventLoopGroup?.shutdownGracefully { _ in }
-        eventLoopGroup = nil
+        // Note: We don't shut down the event loop group since we use the global singleton
+        // The singleton is designed to run for the entire app lifetime
 
         state = .disconnected
         onDisconnected?(nil)

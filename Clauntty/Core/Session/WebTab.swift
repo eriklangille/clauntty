@@ -178,11 +178,11 @@ class WebTab: ObservableObject, Identifiable {
     /// Start port forwarding for this tab
     func startForwarding() async throws {
         guard let connection = sshConnection,
-              let eventLoop = connection.nioEventLoopGroup,
               let channel = connection.nioChannel else {
             state = .error("SSH connection not available")
             throw WebTabError.noConnection
         }
+        let eventLoop = connection.nioEventLoopGroup
 
         state = .connecting
         Logger.clauntty.debugOnly("WebTab: starting forwarding for port \(self.remotePort.port)")

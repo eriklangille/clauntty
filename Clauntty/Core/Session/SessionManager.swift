@@ -72,6 +72,14 @@ class SessionManager: ObservableObject {
     /// Pool of SSH connections, keyed by "user@host:port"
     private var connectionPool: [String: SSHConnection] = [:]
 
+    // MARK: - Reconnection Throttling
+
+    /// Tracks last reconnect attempt time per session to prevent crash loops
+    private var lastReconnectAttempt: [UUID: Date] = [:]
+
+    /// Minimum time between reconnect attempts (prevents rapid crash loops)
+    private let reconnectBackoff: TimeInterval = 2.0
+
     // MARK: - Session Management
 
     /// Create a new session for a connection config
@@ -281,6 +289,14 @@ class SessionManager: ObservableObject {
             Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) not disconnected, skipping reconnect")
             return
         }
+
+        // Throttle reconnect attempts to prevent crash loops
+        if let lastAttempt = lastReconnectAttempt[session.id],
+           Date().timeIntervalSince(lastAttempt) < reconnectBackoff {
+            Logger.clauntty.debugOnly("SessionManager: throttling reconnect for session \(session.id.uuidString.prefix(8)) (too soon)")
+            return
+        }
+        lastReconnectAttempt[session.id] = Date()
 
         guard let rtachSessionId = session.rtachSessionId else {
             Logger.clauntty.warning("SessionManager: session \(session.id.uuidString.prefix(8)) has no rtach session ID, cannot reconnect")
@@ -1327,10 +1343,10 @@ class ForwardedPort: Identifiable, ObservableObject {
     /// Start port forwarding
     func startForwarding() async throws {
         guard let connection = sshConnection,
-              let eventLoop = connection.nioEventLoopGroup,
               let channel = connection.nioChannel else {
             throw ForwardedPortError.noConnection
         }
+        let eventLoop = connection.nioEventLoopGroup
 
         Logger.clauntty.debugOnly("ForwardedPort: starting forwarding for port \(self.remotePort.port)")
 
