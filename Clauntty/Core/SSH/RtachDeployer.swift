@@ -460,9 +460,9 @@ class RtachDeployer {
             "pkill -f 'rtach.*\(sessionId)' 2>/dev/null || true"
         )
 
-        // 2. Remove the socket file
+        // 2. Remove the socket and associated files (.log, .cmd, .title)
         let socketPath = "\(Self.remoteSessionsPath)/\(sessionId)"
-        _ = try await connection.executeCommand("rm -f \(socketPath)")
+        _ = try await connection.executeCommand("rm -f \(socketPath) \(socketPath).log \(socketPath).cmd \(socketPath).title")
 
         // 3. Remove from metadata
         var metadata = try await loadSessionMetadata()
