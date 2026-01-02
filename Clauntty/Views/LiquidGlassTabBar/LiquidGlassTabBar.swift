@@ -400,12 +400,12 @@ class LiquidGlassTabBar: UIView {
     private func layoutBubbles() {
         // Skip layout during collapse animation to prevent interference
         guard !isCollapseAnimating else {
-            Logger.clauntty.info("layoutBubbles SKIPPED: isCollapseAnimating=true")
+            Logger.clauntty.verbose("layoutBubbles SKIPPED: isCollapseAnimating=true")
             return
         }
         // Skip layout during expanded-to-expanded transition (slide animation handles it)
         guard !isExpandedTransitioning else {
-            Logger.clauntty.info("layoutBubbles SKIPPED: isExpandedTransitioning=true")
+            Logger.clauntty.verbose("layoutBubbles SKIPPED: isExpandedTransitioning=true")
             return
         }
         guard !allTabs.isEmpty else { return }
@@ -710,7 +710,7 @@ class LiquidGlassTabBar: UIView {
         }
 
         bubble.onPorts = { [weak self] in
-            Logger.clauntty.info("LiquidGlassTabBar: onPorts callback fired, onShowPorts exists=\(self?.onShowPorts != nil)")
+            Logger.clauntty.debugOnly("LiquidGlassTabBar: onPorts callback fired, onShowPorts exists=\(self?.onShowPorts != nil)")
             self?.collapseExpanded()
             self?.onShowPorts?(tab)
         }
@@ -786,13 +786,13 @@ class LiquidGlassTabBar: UIView {
     func collapseExpanded() {
         guard isExpanded, !isCollapseAnimating, let activeId = activeTabId, let bubble = bubbleViews[activeId] else { return }
 
-        Logger.clauntty.info("COLLAPSE START: setting isCollapseAnimating=true")
+        Logger.clauntty.verbose("COLLAPSE START: setting isCollapseAnimating=true")
         isCollapseAnimating = true
 
         // Store the bubble ID to check if it's still valid after animation
         let collapsingBubbleId = activeId
 
-        Logger.clauntty.info("COLLAPSE: bubble.frame=\(NSCoder.string(for: bubble.frame)), bubble.bounds=\(NSCoder.string(for: bubble.bounds))")
+        Logger.clauntty.verbose("COLLAPSE: bubble.frame=\(NSCoder.string(for: bubble.frame)), bubble.bounds=\(NSCoder.string(for: bubble.bounds))")
 
         // DON'T set isExpanded = false here - it triggers layoutSubviews which interferes with animation
         expandedTabId = nil
@@ -807,8 +807,8 @@ class LiquidGlassTabBar: UIView {
         let scaleX = collapsedWidth / currentWidth
         let scaleY = collapsedHeight / currentHeight
 
-        Logger.clauntty.info("COLLAPSE: currentSize=\(currentWidth)x\(currentHeight), collapsedSize=\(collapsedWidth)x\(collapsedHeight)")
-        Logger.clauntty.info("COLLAPSE: scaleX=\(scaleX), scaleY=\(scaleY) (should both be < 1)")
+        Logger.clauntty.verbose("COLLAPSE: currentSize=\(currentWidth)x\(currentHeight), collapsedSize=\(collapsedWidth)x\(collapsedHeight)")
+        Logger.clauntty.verbose("COLLAPSE: scaleX=\(scaleX), scaleY=\(scaleY) (should both be < 1)")
 
         // Calculate target center Y for collapsed state (where small tab should end up)
         // Collapsed tab sits vertically centered in bubblesContainer
@@ -816,7 +816,7 @@ class LiquidGlassTabBar: UIView {
         let collapsedCenterYInContainer = (containerHeight - collapsedHeight) / 2 + collapsedHeight / 2
         let targetCenterY = topPadding + collapsedCenterYInContainer
 
-        Logger.clauntty.info("COLLAPSE: bubble.center.y=\(bubble.center.y), targetCenterY=\(targetCenterY)")
+        Logger.clauntty.verbose("COLLAPSE: bubble.center.y=\(bubble.center.y), targetCenterY=\(targetCenterY)")
 
         // Hide ALL content immediately (both expanded and collapsed content, so only glass shrinks)
         bubble.hideContentForCollapse()
@@ -827,16 +827,16 @@ class LiquidGlassTabBar: UIView {
 
         // Animate scale down AND move center up to where collapsed tab should be
         UIView.animate(withDuration: 0.15, delay: 0, options: [.curveEaseOut, .overrideInheritedDuration, .overrideInheritedOptions]) {
-            Logger.clauntty.info("COLLAPSE ANIMATING: applying scale transform + moving center up")
+            Logger.clauntty.verbose("COLLAPSE ANIMATING: applying scale transform + moving center up")
             bubble.transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
             bubble.center.y = targetCenterY  // Move up while shrinking
             self.plusButton.alpha = 1
         } completion: { _ in
-            Logger.clauntty.info("COLLAPSE COMPLETE: removing transform and repositioning")
+            Logger.clauntty.verbose("COLLAPSE COMPLETE: removing transform and repositioning")
 
             // Check if bubble was removed during animation (e.g., tab was closed)
             guard self.bubbleViews[collapsingBubbleId] != nil else {
-                Logger.clauntty.info("COLLAPSE: bubble was removed during animation, skipping re-add")
+                Logger.clauntty.verbose("COLLAPSE: bubble was removed during animation, skipping re-add")
                 self.isExpanded = false
                 self.isCollapseAnimating = false
                 // Trigger layout since it was skipped while isCollapseAnimating was true
@@ -875,7 +875,7 @@ class LiquidGlassTabBar: UIView {
             // Now safe to update state - layout will run but bubble is already positioned
             self.isExpanded = false
             self.isCollapseAnimating = false
-            Logger.clauntty.info("COLLAPSE DONE: isCollapseAnimating=false, bubble.frame=\(NSCoder.string(for: bubble.frame))")
+            Logger.clauntty.verbose("COLLAPSE DONE: isCollapseAnimating=false, bubble.frame=\(NSCoder.string(for: bubble.frame))")
         }
     }
 

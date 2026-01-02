@@ -23,7 +23,7 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
-        Logger.clauntty.info("SSH auth: nextAuthenticationType called, availableMethods=\(String(describing: availableMethods))")
+        Logger.clauntty.debugOnly("SSH auth: nextAuthenticationType called, availableMethods=\(String(describing: availableMethods))")
 
         switch authMethod {
         case .password:
@@ -55,9 +55,9 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
             }
 
         case .sshKey(let keyId):
-            Logger.clauntty.info("SSH auth: trying publicKey, available=\(availableMethods.contains(.publicKey)), triedKey=\(self.triedKey)")
+            Logger.clauntty.debugOnly("SSH auth: trying publicKey, available=\(availableMethods.contains(.publicKey)), triedKey=\(self.triedKey)")
             guard availableMethods.contains(.publicKey), !triedKey else {
-                Logger.clauntty.info("SSH auth: no more methods to try")
+                Logger.clauntty.debugOnly("SSH auth: no more methods to try")
                 nextChallengePromise.succeed(nil)
                 return
             }
@@ -66,9 +66,9 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
 
             Task { @MainActor in
                 do {
-                    Logger.clauntty.info("SSH auth: loading private key \(keyId.prefix(8))...")
+                    Logger.clauntty.debugOnly("SSH auth: loading private key \(keyId.prefix(8))...")
                     let privateKey = try self.loadPrivateKey(keyId: keyId)
-                    Logger.clauntty.info("SSH auth: key loaded, sending offer for user '\(self.username)'")
+                    Logger.clauntty.debugOnly("SSH auth: key loaded, sending offer for user '\(self.username)'")
 
                     let offer = NIOSSHUserAuthenticationOffer(
                         username: self.username,
@@ -76,7 +76,7 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
                         offer: .privateKey(.init(privateKey: privateKey))
                     )
                     nextChallengePromise.succeed(offer)
-                    Logger.clauntty.info("SSH auth: offer sent")
+                    Logger.clauntty.debugOnly("SSH auth: offer sent")
                 } catch {
                     Logger.clauntty.error("SSH auth: failed to load SSH key: \(error.localizedDescription)")
                     nextChallengePromise.succeed(nil)

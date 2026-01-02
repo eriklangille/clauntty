@@ -64,7 +64,7 @@ struct ContentView: View {
                                     showingFullTabSelector = true
                                 },
                                 onShowPorts: { session in
-                                    Logger.clauntty.info("ContentView: onShowPorts called for session \(session.id.uuidString.prefix(8))")
+                                    Logger.clauntty.debugOnly("ContentView: onShowPorts called for session \(session.id.uuidString.prefix(8))")
                                     portsSheetSession = session
                                 },
                                 sessionStatesHash: sessionManager.sessionStateVersion
@@ -132,7 +132,7 @@ struct ContentView: View {
 
         guard let connectionName = LaunchArgs.autoConnectName() else { return }
 
-        Logger.clauntty.info("Auto-connect requested for: \(connectionName)")
+        Logger.clauntty.debugOnly("Auto-connect requested for: \(connectionName)")
 
         // Find connection by name (case-insensitive)
         guard let connection = connectionStore.connections.first(where: {
@@ -144,7 +144,7 @@ struct ContentView: View {
             return
         }
 
-        Logger.clauntty.info("Auto-connect: found connection \(connection.name) (\(connection.host))")
+        Logger.clauntty.debugOnly("Auto-connect: found connection \(connection.name) (\(connection.host))")
 
         // Check for multi-tab specs
         let tabSpecs = LaunchArgs.tabSpecs()
@@ -153,21 +153,21 @@ struct ContentView: View {
             do {
                 // First, establish SSH and deploy rtach, then sync sessions
                 // This only discovers sessions and creates tabs - does NOT connect them
-                Logger.clauntty.info("Auto-connect: establishing SSH and syncing sessions...")
+                Logger.clauntty.debugOnly("Auto-connect: establishing SSH and syncing sessions...")
                 if let result = try await sessionManager.connectAndListSessions(for: connection) {
                     await sessionManager.syncSessionsWithServer(config: connection, deployer: result.deployer)
                 }
 
                 // Get persisted tabs for this connection (including newly synced ones)
                 let serverTabs = sessionManager.sessions.filter { $0.connectionConfig.id == connection.id }
-                Logger.clauntty.info("Auto-connect: found \(serverTabs.count) tabs for \(connection.name)")
+                Logger.clauntty.debugOnly("Auto-connect: found \(serverTabs.count) tabs for \(connection.name)")
 
                 // Track which sessions to actually connect (lazy - only connect what's needed)
                 var sessionsToConnect: [Session] = []
 
                 if let specs = tabSpecs {
                     // Multi-tab mode - only connect specified tabs
-                    Logger.clauntty.info("Auto-connect: processing \(specs.count) tab specs")
+                    Logger.clauntty.debugOnly("Auto-connect: processing \(specs.count) tab specs")
 
                     for spec in specs {
                         switch spec {
@@ -175,7 +175,7 @@ struct ContentView: View {
                             // Select existing persisted tab by index (for this server)
                             if index < serverTabs.count {
                                 let session = serverTabs[index]
-                                Logger.clauntty.info("Auto-connect: will connect existing tab \(index): \(session.id.uuidString.prefix(8))")
+                                Logger.clauntty.debugOnly("Auto-connect: will connect existing tab \(index): \(session.id.uuidString.prefix(8))")
                                 sessionsToConnect.append(session)
                             } else {
                                 Logger.clauntty.warning("Auto-connect: tab index \(index) out of range (have \(serverTabs.count) tabs), creating new")
@@ -185,13 +185,13 @@ struct ContentView: View {
 
                         case .newSession:
                             // Create a new session
-                            Logger.clauntty.info("Auto-connect: creating new session")
+                            Logger.clauntty.debugOnly("Auto-connect: creating new session")
                             let session = sessionManager.createSession(for: connection)
                             sessionsToConnect.append(session)
 
                         case .port(let portNum):
                             // Port forward - create web tab
-                            Logger.clauntty.info("Auto-connect: forwarding port \(portNum)")
+                            Logger.clauntty.debugOnly("Auto-connect: forwarding port \(portNum)")
                             let remotePort = RemotePort(id: portNum, port: portNum, process: nil, address: "127.0.0.1")
                             _ = try await sessionManager.createWebTab(for: remotePort, config: connection)
                         }
@@ -199,10 +199,10 @@ struct ContentView: View {
                 } else {
                     // No tab specs - connect first existing tab or create new
                     if let existingTab = serverTabs.first {
-                        Logger.clauntty.info("Auto-connect: will connect existing tab \(existingTab.id.uuidString.prefix(8))")
+                        Logger.clauntty.debugOnly("Auto-connect: will connect existing tab \(existingTab.id.uuidString.prefix(8))")
                         sessionsToConnect.append(existingTab)
                     } else {
-                        Logger.clauntty.info("Auto-connect: no existing tabs, creating new session")
+                        Logger.clauntty.debugOnly("Auto-connect: no existing tabs, creating new session")
                         let session = sessionManager.createSession(for: connection)
                         sessionsToConnect.append(session)
                     }
@@ -211,12 +211,12 @@ struct ContentView: View {
                 // Only connect the LAST session (which becomes active)
                 // Other sessions stay disconnected - lazy reconnect when user switches to them
                 if let activeSession = sessionsToConnect.last {
-                    Logger.clauntty.info("Auto-connect: connecting active session \(activeSession.id.uuidString.prefix(8)) (lazy mode: \(sessionsToConnect.count - 1) others disconnected)")
+                    Logger.clauntty.debugOnly("Auto-connect: connecting active session \(activeSession.id.uuidString.prefix(8)) (lazy mode: \(sessionsToConnect.count - 1) others disconnected)")
                     try await sessionManager.connect(session: activeSession, rtachSessionId: activeSession.rtachSessionId)
                     sessionManager.switchTo(activeSession)
                 }
 
-                Logger.clauntty.info("Auto-connect: connected 1 session, \(sessionsToConnect.count - 1) waiting for lazy reconnect")
+                Logger.clauntty.debugOnly("Auto-connect: connected 1 session, \(sessionsToConnect.count - 1) waiting for lazy reconnect")
 
                 // Save persistence after all changes
                 sessionManager.savePersistence()

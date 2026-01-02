@@ -39,7 +39,7 @@ class PortForwardingManager {
             return self.localPort
         }
 
-        Logger.clauntty.info("PortForwarding: starting on localhost:\(self.localPort) -> \(self.remoteHost):\(self.remotePort)")
+        Logger.clauntty.debugOnly("PortForwarding: starting on localhost:\(self.localPort) -> \(self.remoteHost):\(self.remotePort)")
 
         let remoteHost = self.remoteHost
         let remotePort = self.remotePort
@@ -64,7 +64,7 @@ class PortForwardingManager {
         self.isRunning = true
 
         let boundPort = server.localAddress?.port ?? localPort
-        Logger.clauntty.info("PortForwarding: listening on localhost:\(boundPort)")
+        Logger.clauntty.debugOnly("PortForwarding: listening on localhost:\(boundPort)")
 
         return boundPort
     }
@@ -75,7 +75,7 @@ class PortForwardingManager {
             return
         }
 
-        Logger.clauntty.info("PortForwarding: stopping on port \(self.localPort)")
+        Logger.clauntty.debugOnly("PortForwarding: stopping on port \(self.localPort)")
         try await server.close().get()
         serverChannel = nil
         isRunning = false

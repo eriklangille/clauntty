@@ -185,7 +185,7 @@ class WebTab: ObservableObject, Identifiable {
         }
 
         state = .connecting
-        Logger.clauntty.info("WebTab: starting forwarding for port \(self.remotePort.port)")
+        Logger.clauntty.debugOnly("WebTab: starting forwarding for port \(self.remotePort.port)")
 
         let forwarder = PortForwardingManager(
             localPort: remotePort.port,
@@ -200,7 +200,7 @@ class WebTab: ObservableObject, Identifiable {
             self.localPort = actualPort
             self.portForwarder = forwarder
             self.state = .connected
-            Logger.clauntty.info("WebTab: forwarding started on localhost:\(actualPort)")
+            Logger.clauntty.debugOnly("WebTab: forwarding started on localhost:\(actualPort)")
         } catch {
             Logger.clauntty.error("WebTab: forwarding failed: \(error)")
             state = .error(error.localizedDescription)
@@ -210,7 +210,7 @@ class WebTab: ObservableObject, Identifiable {
 
     /// Stop port forwarding and close the tab
     func close() async {
-        Logger.clauntty.info("WebTab: closing port \(self.remotePort.port)")
+        Logger.clauntty.debugOnly("WebTab: closing port \(self.remotePort.port)")
 
         if let forwarder = portForwarder {
             do {
@@ -227,13 +227,13 @@ class WebTab: ObservableObject, Identifiable {
     /// Reconnect and restart port forwarding (used when restoring persisted tabs)
     /// - Parameter connection: The SSH connection to use for forwarding
     func reconnect(with connection: SSHConnection) async throws {
-        Logger.clauntty.info("WebTab: reconnecting port \(self.remotePort.port)")
+        Logger.clauntty.debugOnly("WebTab: reconnecting port \(self.remotePort.port)")
         self.sshConnection = connection
         try await startForwarding()
 
         // Restore to last path if we have one
         if let lastPath = lastPath, !lastPath.isEmpty, lastPath != "/" {
-            Logger.clauntty.info("WebTab: restoring last path: \(lastPath)")
+            Logger.clauntty.debugOnly("WebTab: restoring last path: \(lastPath)")
             // The webView will be set when the view appears and will load this path
         }
     }

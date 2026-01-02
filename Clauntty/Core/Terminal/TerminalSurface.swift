@@ -24,7 +24,7 @@ enum FontSizePreference {
     static func save(_ size: Float) {
         let clamped = max(minSize, min(maxSize, size))
         UserDefaults.standard.set(clamped, forKey: key)
-        Logger.clauntty.info("Font size preference saved: \(clamped)")
+        Logger.clauntty.debugOnly("Font size preference saved: \(clamped)")
     }
 
     /// Reset to default
@@ -37,6 +37,9 @@ enum FontSizePreference {
 /// Based on: ~/Projects/ghostty/macos/Sources/Ghostty/SurfaceView_UIKit.swift
 struct TerminalSurface: UIViewRepresentable {
     @ObservedObject var ghosttyApp: GhosttyApp
+
+    /// Session ID for debugging (first 8 chars of UUID)
+    var sessionId: String = "unknown"
 
     /// Whether this terminal is currently the active tab
     var isActive: Bool = true
@@ -66,6 +69,7 @@ struct TerminalSurface: UIViewRepresentable {
         }
         // Start with zero frame - SwiftUI will size it properly via layoutSubviews
         let view = TerminalSurfaceView(frame: .zero, app: app, initialFontSize: initialFontSize)
+        view.sessionId = sessionId
         view.onTextInput = onTextInput
         view.onImagePaste = onImagePaste
         view.onTerminalSizeChanged = onTerminalSizeChanged
@@ -139,6 +143,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     @Published var error: Error? = nil
 
     // MARK: - Ghostty Surface
+
+    /// Session ID for debugging (passed from TerminalSurface)
+    var sessionId: String = "unknown"
 
     private(set) var surface: ghostty_surface_t?
 
@@ -226,7 +233,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Hide the software keyboard without resigning first responder
     func hideSoftwareKeyboard() {
-        Logger.clauntty.info("[KB] hideSoftwareKeyboard() called, isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden)")
+        Logger.clauntty.debugOnly("[KB] hideSoftwareKeyboard() called, isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden)")
         guard !isSoftwareKeyboardHidden else { return }
         isSoftwareKeyboardHidden = true
         reloadInputViews()
@@ -234,16 +241,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         keyboardHeight = 0
         updateSizeForKeyboard()
         updateAccessoryBarPosition(keyboardVisible: false, keyboardHeight: 0)
-        Logger.clauntty.info("[KB] hideSoftwareKeyboard() - set flag=true, accessoryBar COLLAPSED")
+        Logger.clauntty.debugOnly("[KB] hideSoftwareKeyboard() - set flag=true, accessoryBar COLLAPSED")
     }
 
     /// Show the software keyboard
     func showSoftwareKeyboard() {
-        Logger.clauntty.info("[KB] showSoftwareKeyboard() called, isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), barShown=\(self.accessoryBar.isKeyboardShown)")
+        Logger.clauntty.debugOnly("[KB] showSoftwareKeyboard() called, isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), barShown=\(self.accessoryBar.isKeyboardShown)")
 
         // Allow show if keyboard was manually hidden OR if bar is collapsed (e.g., after Cmd+K)
         guard isSoftwareKeyboardHidden || !accessoryBar.isKeyboardShown else {
-            Logger.clauntty.info("[KB] showSoftwareKeyboard() skipped - keyboard already shown")
+            Logger.clauntty.debugOnly("[KB] showSoftwareKeyboard() skipped - keyboard already shown")
             return
         }
 
@@ -257,7 +264,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Force keyboard to appear by resigning and re-becoming first responder
         // This is necessary after Cmd+K or other external keyboard dismissal
         if isFirstResponder {
-            Logger.clauntty.info("[KB] showSoftwareKeyboard() - resigning and re-becoming first responder")
+            Logger.clauntty.debugOnly("[KB] showSoftwareKeyboard() - resigning and re-becoming first responder")
             _ = resignFirstResponder()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                 _ = self?.becomeFirstResponder()
@@ -269,13 +276,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             _ = becomeFirstResponder()
             reloadInputViews()
         }
-        Logger.clauntty.info("[KB] showSoftwareKeyboard() - waiting for keyboardWillShow")
+        Logger.clauntty.debugOnly("[KB] showSoftwareKeyboard() - waiting for keyboardWillShow")
 
         // Timeout: if keyboard doesn't show within 0.5s, reset state
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self = self else { return }
             if self.isShowingKeyboardTransition {
-                Logger.clauntty.info("[KB] showSoftwareKeyboard timeout - keyboard didn't appear, resetting state")
+                Logger.clauntty.debugOnly("[KB] showSoftwareKeyboard timeout - keyboard didn't appear, resetting state")
                 self.isShowingKeyboardTransition = false
                 self.isSoftwareKeyboardHidden = true
                 self.accessoryBar.setKeyboardVisible(false)
@@ -304,7 +311,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             accessoryBar.heightAnchor.constraint(equalToConstant: 60),
             accessoryBarBottomConstraint!
         ])
-        Logger.clauntty.info("[KB] Added accessory bar to window")
+        Logger.clauntty.debugOnly("[KB] Added accessory bar to window")
     }
 
     /// Update accessory bar position based on keyboard state
@@ -321,7 +328,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
 
         accessoryBarBottomConstraint?.constant = bottomOffset
-        Logger.clauntty.info("[KB] updateAccessoryBarPosition: keyboardVisible=\(keyboardVisible), kbHeight=\(Int(keyboardHeight)), bottomOffset=\(Int(bottomOffset))")
+        Logger.clauntty.verbose("[KB] updateAccessoryBarPosition: keyboardVisible=\(keyboardVisible), kbHeight=\(Int(keyboardHeight)), bottomOffset=\(Int(bottomOffset))")
     }
 
     // MARK: - SSH Data Flow
@@ -404,7 +411,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             let inputData = Data(bytes: data, count: Int(len))
             // Log PTY input - show first 50 bytes hex for debugging paste
             let hexPreview = inputData.prefix(50).map { String(format: "%02X", $0) }.joined(separator: " ")
-            Logger.clauntty.info("[PTY_INPUT] \(inputData.count) bytes, first 50: \(hexPreview)")
+            Logger.clauntty.verbose("[PTY_INPUT] \(inputData.count) bytes, first 50: \(hexPreview)")
             // Forward to SSH via the same callback as keyboard input
             // Must dispatch to main thread since Session is @MainActor
             DispatchQueue.main.async {
@@ -421,7 +428,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Set initial power mode
         updatePowerMode(PowerManager.shared.currentMode)
 
-        Logger.clauntty.info("Terminal surface created successfully")
+        Logger.clauntty.debugOnly("Terminal surface created successfully")
     }
 
     override init(frame: CGRect) {
@@ -485,7 +492,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // doesn't extend to the keyboard area (SwiftUI handles the layout)
         let keyboardFrameHeight = keyboardFrame.height
 
-        Logger.clauntty.info("[KB] keyboardWillShow: kbFrame=\(Int(keyboardFrame.width))x\(Int(keyboardFrame.height)), bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden)")
+        Logger.clauntty.verbose("[KB] keyboardWillShow: kbFrame=\(Int(keyboardFrame.width))x\(Int(keyboardFrame.height)), bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden)")
 
         // Only treat as "real" keyboard if the keyboard height is substantial (>100 = actual keyboard, not just accessory bar)
         let isRealKeyboard = keyboardFrameHeight > 100
@@ -498,7 +505,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Update terminal size if keyboard visibility changed (affects accessory bar reserve)
         if wasKeyboardVisible != isRealKeyboard {
-            Logger.clauntty.info("[KB] Keyboard visibility changed: \(wasKeyboardVisible) -> \(isRealKeyboard)")
+            Logger.clauntty.verbose("[KB] Keyboard visibility changed: \(wasKeyboardVisible) -> \(isRealKeyboard)")
             updateSizeForKeyboard()
         }
 
@@ -510,36 +517,36 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // If user had manually hidden keyboard (via button), but iOS is now showing
             // a real keyboard (via Cmd+K or other), respect that and clear our flag
             if isSoftwareKeyboardHidden {
-                Logger.clauntty.info("[KB] Real keyboard appeared while flag=hidden, clearing flag (Cmd+K case)")
+                Logger.clauntty.verbose("[KB] Real keyboard appeared while flag=hidden, clearing flag (Cmd+K case)")
                 isSoftwareKeyboardHidden = false
             }
 
             accessoryBar.setKeyboardVisible(true)
             updateAccessoryBarPosition(keyboardVisible: true, keyboardHeight: keyboardFrame.height)
-            Logger.clauntty.info("[KB] accessoryBar.setKeyboardVisible(true) - EXPANDED")
+            Logger.clauntty.verbose("[KB] accessoryBar.setKeyboardVisible(true) - EXPANDED")
         } else {
-            Logger.clauntty.info("[KB] Skipping expand - not real keyboard (height=\(Int(keyboardFrameHeight)))")
+            Logger.clauntty.verbose("[KB] Skipping expand - not real keyboard (height=\(Int(keyboardFrameHeight)))")
         }
     }
 
     @objc private func keyboardWillHide(_ notification: Notification) {
-        Logger.clauntty.info("[KB] keyboardWillHide: bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), isShowingTransition=\(self.isShowingKeyboardTransition), isRotating=\(self.isRotating)")
+        Logger.clauntty.verbose("[KB] keyboardWillHide: bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), isShowingTransition=\(self.isShowingKeyboardTransition), isRotating=\(self.isRotating)")
 
         // Ignore spurious hide notifications during show transition
         if isShowingKeyboardTransition {
-            Logger.clauntty.info("[KB] keyboardWillHide IGNORED - in show transition")
+            Logger.clauntty.verbose("[KB] keyboardWillHide IGNORED - in show transition")
             return
         }
 
         // Ignore spurious hide notifications during rotation
         if isRotating {
-            Logger.clauntty.info("[KB] keyboardWillHide IGNORED - during rotation")
+            Logger.clauntty.verbose("[KB] keyboardWillHide IGNORED - during rotation")
             return
         }
 
         // Ignore if we've manually hidden the keyboard (we already handled it)
         if isSoftwareKeyboardHidden {
-            Logger.clauntty.info("[KB] keyboardWillHide IGNORED - already manually hidden")
+            Logger.clauntty.verbose("[KB] keyboardWillHide IGNORED - already manually hidden")
             return
         }
 
@@ -548,14 +555,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         if accessoryBar.isKeyboardShown {
             if keyboardHeight != 0 {
                 keyboardHeight = 0
-                Logger.clauntty.info("[KB] Keyboard height changed: 0")
+                Logger.clauntty.verbose("[KB] Keyboard height changed: 0")
                 updateSizeForKeyboard()
             }
             accessoryBar.setKeyboardVisible(false)
             updateAccessoryBarPosition(keyboardVisible: false, keyboardHeight: 0)
-            Logger.clauntty.info("[KB] accessoryBar.setKeyboardVisible(false) - COLLAPSED (external hide)")
+            Logger.clauntty.verbose("[KB] accessoryBar.setKeyboardVisible(false) - COLLAPSED (external hide)")
         } else {
-            Logger.clauntty.info("[KB] keyboardWillHide IGNORED - bar already collapsed")
+            Logger.clauntty.verbose("[KB] keyboardWillHide IGNORED - bar already collapsed")
         }
     }
 
@@ -589,7 +596,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             height: bounds.height - accessoryBarReserve
         )
         let safeInsets = safeAreaInsets
-        Logger.clauntty.info("[KB] updateSizeForKeyboard: bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), kbVisible=\(self.keyboardHeight > 0), barReserve=\(Int(accessoryBarReserve)), effectiveSize=\(Int(effectiveSize.width))x\(Int(effectiveSize.height)), safeArea=(t:\(Int(safeInsets.top)),b:\(Int(safeInsets.bottom)),l:\(Int(safeInsets.left)),r:\(Int(safeInsets.right)))")
+        Logger.clauntty.verbose("[KB] updateSizeForKeyboard: bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), kbVisible=\(self.keyboardHeight > 0), barReserve=\(Int(accessoryBarReserve)), effectiveSize=\(Int(effectiveSize.width))x\(Int(effectiveSize.height)), safeArea=(t:\(Int(safeInsets.top)),b:\(Int(safeInsets.bottom)),l:\(Int(safeInsets.left)),r:\(Int(safeInsets.right)))")
         sizeDidChange(effectiveSize)
     }
 
@@ -674,7 +681,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Tell Ghostty the surface is not visible - stops the renderer
         // This prevents the renderer from holding mutex when iOS suspends threads
         ghostty_surface_set_occlusion(surface, false)
-        Logger.clauntty.info("Surface occluded (app backgrounded)")
+        Logger.clauntty.debugOnly("Surface occluded (app backgrounded)")
     }
 
     @objc private func appWillEnterForeground() {
@@ -684,9 +691,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Inactive tabs stay occluded to prevent mutex contention
         if isActiveTab {
             ghostty_surface_set_occlusion(surface, true)
-            Logger.clauntty.info("Surface visible (app foregrounded, active tab)")
+            Logger.clauntty.debugOnly("Surface visible (app foregrounded, active tab)")
+
+            // Force redraw after coming back from background
+            // This fixes frozen TUI apps (Claude Code spinner/timer) that stopped updating
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.forceRedraw()
+            }
         } else {
-            Logger.clauntty.info("Surface stays occluded (app foregrounded, inactive tab)")
+            Logger.clauntty.debugOnly("Surface stays occluded (app foregrounded, inactive tab)")
         }
     }
 
@@ -706,7 +719,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         guard let surface = self.surface else { return }
         let ghosttyMode = ghostty_power_mode_e(rawValue: UInt32(mode.rawValue))
         ghostty_surface_set_power_mode(surface, ghosttyMode)
-        Logger.clauntty.info("Terminal power mode updated: \(String(describing: mode))")
+        Logger.clauntty.debugOnly("Terminal power mode updated: \(String(describing: mode))")
     }
 
     // MARK: - Theme
@@ -726,7 +739,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     @objc private func themeDidChange(_ notification: Notification) {
         if let theme = notification.object as? Theme {
             backgroundColor = UIColor(theme.backgroundColor)
-            Logger.clauntty.info("Terminal background updated for theme: \(theme.name)")
+            Logger.clauntty.debugOnly("Terminal background updated for theme: \(theme.name)")
         }
     }
 
@@ -825,7 +838,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                     self.currentFontSize = 9.0  // Use actual default
                     FontSizePreference.reset()
                     self.onFontSizeChanged?(self.currentFontSize)
-                    Logger.clauntty.info("Font size reset to default")
+                    Logger.clauntty.debugOnly("Font size reset to default")
                     // Notify SSH of new terminal size after font change
                     self.notifyTerminalSizeChanged(surface: surface)
                 }
@@ -845,7 +858,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
             if newRows != self.terminalSize.rows || newCols != self.terminalSize.columns {
                 self.terminalSize = (newRows, newCols)
-                Logger.clauntty.info("Font change: terminal now \(newCols)x\(newRows)")
+                Logger.clauntty.debugOnly("Font change: terminal now \(newCols)x\(newRows)")
                 self.onTerminalSizeChanged?(newRows, newCols)
             }
         }
@@ -865,11 +878,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // If TUI app has mouse tracking enabled, send left-click to app
         let captured = isMouseCaptured
-        Logger.clauntty.debugOnly("[MOUSE] handleTap: isMouseCaptured=\(captured), location=(\(Int(location.x)), \(Int(location.y)))")
+        Logger.clauntty.verbose("[MOUSE] handleTap: isMouseCaptured=\(captured), location=(\(Int(location.x)), \(Int(location.y)))")
 
         if captured {
             guard let surface = self.surface else { return }
-            Logger.clauntty.debugOnly("[MOUSE] sending left-click to TUI app")
+            Logger.clauntty.verbose("[MOUSE] sending left-click to TUI app")
             ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
@@ -1237,7 +1250,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             if let ptr = text.text, text.text_len > 0 {
                 let string = String(cString: ptr)
                 UIPasteboard.general.string = string
-                Logger.clauntty.info("Copied \(text.text_len) characters to clipboard")
+                Logger.clauntty.debugOnly("Copied \(text.text_len) characters to clipboard")
             }
             ghostty_surface_free_text(surface, &text)
         }
@@ -1247,11 +1260,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     @objc override func paste(_ sender: Any?) {
-        Logger.clauntty.info("[PASTE] paste() called")
+        Logger.clauntty.debugOnly("[PASTE] paste() called")
 
         // Try text first
         if let string = UIPasteboard.general.string {
-            Logger.clauntty.info("[PASTE] clipboard has string: \(string.count) chars, \(string.utf8.count) bytes")
+            Logger.clauntty.debugOnly("[PASTE] clipboard has string: \(string.count) chars, \(string.utf8.count) bytes")
 
             // Convert newlines to carriage returns for terminal
             let terminalText = string.replacingOccurrences(of: "\n", with: "\r")
@@ -1266,25 +1279,25 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                 let bracketStart = "\u{1B}[200~"
                 let bracketEnd = "\u{1B}[201~"
                 let wrappedText = bracketStart + terminalText + bracketEnd
-                Logger.clauntty.info("[PASTE] multi-line, sending with bracketed paste wrapper")
+                Logger.clauntty.debugOnly("[PASTE] multi-line, sending with bracketed paste wrapper")
                 if let data = wrappedText.data(using: .utf8) {
                     onTextInput?(data)
                 }
             } else {
                 // Single line - send directly without bracketed paste
-                Logger.clauntty.info("[PASTE] single-line, sending directly")
+                Logger.clauntty.debugOnly("[PASTE] single-line, sending directly")
                 if let data = terminalText.data(using: .utf8) {
                     onTextInput?(data)
                 }
             }
             return
         } else {
-            Logger.clauntty.info("[PASTE] clipboard has no string")
+            Logger.clauntty.debugOnly("[PASTE] clipboard has no string")
         }
 
         // Try images - upload to remote and paste file path
         if let image = UIPasteboard.general.image {
-            Logger.clauntty.info("Pasting image from clipboard")
+            Logger.clauntty.debugOnly("Pasting image from clipboard")
             onImagePaste?(image)
         }
     }
@@ -1308,7 +1321,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // When TUI app has mouse tracking enabled, send scroll events instead of scrollback
         let captured = isMouseCaptured
         if gesture.state == .began {
-            Logger.clauntty.debugOnly("[MOUSE] handleScroll began: isMouseCaptured=\(captured), location=(\(Int(location.x)), \(Int(location.y)))")
+            Logger.clauntty.verbose("[MOUSE] handleScroll began: isMouseCaptured=\(captured), location=(\(Int(location.x)), \(Int(location.y)))")
         }
 
         if captured {
@@ -1321,7 +1334,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                 scrollAccumulator = 0
                 // Send initial position so TUI knows which pane we're over
                 ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
-                Logger.clauntty.debugOnly("[MOUSE] TUI scroll began at (\(Int(location.x)), \(Int(location.y)))")
+                Logger.clauntty.verbose("[MOUSE] TUI scroll began at (\(Int(location.x)), \(Int(location.y)))")
 
             case .changed:
                 // Update position as finger moves (hover simulation)
@@ -1332,7 +1345,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                 let scrollLines = scrollAccumulator / scrollThreshold
 
                 if abs(scrollLines) >= 1 {
-                    Logger.clauntty.debugOnly("[MOUSE] TUI scroll: \(Int(scrollLines)) lines at (\(Int(location.x)), \(Int(location.y)))")
+                    Logger.clauntty.verbose("[MOUSE] TUI scroll: \(Int(scrollLines)) lines at (\(Int(location.x)), \(Int(location.y)))")
                     ghostty_surface_mouse_scroll(surface, 0, Double(scrollLines), 0)
                     scrollAccumulator = scrollAccumulator.truncatingRemainder(dividingBy: scrollThreshold)
                 }
@@ -1433,7 +1446,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     override func layoutSubviews() {
         super.layoutSubviews()
 
-        Logger.clauntty.debugOnly("layoutSubviews: bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), lastBounds=\(Int(self.lastBounds.width))x\(Int(self.lastBounds.height)), keyboardHeight=\(Int(self.keyboardHeight))")
+        Logger.clauntty.verbose("layoutSubviews: bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), lastBounds=\(Int(self.lastBounds.width))x\(Int(self.lastBounds.height)), keyboardHeight=\(Int(self.keyboardHeight))")
 
         // Detect rotation (aspect ratio flip)
         let rotated = detectRotation(from: lastBounds, to: bounds)
@@ -1446,7 +1459,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             width: bounds.width,
             height: bounds.height - accessoryBarReserve
         )
-        Logger.clauntty.debugOnly("layoutSubviews: effectiveSize=\(Int(effectiveSize.width))x\(Int(effectiveSize.height)), rotated=\(rotated)")
+        Logger.clauntty.verbose("layoutSubviews: effectiveSize=\(Int(effectiveSize.width))x\(Int(effectiveSize.height)), rotated=\(rotated)")
         sizeDidChange(effectiveSize)
 
         // Update selection handles after layout change
@@ -1455,7 +1468,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // After rotation, force aggressive refresh to fix viewport position
         if rotated {
             let safeInsets = safeAreaInsets
-            Logger.clauntty.info("[ROTATE] Rotation detected! bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), kbHeight=\(Int(self.keyboardHeight)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), safeArea=(t:\(Int(safeInsets.top)),b:\(Int(safeInsets.bottom)),l:\(Int(safeInsets.left)),r:\(Int(safeInsets.right)))")
+            Logger.clauntty.debugOnly("[ROTATE] Rotation detected! bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height)), kbHeight=\(Int(self.keyboardHeight)), isSoftwareKeyboardHidden=\(self.isSoftwareKeyboardHidden), safeArea=(t:\(Int(safeInsets.top)),b:\(Int(safeInsets.bottom)),l:\(Int(safeInsets.left)),r:\(Int(safeInsets.right)))")
 
             // Set rotation flag to ignore spurious keyboard notifications
             isRotating = true
@@ -1463,7 +1476,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // Re-enforce keyboard hidden state during rotation
             // iOS may send spurious keyboard notifications during rotation
             if isSoftwareKeyboardHidden {
-                Logger.clauntty.info("[ROTATE] Re-enforcing keyboard hidden state via reloadInputViews()")
+                Logger.clauntty.debugOnly("[ROTATE] Re-enforcing keyboard hidden state via reloadInputViews()")
                 reloadInputViews()
             }
 
@@ -1488,7 +1501,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Clear rotation flag
         isRotating = false
-        Logger.clauntty.info("[ROTATE] Rotation complete, cleared isRotating flag")
+        Logger.clauntty.debugOnly("[ROTATE] Rotation complete, cleared isRotating flag")
 
         let gridSize = ghostty_surface_size(surface)
         let scrollOffset = ghostty_surface_scrollback_offset(surface)
@@ -1561,7 +1574,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let pixelWidth = UInt32(size.width * scale)
         let pixelHeight = UInt32(size.height * scale)
 
-        Logger.clauntty.debugOnly("sizeDidChange: \(Int(size.width))x\(Int(size.height))pt @\(scale)x = \(pixelWidth)x\(pixelHeight)px")
+        Logger.clauntty.verbose("sizeDidChange: \(Int(size.width))x\(Int(size.height))pt @\(scale)x = \(pixelWidth)x\(pixelHeight)px")
 
         ghostty_surface_set_content_scale(surface, scale, scale)
         ghostty_surface_set_size(surface, pixelWidth, pixelHeight)
@@ -1577,7 +1590,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let newRows = surfaceSize.rows
         let newCols = surfaceSize.columns
 
-        Logger.clauntty.debugOnly("Terminal grid: \(newCols) cols x \(newRows) rows")
+        Logger.clauntty.verbose("Terminal grid: \(newCols) cols x \(newRows) rows")
 
         if newRows != terminalSize.rows || newCols != terminalSize.columns {
             terminalSize = (newRows, newCols)
@@ -1602,12 +1615,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// recalculate and redraw everything. Useful after tab switches or
     /// reconnections where the Metal layer may have stale content.
     func forceRedraw() {
+        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: forceRedraw called, isRedrawing=\(self.isForceRedrawing), surface=\(self.surface != nil)")
         guard !isForceRedrawing else {
-            Logger.clauntty.debugOnly("forceRedraw: skipped (already redrawing)")
+            Logger.clauntty.debugOnly("TAB_SWITCH: forceRedraw SKIPPED (already redrawing)")
             return
         }
-        guard let surface = self.surface else { return }
-        guard bounds.width > 50 && bounds.height > 50 else { return }
+        guard let surface = self.surface else {
+            Logger.clauntty.debugOnly("TAB_SWITCH: forceRedraw SKIPPED (no surface)")
+            return
+        }
+        guard bounds.width > 50 && bounds.height > 50 else {
+            Logger.clauntty.debugOnly("TAB_SWITCH: forceRedraw SKIPPED (bounds too small: \(Int(self.bounds.width))x\(Int(self.bounds.height)))")
+            return
+        }
 
         isForceRedrawing = true
         defer { isForceRedrawing = false }
@@ -1623,10 +1643,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let gridBefore = ghostty_surface_size(surface)
         Logger.clauntty.debugOnly("forceRedraw: BEFORE grid=\(gridBefore.columns)x\(gridBefore.rows), effectiveSize=\(Int(self.bounds.width))x\(Int(effectiveHeight))")
 
-        // Briefly change size then restore - forces Ghostty to re-render
-        ghostty_surface_set_size(surface, w - 1, h)
+        // Hide and show the view to force Metal layer to get new drawable
+        self.isHidden = true
+        self.isHidden = false
+
+        // Also do size toggle
+        ghostty_surface_set_size(surface, w, h - 40)
         ghostty_surface_set_size(surface, w, h)
         ghostty_surface_refresh(surface)
+
+        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: hide/show + size toggle completed")
 
         // Log state after redraw
         let gridAfter = ghostty_surface_size(surface)
@@ -1650,13 +1676,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Set whether this terminal surface is the active tab
     /// Inactive surfaces don't render their cursor and lose keyboard focus
     func setActive(_ active: Bool) {
-        guard active != isActiveTab else { return }
+        let surfaceExists = self.surface != nil
+        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: setActive(\(active)) starting, wasActive=\(self.isActiveTab), appBg=\(self.isAppBackgrounded), surface=\(surfaceExists)")
+        let stateChanged = active != isActiveTab
         isActiveTab = active
 
-        // Notify about active state change (for power management)
-        onActiveStateChanged?(active)
+        // Notify about active state change (for power management) - only if state changed
+        if stateChanged {
+            onActiveStateChanged?(active)
+        }
 
         if active {
+            // Always refresh rendering when becoming visible, even if already "active"
+            // This fixes frozen rendering when state gets out of sync
             // Becoming active - gain focus and show keyboard
             Logger.clauntty.debugOnly("Surface becoming active")
 
@@ -1676,7 +1708,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // Must un-occlude before forceRedraw() or the render won't happen
             if let surface = self.surface, !isAppBackgrounded {
                 ghostty_surface_set_occlusion(surface, true)
-                Logger.clauntty.debugOnly("Tab active: surface visible")
+                // Toggle focus to wake up the renderer
+                ghostty_surface_set_focus(surface, false)
+                ghostty_surface_set_focus(surface, true)
+                Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: un-occluded + focus toggled")
+            } else {
+                Logger.clauntty.debugOnly("TAB_SWITCH: skipped un-occlude (surface=\(self.surface != nil), appBg=\(self.isAppBackgrounded))")
             }
 
             // Force size update to ensure Metal layer frame is correct after tab switch
@@ -1688,16 +1725,21 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             )
             sizeDidChange(effectiveSize)
 
-            // Force complete re-render by toggling size
-            // This fixes blank/partial screen issues when switching tabs
-            forceRedraw()
+            // Delay forceRedraw to let the un-occlude message propagate to renderer thread
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                guard let self = self else { return }
+                Logger.clauntty.debugOnly("TAB_SWITCH: about to forceRedraw (delayed)")
+                self.forceRedraw()
+                Logger.clauntty.debugOnly("TAB_SWITCH: forceRedraw completed")
+            }
 
             // Force the remote shell to redraw by sending a SIGWINCH
             // This triggers the shell/app (like Claude Code) to repaint
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self = self else { return }
+                Logger.clauntty.debugOnly("TAB_SWITCH: onTerminalSizeChanged callback is \(self.onTerminalSizeChanged == nil ? "nil" : "set")")
                 self.onTerminalSizeChanged?(self.terminalSize.rows, self.terminalSize.columns)
-                Logger.clauntty.debugOnly("Tab active: sent SIGWINCH to force remote redraw")
+                Logger.clauntty.debugOnly("TAB_SWITCH: SIGWINCH sent \(self.terminalSize.columns)x\(self.terminalSize.rows)")
             }
         } else {
             // Becoming inactive - lose focus to hide cursor and accessory bar
@@ -1770,8 +1812,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// can block indefinitely waiting for the surface mailbox. Since the main thread consumes
     /// that mailbox, calling from main thread would deadlock.
     func writeSSHOutput(_ data: Data) {
+        Logger.clauntty.verbose("DATA_FLOW[\(self.sessionId)]: writeSSHOutput called with \(data.count) bytes")
         guard let surface = self.surface else {
-            Logger.clauntty.warning("Cannot write SSH output: no surface")
+            Logger.clauntty.warning("DATA_FLOW[\(self.sessionId)]: writeSSHOutput FAILED - no surface")
             return
         }
 
@@ -1779,16 +1822,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // The surface mailbox is consumed by the main thread, so calling
         // ghostty_surface_write_pty_output from main = self-deadlock when queue fills
         terminalIOQueue.async { [weak self] in
-            guard self != nil else { return }
+            guard let self = self else { return }
 
-            Logger.clauntty.debugOnly("writeSSHOutput: processing \(data.count) bytes on terminal-io queue")
+            Logger.clauntty.verbose("DATA_FLOW[\(self.sessionId)]: ghostty_surface_write_pty_output \(data.count) bytes")
 
             data.withUnsafeBytes { buffer in
                 guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
                 ghostty_surface_write_pty_output(surface, ptr, UInt(data.count))
             }
 
-            Logger.clauntty.debugOnly("writeSSHOutput: completed \(data.count) bytes")
+            Logger.clauntty.verbose("DATA_FLOW[\(self.sessionId)]: ghostty_surface_write_pty_output completed")
         }
     }
 
@@ -1869,7 +1912,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         var cursorH: Double = 0
         ghostty_surface_ime_point(surface, &cursorX, &cursorY, &cursorW, &cursorH)
 
-        Logger.clauntty.debugOnly("captureVisibleText: grid=\(gridSize.columns)x\(gridSize.rows), scrollOffset=\(scrollOffset), altScreen=\(isAltScreen), cursor=(\(Int(cursorX)),\(Int(cursorY))), bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height))")
+        Logger.clauntty.verbose("captureVisibleText: grid=\(gridSize.columns)x\(gridSize.rows), scrollOffset=\(scrollOffset), altScreen=\(isAltScreen), cursor=(\(Int(cursorX)),\(Int(cursorY))), bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height))")
 
         // Create selection spanning entire visible viewport
         var sel = ghostty_selection_s()
@@ -1891,12 +1934,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         defer { ghostty_surface_free_text(surface, &text) }
 
         guard let ptr = text.text, text.text_len > 0 else {
-            Logger.clauntty.info("captureVisibleText: empty text")
+            Logger.clauntty.verbose("captureVisibleText: empty text")
             return ""
         }
 
         let result = String(cString: ptr)
-        Logger.clauntty.debugOnly("captureVisibleText: captured \(result.count) chars, lines=\(result.components(separatedBy: "\n").count)")
+        Logger.clauntty.verbose("captureVisibleText: captured \(result.count) chars, lines=\(result.components(separatedBy: "\n").count)")
 
         return result
     }
@@ -1906,7 +1949,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// - Returns: A UIImage of the current terminal content, or nil if capture failed
     func captureScreenshot() -> UIImage? {
         guard bounds.width > 0, bounds.height > 0 else {
-            Logger.clauntty.debugOnly("captureScreenshot: invalid bounds")
+            Logger.clauntty.verbose("captureScreenshot: invalid bounds")
             return nil
         }
 
@@ -1915,7 +1958,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             layer.render(in: ctx.cgContext)
         }
 
-        Logger.clauntty.debugOnly("captureScreenshot: captured \(Int(image.size.width))x\(Int(image.size.height)) image")
+        Logger.clauntty.verbose("captureScreenshot: captured \(Int(image.size.width))x\(Int(image.size.height)) image")
         return image
     }
 

@@ -55,9 +55,9 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         }
 
         bar.onShowPorts = { tab in
-            Logger.clauntty.info("LiquidGlassTabBarRepresentable: onShowPorts callback fired, coordinator.onShowPorts exists=\(context.coordinator.onShowPorts != nil)")
+            Logger.clauntty.debugOnly("LiquidGlassTabBarRepresentable: onShowPorts callback fired, coordinator.onShowPorts exists=\(context.coordinator.onShowPorts != nil)")
             if case .terminal(let session) = tab {
-                Logger.clauntty.info("LiquidGlassTabBarRepresentable: calling coordinator.onShowPorts for session \(session.id.uuidString.prefix(8))")
+                Logger.clauntty.debugOnly("LiquidGlassTabBarRepresentable: calling coordinator.onShowPorts for session \(session.id.uuidString.prefix(8))")
                 context.coordinator.onShowPorts?(session)
             }
         }

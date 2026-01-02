@@ -113,7 +113,7 @@ final class PowerManager: ObservableObject {
         }
 
         if newMode != currentMode {
-            Logger.clauntty.info("PowerManager: mode changed \(String(describing: self.currentMode)) -> \(String(describing: newMode))")
+            Logger.clauntty.debugOnly("PowerManager: mode changed \(String(describing: self.currentMode)) -> \(String(describing: newMode))")
             currentMode = newMode
         }
     }

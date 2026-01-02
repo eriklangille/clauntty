@@ -68,6 +68,7 @@ struct TerminalView: View {
                 // Use .id(session.id) to ensure a new surface is created for each session
                 TerminalSurface(
                     ghosttyApp: ghosttyApp,
+                    sessionId: String(session.id.uuidString.prefix(8)),
                     isActive: isActive,
                     initialFontSize: session.fontSize,
                     onTextInput: { data in

@@ -349,19 +349,19 @@ class KeyboardAccessoryView: UIView {
     // MARK: - Keyboard Toggle
 
     private func toggleKeyboard() {
-        Logger.clauntty.info("[AccessoryBar] toggleKeyboard called, isKeyboardShown=\(self.isKeyboardShown)")
+        Logger.clauntty.debugOnly("[AccessoryBar] toggleKeyboard called, isKeyboardShown=\(self.isKeyboardShown)")
         if isKeyboardShown {
-            Logger.clauntty.info("[AccessoryBar] calling onDismissKeyboard")
+            Logger.clauntty.debugOnly("[AccessoryBar] calling onDismissKeyboard")
             onDismissKeyboard?()
         } else {
-            Logger.clauntty.info("[AccessoryBar] calling onShowKeyboard")
+            Logger.clauntty.debugOnly("[AccessoryBar] calling onShowKeyboard")
             onShowKeyboard?()
         }
     }
 
     /// Called when keyboard visibility changes externally
     func setKeyboardVisible(_ visible: Bool) {
-        Logger.clauntty.info("[AccessoryBar] setKeyboardVisible(\(visible)) called, was=\(self.isKeyboardShown)")
+        Logger.clauntty.debugOnly("[AccessoryBar] setKeyboardVisible(\(visible)) called, was=\(self.isKeyboardShown)")
         isKeyboardShown = visible
         updateKeyboardToggleIcon()
         updateButtonsVisibility()
@@ -408,7 +408,7 @@ class KeyboardAccessoryView: UIView {
         }
 
         let frame = containerEffectView.frame
-        Logger.clauntty.info("[AccessoryBar] updateButtonsVisibility: isKeyboardShown=\(self.isKeyboardShown), frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.width))x\(Int(frame.height))")
+        Logger.clauntty.debugOnly("[AccessoryBar] updateButtonsVisibility: isKeyboardShown=\(self.isKeyboardShown), frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.width))x\(Int(frame.height))")
     }
 
     // MARK: - Key Actions
@@ -498,10 +498,10 @@ class KeyboardAccessoryView: UIView {
         if nippleFrame.contains(point) {
             let nipplePoint = convert(point, to: nippleContainerView)
             if let hitView = nippleContainerView.hitTest(nipplePoint, with: event) {
-                Logger.clauntty.info("[AccessoryBar] hitTest: hit nipple subview")
+                Logger.clauntty.verbose("[AccessoryBar] hitTest: hit nipple subview")
                 return hitView
             }
-            Logger.clauntty.info("[AccessoryBar] hitTest: hit nipple background")
+            Logger.clauntty.verbose("[AccessoryBar] hitTest: hit nipple background")
             return nippleContainerView
         }
 
@@ -511,16 +511,16 @@ class KeyboardAccessoryView: UIView {
             // Convert to container's coordinate space and do hit test
             let containerPoint = convert(point, to: containerEffectView)
             if let hitView = containerEffectView.hitTest(containerPoint, with: event) {
-                Logger.clauntty.info("[AccessoryBar] hitTest: hit container subview \(String(describing: type(of: hitView)))")
+                Logger.clauntty.verbose("[AccessoryBar] hitTest: hit container subview \(String(describing: type(of: hitView)))")
                 return hitView
             }
             // If no subview handles it, return the container itself (for touches on background)
-            Logger.clauntty.info("[AccessoryBar] hitTest: hit container background")
+            Logger.clauntty.verbose("[AccessoryBar] hitTest: hit container background")
             return containerEffectView
         }
 
         // Touch is outside visible elements - pass through to views below
-        Logger.clauntty.info("[AccessoryBar] hitTest: passing through at \(Int(point.x)),\(Int(point.y)), containerFrame=\(Int(containerFrame.origin.x)),\(Int(containerFrame.origin.y)),\(Int(containerFrame.width))x\(Int(containerFrame.height))")
+        Logger.clauntty.verbose("[AccessoryBar] hitTest: passing through at \(Int(point.x)),\(Int(point.y)), containerFrame=\(Int(containerFrame.origin.x)),\(Int(containerFrame.origin.y)),\(Int(containerFrame.width))x\(Int(containerFrame.height))")
         return nil
     }
 }

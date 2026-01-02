@@ -83,7 +83,9 @@ class RtachDeployer {
     /// 2.5.3 - Per-session log files ({socket}.log), ReleaseFast default build
     /// 2.6.0 - Compression: terminal_data payloads are zlib-compressed when beneficial (30-60% bandwidth savings)
     /// 2.6.1 - Fix: client.zig forwards iOS upgrade packet to master for compression handshake
-    static let expectedVersion = "2.6.1"
+    /// 2.6.2 - Diagnostics: signal handlers, heartbeat logging, allocation failure logging
+    /// 2.6.3 - Fix: Always send SIGWINCH on resume (fixes frozen Claude Code after tab switch)
+    static let expectedVersion = "2.6.3"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -104,20 +106,20 @@ class RtachDeployer {
     /// Deploy rtach to the remote server if not already present
     /// Returns the command to wrap the shell with rtach
     func deployIfNeeded(sessionId: String = "default") async throws -> String {
-        Logger.clauntty.info("Checking rtach deployment status...")
+        Logger.clauntty.debugOnly("Checking rtach deployment status...")
 
         // 1. Check remote architecture
         let arch = try await getRemoteArch()
-        Logger.clauntty.info("Remote architecture: \(arch)")
+        Logger.clauntty.debugOnly("Remote architecture: \(arch)")
 
         // 2. Check if rtach exists and is executable
         let exists = try await rtachExists()
 
         if !exists {
-            Logger.clauntty.info("rtach not found, deploying...")
+            Logger.clauntty.debugOnly("rtach not found, deploying...")
             try await deploy(arch: arch)
         } else {
-            Logger.clauntty.info("rtach already deployed")
+            Logger.clauntty.debugOnly("rtach already deployed")
         }
 
         // 3. Ensure sessions directory exists
@@ -227,7 +229,7 @@ class RtachDeployer {
         // Sort by most recent first
         sessions.sort { $0.lastActive > $1.lastActive }
 
-        Logger.clauntty.info("Found \(sessions.count) existing rtach sessions")
+        Logger.clauntty.debugOnly("Found \(sessions.count) existing rtach sessions")
         return sessions
     }
 
@@ -239,26 +241,26 @@ class RtachDeployer {
     /// Deploy rtach if needed (without creating a session)
     /// Checks version and redeploys if outdated
     func ensureDeployed() async throws {
-        Logger.clauntty.info("RtachDeployer.ensureDeployed: checking if update needed...")
+        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: checking if update needed...")
         if try await needsUpdate() {
-            Logger.clauntty.info("RtachDeployer.ensureDeployed: update needed, getting arch...")
+            Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: update needed, getting arch...")
             let arch = try await getRemoteArch()
-            Logger.clauntty.info("RtachDeployer.ensureDeployed: deploying for \(arch)...")
+            Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: deploying for \(arch)...")
             try await deploy(arch: arch)
         }
         // Ensure sessions directory exists
-        Logger.clauntty.info("RtachDeployer.ensureDeployed: creating sessions directory...")
+        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: creating sessions directory...")
         _ = try await connection.executeCommand("mkdir -p \(Self.remoteSessionsPath)")
 
         // Deploy helper scripts (forward-port, open-tab)
-        Logger.clauntty.info("RtachDeployer.ensureDeployed: deploying helper scripts...")
+        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: deploying helper scripts...")
         try await deployHelperScripts()
 
         // Deploy Claude Code hook for input detection
-        Logger.clauntty.info("RtachDeployer.ensureDeployed: deploying Claude Code hook...")
+        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: deploying Claude Code hook...")
         try await deployClaudeHook()
 
-        Logger.clauntty.info("RtachDeployer.ensureDeployed: done")
+        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: done")
     }
 
     // MARK: - Helper Scripts
@@ -317,7 +319,7 @@ class RtachDeployer {
             "chmod +x ~/.clauntty/bin/open-tab"
         )
 
-        Logger.clauntty.info("Helper scripts deployed (forward-port, open-tab)")
+        Logger.clauntty.debugOnly("Helper scripts deployed (forward-port, open-tab)")
     }
 
     // MARK: - Claude Code Settings
@@ -367,9 +369,9 @@ class RtachDeployer {
 
         if needsUpdate {
             try await writeClaudeSettings(settings)
-            Logger.clauntty.info("Claude Code settings deployed (env, permissions)")
+            Logger.clauntty.debugOnly("Claude Code settings deployed (env, permissions)")
         } else {
-            Logger.clauntty.info("Claude Code settings already configured")
+            Logger.clauntty.debugOnly("Claude Code settings already configured")
         }
     }
 
@@ -446,12 +448,12 @@ class RtachDeployer {
             stdinData: data
         )
 
-        Logger.clauntty.info("Saved session metadata (\(metadata.count) sessions)")
+        Logger.clauntty.debugOnly("Saved session metadata (\(metadata.count) sessions)")
     }
 
     /// Delete a session (kills the process and removes the socket)
     func deleteSession(sessionId: String) async throws {
-        Logger.clauntty.info("Deleting session: \(sessionId)")
+        Logger.clauntty.debugOnly("Deleting session: \(sessionId)")
 
         // 1. Kill any rtach processes for this session
         _ = try await connection.executeCommand(
@@ -467,7 +469,7 @@ class RtachDeployer {
         metadata.removeValue(forKey: sessionId)
         try await saveSessionMetadata(metadata)
 
-        Logger.clauntty.info("Session deleted: \(sessionId)")
+        Logger.clauntty.debugOnly("Session deleted: \(sessionId)")
     }
 
     /// Rename a session
@@ -487,7 +489,7 @@ class RtachDeployer {
         }
 
         try await saveSessionMetadata(metadata)
-        Logger.clauntty.info("Session renamed: \(sessionId) -> \(newName)")
+        Logger.clauntty.debugOnly("Session renamed: \(sessionId) -> \(newName)")
     }
 
     /// Update last accessed time for a session (call when connecting)
@@ -507,7 +509,7 @@ class RtachDeployer {
         }
 
         try await saveSessionMetadata(metadata)
-        Logger.clauntty.info("Updated last accessed for session: \(sessionId)")
+        Logger.clauntty.debugOnly("Updated last accessed for session: \(sessionId)")
     }
 
     // MARK: - Private
@@ -577,15 +579,15 @@ class RtachDeployer {
         }
 
         guard let remoteVersion = try await getRemoteVersion() else {
-            Logger.clauntty.info("Remote rtach version unknown, will redeploy")
+            Logger.clauntty.debugOnly("Remote rtach version unknown, will redeploy")
             return true // Can't determine version, redeploy to be safe
         }
 
         let needsUpdate = remoteVersion != Self.expectedVersion
         if needsUpdate {
-            Logger.clauntty.info("Remote rtach version \(remoteVersion) != expected \(Self.expectedVersion), will update")
+            Logger.clauntty.debugOnly("Remote rtach version \(remoteVersion) != expected \(Self.expectedVersion), will update")
         } else {
-            Logger.clauntty.info("Remote rtach version \(remoteVersion) is up to date")
+            Logger.clauntty.debugOnly("Remote rtach version \(remoteVersion) is up to date")
         }
         return needsUpdate
     }
@@ -599,7 +601,7 @@ class RtachDeployer {
             throw RtachDeployError.binaryNotFound("\(platform.os)-\(platform.arch)")
         }
 
-        Logger.clauntty.info("Uploading rtach binary for \(platform.os)-\(platform.arch) (\(binaryData.count) bytes)...")
+        Logger.clauntty.debugOnly("Uploading rtach binary for \(platform.os)-\(platform.arch) (\(binaryData.count) bytes)...")
 
         // Create directory
         _ = try await connection.executeCommand("mkdir -p ~/.clauntty/bin")
@@ -617,7 +619,7 @@ class RtachDeployer {
             throw RtachDeployError.deploymentFailed
         }
 
-        Logger.clauntty.info("rtach deployed successfully")
+        Logger.clauntty.debugOnly("rtach deployed successfully")
     }
 
     private func loadBundledBinary(for platform: RemotePlatform) -> Data? {

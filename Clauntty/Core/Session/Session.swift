@@ -303,10 +303,10 @@ class Session: ObservableObject, Identifiable {
 
     // MARK: - Initialization
 
-    init(connectionConfig: SavedConnection) {
-        self.id = UUID()
+    init(connectionConfig: SavedConnection, id: UUID = UUID(), createdAt: Date = Date()) {
+        self.id = id
         self.connectionConfig = connectionConfig
-        self.createdAt = Date()
+        self.createdAt = createdAt
     }
 
     // MARK: - Channel Management
@@ -336,7 +336,7 @@ class Session: ObservableObject, Identifiable {
         rtachProtocol.delegate = self
         rtachProtocol.connect()
 
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): channel attached, channelHandler is set")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): channel attached, channelHandler is set")
     }
 
     /// Detach the channel (on disconnect)
@@ -357,7 +357,7 @@ class Session: ObservableObject, Identifiable {
         // Reset rtach protocol state for reconnection
         rtachProtocol.reset()
 
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): channel detached")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): channel detached")
     }
 
     // MARK: - Data Flow
@@ -376,7 +376,7 @@ class Session: ObservableObject, Identifiable {
     /// Handle SSH channel becoming inactive (connection lost)
     /// This is called when the underlying TCP connection dies (e.g., after background timeout)
     func handleChannelInactive() {
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): handling channel inactive")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): handling channel inactive")
 
         // Clear channel references
         sshChannel = nil
@@ -464,6 +464,9 @@ class Session: ObservableObject, Identifiable {
 
     /// Process terminal data (forward to terminal and track scrollback)
     private func processTerminalData(_ data: Data) {
+        let sessionTitle = self.title.prefix(15)
+        let hasCallback = self.onDataReceived != nil
+        Logger.clauntty.verbose("DATA_FLOW[\(self.id.uuidString.prefix(8))] '\(sessionTitle)': \(data.count) bytes, callback=\(hasCallback)")
         totalBytesToTerminal += data.count
 
         // Log if this data contains alternate screen switch escape sequence
@@ -474,10 +477,10 @@ class Session: ObservableObject, Identifiable {
         let altScreenExit = Data([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x6c])  // ESC[?1049l
 
         if data.range(of: altScreenEnter) != nil {
-            Logger.clauntty.debugOnly("[ALTSCREEN] Received ESC[?1049h (switch to alternate screen) in \(data.count) bytes")
+            Logger.clauntty.verbose("[ALTSCREEN] Received ESC[?1049h (switch to alternate screen) in \(data.count) bytes")
         }
         if data.range(of: altScreenExit) != nil {
-            Logger.clauntty.debugOnly("[ALTSCREEN] Received ESC[?1049l (switch to normal screen) in \(data.count) bytes")
+            Logger.clauntty.verbose("[ALTSCREEN] Received ESC[?1049l (switch to normal screen) in \(data.count) bytes")
         }
 
         // Track loading state for showing loading indicator
@@ -515,12 +518,12 @@ class Session: ObservableObject, Identifiable {
         switch cmd {
         case "open":
             if parts.count > 1, let port = Int(parts[1]) {
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): rtach command open port \(port)")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command open port \(port)")
                 onOpenTabRequested?(port)
             }
         case "forward":
             if parts.count > 1, let port = Int(parts[1]) {
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): rtach command forward port \(port)")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command forward port \(port)")
                 onPortForwardRequested?(port)
             }
         default:
@@ -588,7 +591,7 @@ class Session: ObservableObject, Identifiable {
 
             // Connection dropped silently - update state if not already disconnected
             if state != .disconnected {
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): detected disconnection, triggering reconnect")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): detected disconnection, triggering reconnect")
                 handleChannelInactive()
                 onNeedsReconnect?()
             }
@@ -600,8 +603,10 @@ class Session: ObservableObject, Identifiable {
 
     /// Send window size change
     func sendWindowChange(rows: UInt16, columns: UInt16) {
+        Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange called \(columns)x\(rows)")
         guard let channel = sshChannel else {
             // Expected during connection setup - size will be sent after channel is established
+            Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange SKIPPED (no channel)")
             return
         }
 
@@ -642,13 +647,13 @@ class Session: ObservableObject, Identifiable {
         let filename = "clauntty-paste-\(UUID().uuidString.prefix(8)).png"
         let remotePath = "/tmp/\(filename)"
 
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): uploading image (\(imageData.count) bytes) to \(remotePath)")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): uploading image (\(imageData.count) bytes) to \(remotePath)")
 
         // Upload async and paste path when done
         Task {
             do {
                 try await connection.executeWithStdin("cat > \(remotePath)", stdinData: imageData)
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): image uploaded, pasting path")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): image uploaded, pasting path")
 
                 // Paste the file path to the terminal
                 if let pathData = remotePath.data(using: .utf8) {
@@ -666,13 +671,13 @@ class Session: ObservableObject, Identifiable {
     /// rtach will buffer output locally and send idle notifications
     func pauseOutput() {
         guard !isPaused else {
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pauseOutput skipped (already paused)")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pauseOutput skipped (already paused)")
             return
         }
         guard rtachProtocol.isFramedMode else {
             // Not in framed mode yet - remember to pause after handshake
             pendingPause = true
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pauseOutput deferred (not framed mode yet)")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pauseOutput deferred (not framed mode yet)")
             return
         }
 
@@ -680,22 +685,31 @@ class Session: ObservableObject, Identifiable {
         isPaused = true
         isPrefetchingOnIdle = false
         rtachProtocol.sendPause()
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): paused output streaming")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): paused output streaming")
     }
 
     /// Resume terminal output streaming (when tab becomes active)
     /// rtach will flush any buffered output since pause
     func resumeOutput() {
+        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput called, isPaused=\(self.isPaused), isFramedMode=\(self.rtachProtocol.isFramedMode)")
         // Clear pending pause if we're resuming before framed mode
         pendingPause = false
 
-        guard isPaused else { return }
-        guard rtachProtocol.isFramedMode else { return }
+        guard isPaused else {
+            Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SKIPPED (not paused)")
+            return
+        }
+        guard rtachProtocol.isFramedMode else {
+            Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SKIPPED (not framed mode)")
+            return
+        }
 
         isPaused = false
         isPrefetchingOnIdle = false
         rtachProtocol.sendResume()
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): resumed output streaming")
+        // Also request a full redraw from rtach to force TUI apps to repaint
+        rtachProtocol.requestRedraw()
+        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SENT resume + redraw to rtach")
     }
 
     // MARK: - Scrollback Request
@@ -819,14 +833,14 @@ extension Session: RtachClient.RtachSessionDelegate {
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, sendData data: Data) {
         // Log at entry point for paste debugging - show first few bytes to identify packet type
         let preview = data.prefix(10).map { String(format: "%02X", $0) }.joined(separator: " ")
-        Logger.clauntty.info("[PASTE] rtachSession entry: \(data.count) bytes, isMain=\(Thread.isMainThread), preview=\(preview)")
+        Logger.clauntty.verbose("[PASTE] rtachSession entry: \(data.count) bytes, isMain=\(Thread.isMainThread), preview=\(preview)")
 
         // Must run synchronously to maintain packet order
         // The upgrade packet must be sent BEFORE we start framing keyboard input
         if Thread.isMainThread {
             MainActor.assumeIsolated {
                 if let handler = self.channelHandler {
-                    Logger.clauntty.info("[PASTE] sending sync: \(data.count) bytes")
+                    Logger.clauntty.verbose("[PASTE] sending sync: \(data.count) bytes")
                     handler.sendToRemote(data)
                 } else {
                     Logger.clauntty.warning("[PASTE] channelHandler nil! Dropping \(data.count) bytes")
@@ -836,7 +850,7 @@ extension Session: RtachClient.RtachSessionDelegate {
             Logger.clauntty.warning("[PASTE] async dispatch! \(data.count) bytes - may cause ordering issues")
             Task { @MainActor in
                 if let handler = self.channelHandler {
-                    Logger.clauntty.info("[PASTE] sending async: \(data.count) bytes")
+                    Logger.clauntty.verbose("[PASTE] sending async: \(data.count) bytes")
                     handler.sendToRemote(data)
                 } else {
                     Logger.clauntty.warning("[PASTE] channelHandler nil (async)! Dropping \(data.count) bytes")
@@ -847,12 +861,12 @@ extension Session: RtachClient.RtachSessionDelegate {
 
     nonisolated func rtachSessionDidReceiveIdle(_ session: RtachClient.RtachSession) {
         Task { @MainActor in
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): received idle notification from rtach")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): received idle notification from rtach")
 
             // Reset pre-fetch state if we receive idle while still in pre-fetch mode
             // This handles the case where server had no buffered data
             if self.isPrefetchingOnIdle {
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pre-fetch had no data, resetting")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pre-fetch had no data, resetting")
                 self.isPrefetchingOnIdle = false
                 // Re-pause since we're still inactive
                 self.rtachProtocol.sendPause()
@@ -867,7 +881,7 @@ extension Session: RtachClient.RtachSessionDelegate {
             // Pre-fetch buffered data if we're paused
             // This ensures instant tab switch by getting data before user activates tab
             if self.isPaused {
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pre-fetching buffered data on idle")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pre-fetching buffered data on idle")
                 self.isPrefetchingOnIdle = true
                 self.rtachProtocol.sendResume()
                 // After receiving buffered data, we'll re-pause in processTerminalData
@@ -877,7 +891,7 @@ extension Session: RtachClient.RtachSessionDelegate {
 
     nonisolated func rtachSessionDidEnterFramedMode(_ session: RtachClient.RtachSession) {
         Task { @MainActor in
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): entered framed mode")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): entered framed mode")
 
             // Request scrollback after framed mode is established
             // This gets scrollback history for reconnects (rtach preserves it on server)
@@ -885,7 +899,7 @@ extension Session: RtachClient.RtachSessionDelegate {
 
             // Check if we have a pending pause request
             if self.pendingPause {
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): applying deferred pause")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): applying deferred pause")
                 self.pauseOutput()
             }
         }

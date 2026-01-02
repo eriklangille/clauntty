@@ -33,7 +33,7 @@ class SSHKeyStore: ObservableObject {
         keys.append(key)
         save()
 
-        Logger.clauntty.info("Added SSH key: \(label) (id: \(id.prefix(8)))")
+        Logger.clauntty.debugOnly("Added SSH key: \(label) (id: \(id.prefix(8)))")
         return key
     }
 
@@ -50,7 +50,7 @@ class SSHKeyStore: ObservableObject {
         try KeychainHelper.deleteSSHKey(id: key.id)
         keys.removeAll { $0.id == key.id }
         save()
-        Logger.clauntty.info("Deleted SSH key: \(key.label)")
+        Logger.clauntty.debugOnly("Deleted SSH key: \(key.label)")
     }
 
     /// Get a key by ID
@@ -80,7 +80,7 @@ class SSHKeyStore: ObservableObject {
         }
         do {
             keys = try JSONDecoder().decode([SSHKey].self, from: data)
-            Logger.clauntty.info("Loaded \(self.keys.count) SSH keys")
+            Logger.clauntty.debugOnly("Loaded \(self.keys.count) SSH keys")
         } catch {
             Logger.clauntty.error("Failed to load SSH keys: \(error.localizedDescription)")
         }

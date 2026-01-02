@@ -90,36 +90,35 @@ xcrun devicectl device process launch --device "iPhone 16" com.clauntty.app
 
 The app uses a tiered logging system optimized for performance:
 
-| Logger Method | When Logged | Use Case |
-|---------------|-------------|----------|
+| Method | When Logged | Use Case |
+|--------|-------------|----------|
 | `Logger.clauntty.error()` | Always | Errors, failures |
 | `Logger.clauntty.warning()` | Always | Warnings |
-| `Logger.clauntty.info()` | Always | Important state changes |
-| `Logger.clauntty.debugOnly()` | DEBUG builds only | Development info |
-| `Logger.clauntty.verbose()` | DEBUG + CLAUNTTY_VERBOSE=1 | Hot path, hex dumps |
+| `Logger.clauntty.debugOnly()` | DEBUG builds only | Lifecycle events, state changes |
+| `Logger.clauntty.verbose()` | DEBUG + CLAUNTTY_VERBOSE=1 | Per-packet, per-frame, per-touch |
 
-**Performance characteristics:**
-- **Release builds**: `debugOnly()` and `verbose()` are compiled out entirely (zero overhead)
-- **Debug builds**: Single boolean check for `verbose()` - negligible overhead
+**When to use each level:**
+- **`error/warning`**: Problems that need attention
+- **`debugOnly()`**: Session lifecycle, tab switching, connection events, one-time init - things you want during normal debugging
+- **`verbose()`**: High-frequency logs that would flood output - per-keystroke, per-SSH-packet, per-frame animation, hit tests, layout passes
+
+**Performance:**
+- **Release builds**: `debugOnly()` and `verbose()` compiled out entirely (zero overhead)
+- **Debug builds**: `verbose()` has single boolean check - negligible overhead
 - **`@autoclosure`**: Message strings only constructed if logging is enabled
 
-### Enable Verbose Logging
+### Viewing Logs
 
 ```bash
-# sim.sh automatically enables verbose logging
+# Stream logs live (shows debugOnly level)
+./scripts/sim.sh logs
+
+# Show last N seconds/minutes
+./scripts/sim.sh logs 30s
+./scripts/sim.sh logs 5m
+
+# Debug command shows logs at end
 ./scripts/sim.sh debug devbox
-
-# In Xcode: Edit Scheme → Run → Arguments → Environment Variables
-# Add: CLAUNTTY_VERBOSE = 1
-```
-
-### Log Commands
-
-```bash
-# Use sim.sh for logs (preferred)
-./scripts/sim.sh logs           # Stream logs (Ctrl+C to stop)
-./scripts/sim.sh logs 30s       # Show last 30 seconds
-./scripts/sim.sh logs 5m        # Show last 5 minutes
 
 # Screenshot
 ./scripts/sim.sh screenshot myshot   # Save to screenshots/myshot.png
@@ -132,6 +131,23 @@ uv run scripts/parse_crash.py --raw --latest  # Raw stack trace
 idevicecrashreport -e /tmp/clauntty_crashes   # Pull all crashes to folder
 ls /tmp/clauntty_crashes | grep -i clauntty   # List Clauntty crashes
 uv run scripts/parse_crash.py /tmp/clauntty_crashes/Clauntty-YYYY-MM-DD-HHMMSS.ips
+```
+
+**Note:** `sim.sh` streams at debug level. Historical logs (`log show`) don't persist debug-level by default - use live streaming.
+
+### Enable Verbose Logging
+
+Verbose logs are disabled by default (too noisy). Enable with `CLAUNTTY_VERBOSE=1`:
+
+```bash
+# sim.sh debug automatically sets CLAUNTTY_VERBOSE=1
+./scripts/sim.sh debug devbox
+
+# Manual: set environment variable before launch
+SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted com.clauntty.app
+
+# In Xcode: Edit Scheme → Run → Arguments → Environment Variables
+# Add: CLAUNTTY_VERBOSE = 1
 ```
 
 Expected: idle ~2 FPS (cursor blink), active output 30-100 FPS, low power max 33 FPS.

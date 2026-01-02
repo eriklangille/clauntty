@@ -60,7 +60,7 @@ class PortScanner {
         let ports = parseOutput(output)
         let sorted = ports.sorted { $0.sortPriority < $1.sortPriority || ($0.sortPriority == $1.sortPriority && $0.port < $1.port) }
 
-        Logger.clauntty.info("PortScanner: found \(sorted.count) listening ports")
+        Logger.clauntty.debugOnly("PortScanner: found \(sorted.count) listening ports")
         return sorted
     }
 
@@ -182,7 +182,7 @@ class PortScanner {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if trimmed == "KILLED" {
-            Logger.clauntty.info("PortScanner: killed process on port \(port)")
+            Logger.clauntty.debugOnly("PortScanner: killed process on port \(port)")
         } else {
             Logger.clauntty.warning("PortScanner: could not find process on port \(port)")
             throw PortScannerError.processNotFound

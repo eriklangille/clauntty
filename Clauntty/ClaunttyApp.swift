@@ -11,12 +11,12 @@ enum GhosttyGlobal {
         guard !initialized else { return }
         initialized = true
 
-        Logger.clauntty.info("Initializing GhosttyKit global state...")
+        Logger.clauntty.debugOnly("Initializing GhosttyKit global state...")
         let result = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         if result != 0 {
             Logger.clauntty.error("ghostty_init failed with code: \(result)")
         } else {
-            Logger.clauntty.info("GhosttyKit global state initialized successfully")
+            Logger.clauntty.debugOnly("GhosttyKit global state initialized successfully")
         }
     }
 }
@@ -114,7 +114,7 @@ struct ClaunttyApp: App {
         switch Self.previewMode {
         case .terminal, .terminalKeyboard:
             initialState.connectionStatus = .connected
-            Logger.clauntty.info("Preview mode: \(Self.previewMode.rawValue)")
+            Logger.clauntty.debugOnly("Preview mode: \(Self.previewMode.rawValue)")
         case .connectionList, .newConnection, .none:
             break
         }
@@ -142,7 +142,7 @@ struct ClaunttyApp: App {
     /// Handle custom URL schemes for testing/debugging
     /// - clauntty://dump-text - Dump visible terminal text to /tmp/clauntty_dump.txt
     private func handleURL(_ url: URL) {
-        Logger.clauntty.info("Received URL: \(url.absoluteString)")
+        Logger.clauntty.debugOnly("Received URL: \(url.absoluteString)")
 
         guard url.scheme == "clauntty" else {
             Logger.clauntty.warning("Unknown URL scheme: \(url.scheme ?? "nil")")
@@ -202,6 +202,10 @@ struct AppContentView: View {
     private func handleScenePhaseChange(_ phase: ScenePhase) {
         switch phase {
         case .background:
+            let activeTitle = sessionManager.activeSession?.title.prefix(20) ?? "none"
+            let activeId = sessionManager.activeSession?.id.uuidString.prefix(8) ?? "none"
+            Logger.clauntty.debugOnly("APP_LIFECYCLE: BACKGROUNDING - activeSession='\(activeTitle)' [\(activeId)], totalSessions=\(self.sessionManager.sessions.count)")
+
             NotificationManager.shared.appIsBackgrounded = true
             // Request background time to continue processing SSH data
             // This gives us ~30 seconds to detect when Claude finishes
@@ -213,8 +217,12 @@ struct AppContentView: View {
             for session in sessionManager.sessions {
                 session.pauseOutput()
             }
-            Logger.clauntty.info("App backgrounded: paused all \(self.sessionManager.sessions.count) sessions")
+            Logger.clauntty.debugOnly("APP_LIFECYCLE: BACKGROUNDED - paused all \(self.sessionManager.sessions.count) sessions")
         case .active:
+            let activeTitle = sessionManager.activeSession?.title.prefix(20) ?? "none"
+            let activeId = sessionManager.activeSession?.id.uuidString.prefix(8) ?? "none"
+            Logger.clauntty.debugOnly("APP_LIFECYCLE: FOREGROUNDING - activeSession='\(activeTitle)' [\(activeId)]")
+
             NotificationManager.shared.appIsBackgrounded = false
             NotificationManager.shared.clearAllPendingNotifications()
             NotificationManager.shared.endBackgroundTask()
@@ -225,15 +233,17 @@ struct AppContentView: View {
             if let activeSession = sessionManager.activeSession {
                 if activeSession.state == .disconnected {
                     // Active session is disconnected - reconnect it
-                    Logger.clauntty.info("App activated: reconnecting active session \(activeSession.id.uuidString.prefix(8))")
+                    Logger.clauntty.debugOnly("APP_LIFECYCLE: reconnecting disconnected active session")
                     Task {
                         try? await sessionManager.reconnect(session: activeSession)
                     }
                 } else {
                     // Active session is connected - just resume output
+                    Logger.clauntty.debugOnly("APP_LIFECYCLE: resuming connected active session")
                     activeSession.resumeOutput()
-                    Logger.clauntty.info("App activated: resumed active session \(activeSession.id.uuidString.prefix(8))")
                 }
+            } else {
+                Logger.clauntty.debugOnly("APP_LIFECYCLE: no active session to resume")
             }
         case .inactive:
             // Transitional state, don't change background flag
@@ -249,7 +259,7 @@ struct AppContentView: View {
         // Find and switch to the session
         if let session = sessionManager.sessions.first(where: { $0.id == sessionId }) {
             sessionManager.switchTo(session)
-            Logger.clauntty.info("Switched to session from notification: \(sessionId.uuidString.prefix(8))")
+            Logger.clauntty.debugOnly("Switched to session from notification: \(sessionId.uuidString.prefix(8))")
         } else {
             Logger.clauntty.warning("Session not found for notification: \(sessionId.uuidString.prefix(8))")
         }

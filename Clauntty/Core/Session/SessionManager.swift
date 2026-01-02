@@ -93,7 +93,7 @@ class SessionManager: ObservableObject {
         // Always make new session active (user just opened it)
         activeSessionId = session.id
 
-        Logger.clauntty.info("SessionManager: created session \(session.id.uuidString.prefix(8)) for \(config.host)")
+        Logger.clauntty.debugOnly("SessionManager: created session \(session.id.uuidString.prefix(8)) for \(config.host)")
         return session
     }
 
@@ -123,10 +123,10 @@ class SessionManager: ObservableObject {
         // Get or create SSH connection
         let connection: SSHConnection
         if let existing = connectionPool[poolKey], existing.isConnected {
-            Logger.clauntty.info("SessionManager: reusing existing connection for \(poolKey)")
+            Logger.clauntty.debugOnly("SessionManager: reusing existing connection for \(poolKey)")
             connection = existing
         } else {
-            Logger.clauntty.info("SessionManager: creating new connection for \(poolKey)")
+            Logger.clauntty.debugOnly("SessionManager: creating new connection for \(poolKey)")
             connection = SSHConnection(
                 host: config.host,
                 port: config.port,
@@ -144,12 +144,12 @@ class SessionManager: ObservableObject {
         // Deploy rtach and list sessions
         do {
             let deployer = RtachDeployer(connection: connection)
-            Logger.clauntty.info("SessionManager: ensuring rtach deployed...")
+            Logger.clauntty.debugOnly("SessionManager: ensuring rtach deployed...")
             try await deployer.ensureDeployed()
             rtachDeployers[poolKey] = deployer
-            Logger.clauntty.info("SessionManager: listing sessions...")
+            Logger.clauntty.debugOnly("SessionManager: listing sessions...")
             let sessions = try await deployer.listSessions()
-            Logger.clauntty.info("SessionManager: found \(sessions.count) existing sessions")
+            Logger.clauntty.debugOnly("SessionManager: found \(sessions.count) existing sessions")
             return (sessions: sessions, deployer: deployer)
         } catch {
             Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
@@ -160,7 +160,7 @@ class SessionManager: ObservableObject {
     /// Connect a session with optional rtach session ID
     /// - Parameter rtachSessionId: The rtach session to attach to, or nil for new session
     func connect(session: Session, rtachSessionId: String? = nil) async throws {
-        Logger.clauntty.info("SessionManager.connect called for session \(session.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("SessionManager.connect called for session \(session.id.uuidString.prefix(8))")
         session.state = .connecting
 
         let config = session.connectionConfig
@@ -168,7 +168,7 @@ class SessionManager: ObservableObject {
 
         // Create a fresh SSH connection for the terminal session
         // (The connection from connectAndListSessions may be in a bad state after exec commands)
-        Logger.clauntty.info("SessionManager: creating fresh connection for terminal session \(session.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("SessionManager: creating fresh connection for terminal session \(session.id.uuidString.prefix(8))")
         let connection = SSHConnection(
             host: config.host,
             port: config.port,
@@ -177,7 +177,7 @@ class SessionManager: ObservableObject {
             connectionId: config.id
         )
         try await connection.connect()
-        Logger.clauntty.info("SessionManager: SSH connection established for \(session.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("SessionManager: SSH connection established for \(session.id.uuidString.prefix(8))")
 
         // Store this session's connection - don't disconnect other sessions' connections!
         // Each session gets its own SSH connection to avoid killing other sessions' channels
@@ -190,13 +190,13 @@ class SessionManager: ObservableObject {
             // Ensure rtach is deployed (may already be cached in rtachDeployers)
             var deployer = rtachDeployers[poolKey]
             if deployer == nil {
-                Logger.clauntty.info("SessionManager: deploying rtach for session \(session.id.uuidString.prefix(8))...")
+                Logger.clauntty.debugOnly("SessionManager: deploying rtach for session \(session.id.uuidString.prefix(8))...")
                 let newDeployer = RtachDeployer(connection: connection)
                 do {
                     try await newDeployer.ensureDeployed()
                     rtachDeployers[poolKey] = newDeployer
                     deployer = newDeployer
-                    Logger.clauntty.info("SessionManager: rtach deployed successfully")
+                    Logger.clauntty.debugOnly("SessionManager: rtach deployed successfully")
                 } catch {
                     Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
                 }
@@ -209,7 +209,7 @@ class SessionManager: ObservableObject {
                 session.rtachSessionId = sessionId
                 shellCommand = deployer.shellCommand(sessionId: sessionId)
                 usingRtach = true
-                Logger.clauntty.info("SessionManager: using rtach session: \(sessionId.prefix(8))...")
+                Logger.clauntty.debugOnly("SessionManager: using rtach session: \(sessionId.prefix(8))...")
 
                 // Update last accessed time for this session
                 try? await deployer.updateLastAccessed(sessionId: sessionId)
@@ -219,7 +219,7 @@ class SessionManager: ObservableObject {
         }
 
         // Create a new channel for this session with the correct terminal size
-        Logger.clauntty.info("SessionManager: creating channel for \(session.id.uuidString.prefix(8)), command=\(shellCommand ?? "shell"), rtach=\(usingRtach)")
+        Logger.clauntty.debugOnly("SessionManager: creating channel for \(session.id.uuidString.prefix(8)), command=\(shellCommand ?? "shell"), rtach=\(usingRtach)")
         let (channel, handler) = try await connection.createChannel(
             terminalSize: session.initialTerminalSize,
             command: shellCommand,
@@ -230,12 +230,12 @@ class SessionManager: ObservableObject {
             },
             onChannelInactive: { [weak session] in
                 Task { @MainActor in
-                    Logger.clauntty.info("Session \(session?.id.uuidString.prefix(8) ?? "nil"): channel became inactive, marking disconnected")
+                    Logger.clauntty.debugOnly("Session \(session?.id.uuidString.prefix(8) ?? "nil"): channel became inactive, marking disconnected")
                     session?.handleChannelInactive()
                 }
             }
         )
-        Logger.clauntty.info("SessionManager: channel created for \(session.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("SessionManager: channel created for \(session.id.uuidString.prefix(8))")
 
         session.attach(channel: channel, handler: handler, connection: connection, expectsRtach: usingRtach)
 
@@ -254,21 +254,21 @@ class SessionManager: ObservableObject {
             guard let self = self, let session = session else { return }
             // Only auto-reconnect if this is the active session
             guard self.activeTab == .terminal(session.id) else {
-                Logger.clauntty.info("SessionManager: session \(session.id.uuidString.prefix(8)) needs reconnect but is not active, skipping auto-reconnect")
+                Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) needs reconnect but is not active, skipping auto-reconnect")
                 return
             }
-            Logger.clauntty.info("SessionManager: active session \(session.id.uuidString.prefix(8)) needs reconnect, triggering auto-reconnect")
+            Logger.clauntty.debugOnly("SessionManager: active session \(session.id.uuidString.prefix(8)) needs reconnect, triggering auto-reconnect")
             Task {
                 do {
                     try await self.reconnect(session: session)
-                    Logger.clauntty.info("SessionManager: auto-reconnect succeeded for session \(session.id.uuidString.prefix(8))")
+                    Logger.clauntty.debugOnly("SessionManager: auto-reconnect succeeded for session \(session.id.uuidString.prefix(8))")
                 } catch {
                     Logger.clauntty.error("SessionManager: auto-reconnect failed for session \(session.id.uuidString.prefix(8)): \(error.localizedDescription)")
                 }
             }
         }
 
-        Logger.clauntty.info("SessionManager: session \(session.id.uuidString.prefix(8)) connected and attached")
+        Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) connected and attached")
 
         // Request notification permission on first session connect
         await NotificationManager.shared.requestAuthorizationIfNeeded()
@@ -278,7 +278,7 @@ class SessionManager: ObservableObject {
     /// Uses the session's existing rtach session ID to reattach
     func reconnect(session: Session) async throws {
         guard session.state == .disconnected else {
-            Logger.clauntty.info("SessionManager: session \(session.id.uuidString.prefix(8)) not disconnected, skipping reconnect")
+            Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) not disconnected, skipping reconnect")
             return
         }
 
@@ -287,7 +287,7 @@ class SessionManager: ObservableObject {
             throw SessionError.notConnected
         }
 
-        Logger.clauntty.info("SessionManager: reconnecting session \(session.id.uuidString.prefix(8)) to rtach session \(rtachSessionId.prefix(8))")
+        Logger.clauntty.debugOnly("SessionManager: reconnecting session \(session.id.uuidString.prefix(8)) to rtach session \(rtachSessionId.prefix(8))")
 
         // Ensure rtach deployer exists for this connection
         let config = session.connectionConfig
@@ -320,21 +320,21 @@ class SessionManager: ObservableObject {
         let disconnectedSessions = sessions.filter { $0.state == .disconnected }
 
         if disconnectedSessions.isEmpty {
-            Logger.clauntty.info("SessionManager: no disconnected sessions to reconnect")
+            Logger.clauntty.debugOnly("SessionManager: no disconnected sessions to reconnect")
             return
         }
 
-        Logger.clauntty.info("SessionManager: reconnecting \(disconnectedSessions.count) disconnected sessions")
+        Logger.clauntty.debugOnly("SessionManager: reconnecting \(disconnectedSessions.count) disconnected sessions")
 
         for session in disconnectedSessions {
             do {
                 try await reconnect(session: session)
-                Logger.clauntty.info("SessionManager: reconnected session \(session.id.uuidString.prefix(8))")
+                Logger.clauntty.debugOnly("SessionManager: reconnected session \(session.id.uuidString.prefix(8))")
 
                 // Resume the active session after reconnect (others stay paused for battery)
                 if activeTab == .terminal(session.id) {
                     session.resumeOutput()
-                    Logger.clauntty.info("SessionManager: resumed active session \(session.id.uuidString.prefix(8)) after reconnect")
+                    Logger.clauntty.debugOnly("SessionManager: resumed active session \(session.id.uuidString.prefix(8)) after reconnect")
                 }
             } catch {
                 Logger.clauntty.error("SessionManager: failed to reconnect session \(session.id.uuidString.prefix(8)): \(error.localizedDescription)")
@@ -346,7 +346,7 @@ class SessionManager: ObservableObject {
     /// Close a session
     /// - Parameter killRemote: Whether to kill the rtach session on the server (default true)
     func closeSession(_ session: Session, killRemote: Bool = true) {
-        Logger.clauntty.info("SessionManager: closing session \(session.id.uuidString.prefix(8)), killRemote=\(killRemote)")
+        Logger.clauntty.debugOnly("SessionManager: closing session \(session.id.uuidString.prefix(8)), killRemote=\(killRemote)")
 
         // Detach from channel
         session.detach()
@@ -409,7 +409,7 @@ class SessionManager: ObservableObject {
         let deployer = RtachDeployer(connection: connection)
         do {
             try await deployer.deleteSession(sessionId: sessionId)
-            Logger.clauntty.info("SessionManager: killed rtach session \(sessionId.prefix(8))")
+            Logger.clauntty.debugOnly("SessionManager: killed rtach session \(sessionId.prefix(8))")
         } catch {
             Logger.clauntty.error("SessionManager: failed to kill rtach session: \(error.localizedDescription)")
         }
@@ -418,6 +418,13 @@ class SessionManager: ObservableObject {
     /// Switch to a different session
     /// If the session is disconnected, triggers lazy reconnection
     func switchTo(_ session: Session) {
+        let sessionTitle = session.title.prefix(20)
+        let sessionId = session.id.uuidString.prefix(8)
+        let previousId = activeSession?.id.uuidString.prefix(8) ?? "none"
+        let previousTitle = activeSession?.title.prefix(20) ?? "none"
+
+        Logger.clauntty.debugOnly("TAB_TAP: switchTo '\(sessionTitle)' [\(sessionId)] from '\(previousTitle)' [\(previousId)]")
+
         guard sessions.contains(where: { $0.id == session.id }) else {
             Logger.clauntty.warning("SessionManager: cannot switch to unknown session")
             return
@@ -429,15 +436,16 @@ class SessionManager: ObservableObject {
 
         // Pause the previous active session (battery optimization)
         if let previousSession = activeSession, previousSession.id != session.id {
+            Logger.clauntty.debugOnly("TAB_TAP: pausing previous session '\(previousSession.title.prefix(20))'")
             previousSession.pauseOutput()
         }
 
         activeSessionId = session.id
-        Logger.clauntty.info("SessionManager: switched to session \(session.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("TAB_TAP: activeSessionId set to \(sessionId)")
 
         // If the session is disconnected, trigger lazy reconnect
         if session.state == .disconnected {
-            Logger.clauntty.info("SessionManager: lazy reconnecting session \(session.id.uuidString.prefix(8))")
+            Logger.clauntty.debugOnly("SessionManager: lazy reconnecting session \(session.id.uuidString.prefix(8))")
             Task {
                 do {
                     try await reconnect(session: session)
@@ -453,7 +461,7 @@ class SessionManager: ObservableObject {
 
     /// Close all sessions
     func closeAllSessions() {
-        Logger.clauntty.info("SessionManager: closing all sessions")
+        Logger.clauntty.debugOnly("SessionManager: closing all sessions")
         for session in sessions {
             session.detach()
         }
@@ -482,7 +490,7 @@ class SessionManager: ObservableObject {
         // Close connections not in use
         for (key, connection) in connectionPool {
             if !activeKeys.contains(key) {
-                Logger.clauntty.info("SessionManager: closing unused connection \(key)")
+                Logger.clauntty.debugOnly("SessionManager: closing unused connection \(key)")
                 connection.disconnect()
                 connectionPool.removeValue(forKey: key)
             }
@@ -563,13 +571,13 @@ class SessionManager: ObservableObject {
         // Persist web tabs
         saveWebTabPersistence()
 
-        Logger.clauntty.info("SessionManager: created web tab for port \(port.port)")
+        Logger.clauntty.debugOnly("SessionManager: created web tab for port \(port.port)")
         return webTab
     }
 
     /// Close a web tab
     func closeWebTab(_ webTab: WebTab) {
-        Logger.clauntty.info("SessionManager: closing web tab for port \(webTab.remotePort.port)")
+        Logger.clauntty.debugOnly("SessionManager: closing web tab for port \(webTab.remotePort.port)")
 
         Task {
             await webTab.close()
@@ -611,7 +619,7 @@ class SessionManager: ObservableObject {
 
         // If the web tab is closed/disconnected, reconnect
         if webTab.state == .closed {
-            Logger.clauntty.info("SessionManager: web tab is closed, reconnecting...")
+            Logger.clauntty.debugOnly("SessionManager: web tab is closed, reconnecting...")
             Task {
                 do {
                     try await reconnectWebTab(webTab)
@@ -621,7 +629,7 @@ class SessionManager: ObservableObject {
             }
         }
 
-        Logger.clauntty.info("SessionManager: switched to web tab \(webTab.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("SessionManager: switched to web tab \(webTab.id.uuidString.prefix(8))")
     }
 
     /// Reconnect a web tab (establish SSH connection and start port forwarding)
@@ -629,15 +637,15 @@ class SessionManager: ObservableObject {
         let config = webTab.connectionConfig
         let poolKey = connectionKey(for: config)
 
-        Logger.clauntty.info("SessionManager: reconnecting web tab for port \(webTab.remotePort.port)")
+        Logger.clauntty.debugOnly("SessionManager: reconnecting web tab for port \(webTab.remotePort.port)")
 
         // Get or create connection
         let connection: SSHConnection
         if let existing = connectionPool[poolKey], existing.isConnected {
-            Logger.clauntty.info("SessionManager: reusing existing connection for web tab")
+            Logger.clauntty.debugOnly("SessionManager: reusing existing connection for web tab")
             connection = existing
         } else {
-            Logger.clauntty.info("SessionManager: creating new connection for web tab")
+            Logger.clauntty.debugOnly("SessionManager: creating new connection for web tab")
             connection = SSHConnection(
                 host: config.host,
                 port: config.port,
@@ -652,7 +660,7 @@ class SessionManager: ObservableObject {
         // Reconnect the web tab with this connection
         try await webTab.reconnect(with: connection)
 
-        Logger.clauntty.info("SessionManager: web tab reconnected successfully")
+        Logger.clauntty.debugOnly("SessionManager: web tab reconnected successfully")
     }
 
     /// Check if a port is already open in a web tab
@@ -685,7 +693,7 @@ class SessionManager: ObservableObject {
     /// Move a terminal session to a new index
     func moveSession(from source: IndexSet, to destination: Int) {
         sessions.move(fromOffsets: source, toOffset: destination)
-        Logger.clauntty.info("SessionManager: reordered sessions")
+        Logger.clauntty.debugOnly("SessionManager: reordered sessions")
     }
 
     /// Move a terminal session by ID to a new index
@@ -694,13 +702,13 @@ class SessionManager: ObservableObject {
         let session = sessions.remove(at: sourceIndex)
         let adjustedDestination = destination > sourceIndex ? destination - 1 : destination
         sessions.insert(session, at: min(adjustedDestination, sessions.count))
-        Logger.clauntty.info("SessionManager: moved session to index \(adjustedDestination)")
+        Logger.clauntty.debugOnly("SessionManager: moved session to index \(adjustedDestination)")
     }
 
     /// Move a web tab to a new index
     func moveWebTab(from source: IndexSet, to destination: Int) {
         webTabs.move(fromOffsets: source, toOffset: destination)
-        Logger.clauntty.info("SessionManager: reordered web tabs")
+        Logger.clauntty.debugOnly("SessionManager: reordered web tabs")
     }
 
     /// Move a web tab by ID to a new index
@@ -709,7 +717,7 @@ class SessionManager: ObservableObject {
         let webTab = webTabs.remove(at: sourceIndex)
         let adjustedDestination = destination > sourceIndex ? destination - 1 : destination
         webTabs.insert(webTab, at: min(adjustedDestination, webTabs.count))
-        Logger.clauntty.info("SessionManager: moved web tab to index \(adjustedDestination)")
+        Logger.clauntty.debugOnly("SessionManager: moved web tab to index \(adjustedDestination)")
     }
 
     // MARK: - Global Tab Ordering
@@ -756,7 +764,7 @@ class SessionManager: ObservableObject {
         tabOrder.insert(movedId, at: insertIndex)
 
         saveTabOrder()
-        Logger.clauntty.info("SessionManager: moved tab from index \(sourceIndex) to \(insertIndex)")
+        Logger.clauntty.debugOnly("SessionManager: moved tab from index \(sourceIndex) to \(insertIndex)")
     }
 
     /// Move a tab by ID to a specific global index
@@ -782,7 +790,7 @@ class SessionManager: ObservableObject {
         // Append to end
         tabOrder.append(id)
         saveTabOrder()
-        Logger.clauntty.info("SessionManager: moved tab to end")
+        Logger.clauntty.debugOnly("SessionManager: moved tab to end")
     }
 
     /// Ensure tabOrder contains all current tabs (rebuilds if incomplete)
@@ -793,7 +801,7 @@ class SessionManager: ObservableObject {
         // Check if tabOrder is missing any tabs
         let missingIds = allIds.subtracting(orderedIds)
         if !missingIds.isEmpty {
-            Logger.clauntty.info("SessionManager: tabOrder missing \(missingIds.count) tabs, rebuilding")
+            Logger.clauntty.debugOnly("SessionManager: tabOrder missing \(missingIds.count) tabs, rebuilding")
             // Append missing tabs (preserves existing order)
             for session in sessions where missingIds.contains(session.id) {
                 tabOrder.append(session.id)
@@ -822,12 +830,12 @@ class SessionManager: ObservableObject {
     /// Load tab order from UserDefaults
     func loadTabOrder() {
         guard let orderStrings = UserDefaults.standard.stringArray(forKey: tabOrderKey) else {
-            Logger.clauntty.info("SessionManager: no saved tab order found, will migrate from existing tabs")
+            Logger.clauntty.debugOnly("SessionManager: no saved tab order found, will migrate from existing tabs")
             migrateToGlobalTabOrder()
             return
         }
         tabOrder = orderStrings.compactMap { UUID(uuidString: $0) }
-        Logger.clauntty.info("SessionManager: loaded tab order with \(self.tabOrder.count) tabs")
+        Logger.clauntty.debugOnly("SessionManager: loaded tab order with \(self.tabOrder.count) tabs")
     }
 
     /// Migrate from per-type ordering to global tab order
@@ -836,13 +844,13 @@ class SessionManager: ObservableObject {
         // Only migrate if we have tabs
         guard !sessions.isEmpty || !webTabs.isEmpty else { return }
 
-        Logger.clauntty.info("SessionManager: migrating to global tab order")
+        Logger.clauntty.debugOnly("SessionManager: migrating to global tab order")
 
         // Build initial order: terminals first (in their array order), then web tabs
         tabOrder = sessions.map { $0.id } + webTabs.map { $0.id }
 
         saveTabOrder()
-        Logger.clauntty.info("SessionManager: migrated \(self.tabOrder.count) tabs to global order")
+        Logger.clauntty.debugOnly("SessionManager: migrated \(self.tabOrder.count) tabs to global order")
     }
 
     // MARK: - Tab Navigation
@@ -857,7 +865,7 @@ class SessionManager: ObservableObject {
         Task {
             do {
                 try await startForwarding(port: remotePort, config: config)
-                Logger.clauntty.info("SessionManager: forwarded port \(port) via OSC 777")
+                Logger.clauntty.debugOnly("SessionManager: forwarded port \(port) via OSC 777")
             } catch {
                 Logger.clauntty.error("SessionManager: failed to forward port \(port): \(error)")
             }
@@ -874,13 +882,13 @@ class SessionManager: ObservableObject {
             do {
                 // Check if already open - just log and return, don't switch
                 if webTabForPort(port, config: config) != nil {
-                    Logger.clauntty.info("SessionManager: web tab for port \(port) already exists")
+                    Logger.clauntty.debugOnly("SessionManager: web tab for port \(port) already exists")
                     return
                 }
 
                 // Create new web tab in background (don't switch to it)
                 _ = try await createWebTab(for: remotePort, config: config, makeActive: false)
-                Logger.clauntty.info("SessionManager: opened web tab for port \(port) via OSC 777 (background)")
+                Logger.clauntty.debugOnly("SessionManager: opened web tab for port \(port) via OSC 777 (background)")
             } catch {
                 Logger.clauntty.error("SessionManager: failed to open tab for port \(port): \(error)")
             }
@@ -920,7 +928,7 @@ class SessionManager: ObservableObject {
     /// Switch to the previous tab (for "go back" gesture)
     func switchToPreviousTab() {
         guard let previous = previousActiveTab else {
-            Logger.clauntty.info("SessionManager: no previous tab to switch to")
+            Logger.clauntty.debugOnly("SessionManager: no previous tab to switch to")
             return
         }
 
@@ -948,11 +956,11 @@ class SessionManager: ObservableObject {
 
         if let nextSession = waitingSessions.first {
             switchTo(nextSession)
-            Logger.clauntty.info("SessionManager: switched to waiting session \(nextSession.id.uuidString.prefix(8))")
+            Logger.clauntty.debugOnly("SessionManager: switched to waiting session \(nextSession.id.uuidString.prefix(8))")
             return true
         }
 
-        Logger.clauntty.info("SessionManager: no tabs waiting for input")
+        Logger.clauntty.debugOnly("SessionManager: no tabs waiting for input")
         return false
     }
 
@@ -977,7 +985,7 @@ class SessionManager: ObservableObject {
 
         // Check if already forwarded
         if isPortForwarded(port.port, config: config) {
-            Logger.clauntty.info("SessionManager: port \(port.port) already forwarded")
+            Logger.clauntty.debugOnly("SessionManager: port \(port.port) already forwarded")
             return
         }
 
@@ -1008,7 +1016,7 @@ class SessionManager: ObservableObject {
         try await forwardedPort.startForwarding()
 
         forwardedPorts.append(forwardedPort)
-        Logger.clauntty.info("SessionManager: started forwarding port \(port.port) -> localhost:\(forwardedPort.localPort)")
+        Logger.clauntty.debugOnly("SessionManager: started forwarding port \(port.port) -> localhost:\(forwardedPort.localPort)")
     }
 
     /// Stop forwarding a port
@@ -1024,7 +1032,7 @@ class SessionManager: ObservableObject {
             Task {
                 await forwarded.stopForwarding()
             }
-            Logger.clauntty.info("SessionManager: stopped forwarding port \(port.port)")
+            Logger.clauntty.debugOnly("SessionManager: stopped forwarding port \(port.port)")
         }
 
         // Also close any web tab using this port
@@ -1104,7 +1112,7 @@ class SessionManager: ObservableObject {
     /// Creates Session objects in disconnected state
     func loadPersistedTabs(connectionStore: ConnectionStore) {
         guard let data = UserDefaults.standard.data(forKey: persistedTabsKey) else {
-            Logger.clauntty.info("SessionManager: no persisted tabs found")
+            Logger.clauntty.debugOnly("SessionManager: no persisted tabs found")
             return
         }
 
@@ -1121,7 +1129,7 @@ class SessionManager: ObservableObject {
                     continue
                 }
 
-                let session = Session(connectionConfig: config)
+                let session = Session(connectionConfig: config, id: persisted.id, createdAt: persisted.createdAt)
                 session.rtachSessionId = persisted.rtachSessionId
                 session.dynamicTitle = persisted.cachedDynamicTitle
                 session.fontSize = persisted.fontSize
@@ -1140,12 +1148,12 @@ class SessionManager: ObservableObject {
                let activeId = UUID(uuidString: activeIdString),
                self.sessions.contains(where: { $0.id == activeId }) {
                 self.activeTab = .terminal(activeId)
-                Logger.clauntty.info("SessionManager: restored active tab \(activeIdString.prefix(8))")
+                Logger.clauntty.debugOnly("SessionManager: restored active tab \(activeIdString.prefix(8))")
             } else if let first = self.sessions.first {
                 self.activeTab = .terminal(first.id)
             }
 
-            Logger.clauntty.info("SessionManager: loaded \(self.sessions.count) persisted tabs")
+            Logger.clauntty.debugOnly("SessionManager: loaded \(self.sessions.count) persisted tabs")
         } catch {
             Logger.clauntty.error("SessionManager: failed to load persisted tabs: \(error.localizedDescription)")
         }
@@ -1195,7 +1203,7 @@ class SessionManager: ObservableObject {
     /// Creates WebTab objects in closed state - they reconnect on demand
     func loadPersistedWebTabs(connectionStore: ConnectionStore) {
         guard let data = UserDefaults.standard.data(forKey: persistedWebTabsKey) else {
-            Logger.clauntty.info("SessionManager: no persisted web tabs found")
+            Logger.clauntty.debugOnly("SessionManager: no persisted web tabs found")
             return
         }
 
@@ -1233,7 +1241,7 @@ class SessionManager: ObservableObject {
                 self.webTabs.append(webTab)
             }
 
-            Logger.clauntty.info("SessionManager: loaded \(self.webTabs.count) persisted web tabs")
+            Logger.clauntty.debugOnly("SessionManager: loaded \(self.webTabs.count) persisted web tabs")
         } catch {
             Logger.clauntty.error("SessionManager: failed to load persisted web tabs: \(error.localizedDescription)")
         }
@@ -1258,7 +1266,7 @@ class SessionManager: ObservableObject {
                 if let rtachId = session.rtachSessionId, !serverSessionIds.contains(rtachId) {
                     session.state = .remotelyDeleted
                     session.remoteClosureReason = "Session no longer exists on server"
-                    Logger.clauntty.info("SessionManager: marked session \(session.id.uuidString.prefix(8)) as remotely deleted")
+                    Logger.clauntty.debugOnly("SessionManager: marked session \(session.id.uuidString.prefix(8)) as remotely deleted")
                 }
             }
 
@@ -1268,7 +1276,7 @@ class SessionManager: ObservableObject {
                 if let existingSession = sessionForRtach(serverSession.id) {
                     // Update existing session to use the new connection
                     existingSession.connectionConfig = config
-                    Logger.clauntty.info("SessionManager: updated connection for existing rtach session \(serverSession.id.prefix(8)) from different host")
+                    Logger.clauntty.debugOnly("SessionManager: updated connection for existing rtach session \(serverSession.id.prefix(8)) from different host")
                     continue
                 }
 
@@ -1284,7 +1292,7 @@ class SessionManager: ObservableObject {
 
                 sessions.append(session)
                 tabOrder.append(session.id)  // Add to global tab order
-                Logger.clauntty.info("SessionManager: auto-created tab for remote session \(serverSession.id.prefix(8))")
+                Logger.clauntty.debugOnly("SessionManager: auto-created tab for remote session \(serverSession.id.prefix(8))")
             }
 
             savePersistence()
@@ -1324,7 +1332,7 @@ class ForwardedPort: Identifiable, ObservableObject {
             throw ForwardedPortError.noConnection
         }
 
-        Logger.clauntty.info("ForwardedPort: starting forwarding for port \(self.remotePort.port)")
+        Logger.clauntty.debugOnly("ForwardedPort: starting forwarding for port \(self.remotePort.port)")
 
         let forwarder = PortForwardingManager(
             localPort: remotePort.port,
@@ -1338,7 +1346,7 @@ class ForwardedPort: Identifiable, ObservableObject {
         self.localPort = actualPort
         self.portForwarder = forwarder
 
-        Logger.clauntty.info("ForwardedPort: forwarding started on localhost:\(actualPort)")
+        Logger.clauntty.debugOnly("ForwardedPort: forwarding started on localhost:\(actualPort)")
     }
 
     /// Stop port forwarding
@@ -1346,7 +1354,7 @@ class ForwardedPort: Identifiable, ObservableObject {
         if let forwarder = portForwarder {
             try? await forwarder.stop()
             portForwarder = nil
-            Logger.clauntty.info("ForwardedPort: stopped forwarding for port \(self.remotePort.port)")
+            Logger.clauntty.debugOnly("ForwardedPort: stopped forwarding for port \(self.remotePort.port)")
         }
     }
 }

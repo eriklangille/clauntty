@@ -75,20 +75,20 @@ class NotificationManager: NSObject, ObservableObject {
     /// Request notification authorization if not already prompted
     /// Call this on first session connect
     func requestAuthorizationIfNeeded() async {
-        Logger.clauntty.info("NotificationManager.requestAuthorizationIfNeeded called, hasPrompted=\(self.hasPromptedForPermission)")
+        Logger.clauntty.debugOnly("NotificationManager.requestAuthorizationIfNeeded called, hasPrompted=\(self.hasPromptedForPermission)")
 
         guard !hasPromptedForPermission else {
-            Logger.clauntty.info("NotificationManager: already prompted for permission, skipping")
+            Logger.clauntty.debugOnly("NotificationManager: already prompted for permission, skipping")
             return
         }
 
-        Logger.clauntty.info("NotificationManager: requesting notification authorization NOW")
+        Logger.clauntty.debugOnly("NotificationManager: requesting notification authorization NOW")
 
         do {
             let granted = try await notificationCenter.requestAuthorization(options: [.alert, .sound, .badge])
             hasPromptedForPermission = true
             isAuthorized = granted
-            Logger.clauntty.info("NotificationManager: authorization \(granted ? "granted" : "denied")")
+            Logger.clauntty.debugOnly("NotificationManager: authorization \(granted ? "granted" : "denied")")
         } catch {
             hasPromptedForPermission = true
             isAuthorized = false
@@ -100,38 +100,38 @@ class NotificationManager: NSObject, ObservableObject {
     func checkAuthorizationStatus() async {
         let settings = await notificationCenter.notificationSettings()
         isAuthorized = settings.authorizationStatus == .authorized
-        Logger.clauntty.info("NotificationManager: authorization status = \(settings.authorizationStatus.rawValue)")
+        Logger.clauntty.debugOnly("NotificationManager: authorization status = \(settings.authorizationStatus.rawValue)")
     }
 
     // MARK: - Notification Scheduling
 
     /// Check if a notification should be sent for this session
     func shouldNotify(for session: Session) -> Bool {
-        Logger.clauntty.info("NotificationManager.shouldNotify: backgrounded=\(self.appIsBackgrounded), authorized=\(self.isAuthorized), mode=\(self.notificationMode.rawValue), isClaudeSession=\(session.isClaudeSession)")
+        Logger.clauntty.debugOnly("NotificationManager.shouldNotify: backgrounded=\(self.appIsBackgrounded), authorized=\(self.isAuthorized), mode=\(self.notificationMode.rawValue), isClaudeSession=\(session.isClaudeSession)")
 
         // Must be backgrounded
         guard appIsBackgrounded else {
-            Logger.clauntty.info("NotificationManager: not backgrounded, skipping notification")
+            Logger.clauntty.debugOnly("NotificationManager: not backgrounded, skipping notification")
             return false
         }
 
         // Must be authorized
         guard isAuthorized else {
-            Logger.clauntty.info("NotificationManager: not authorized, skipping notification")
+            Logger.clauntty.debugOnly("NotificationManager: not authorized, skipping notification")
             return false
         }
 
         // Check mode
         switch notificationMode {
         case .none:
-            Logger.clauntty.info("NotificationManager: mode is none, skipping notification")
+            Logger.clauntty.debugOnly("NotificationManager: mode is none, skipping notification")
             return false
         case .claudeOnly:
             let should = session.isClaudeSession
-            Logger.clauntty.info("NotificationManager: claudeOnly mode, isClaudeSession=\(should)")
+            Logger.clauntty.debugOnly("NotificationManager: claudeOnly mode, isClaudeSession=\(should)")
             return should
         case .allTerminals:
-            Logger.clauntty.info("NotificationManager: allTerminals mode, sending notification")
+            Logger.clauntty.debugOnly("NotificationManager: allTerminals mode, sending notification")
             return true
         }
     }
@@ -161,7 +161,7 @@ class NotificationManager: NSObject, ObservableObject {
 
         do {
             try await notificationCenter.add(request)
-            Logger.clauntty.info("NotificationManager: scheduled notification for \(session.title)")
+            Logger.clauntty.debugOnly("NotificationManager: scheduled notification for \(session.title)")
         } catch {
             pendingSessionIds.remove(session.id)
             Logger.clauntty.error("NotificationManager: failed to schedule notification: \(error.localizedDescription)")
@@ -195,7 +195,7 @@ class NotificationManager: NSObject, ObservableObject {
         // Clear from pending
         pendingSessionIds.remove(sessionId)
 
-        Logger.clauntty.info("NotificationManager: notification tapped for session \(sessionIdString.prefix(8))")
+        Logger.clauntty.debugOnly("NotificationManager: notification tapped for session \(sessionIdString.prefix(8))")
         return sessionId
     }
 
@@ -204,13 +204,13 @@ class NotificationManager: NSObject, ObservableObject {
     /// Start a background task to continue SSH processing for ~30 seconds
     func startBackgroundTask() {
         guard backgroundTaskId == .invalid else {
-            Logger.clauntty.info("NotificationManager: background task already running")
+            Logger.clauntty.debugOnly("NotificationManager: background task already running")
             return
         }
 
         backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "SSHProcessing") { [weak self] in
             // Called when time is about to expire
-            Logger.clauntty.info("NotificationManager: background task time expired")
+            Logger.clauntty.debugOnly("NotificationManager: background task time expired")
             self?.endBackgroundTask()
         }
 
@@ -218,7 +218,7 @@ class NotificationManager: NSObject, ObservableObject {
             let remaining = UIApplication.shared.backgroundTimeRemaining
             // backgroundTimeRemaining can be Double.greatestFiniteMagnitude when not truly backgrounded
             let remainingStr = remaining > 1000 ? "unlimited" : "\(Int(remaining))s"
-            Logger.clauntty.info("NotificationManager: started background task, remaining time: \(remainingStr)")
+            Logger.clauntty.debugOnly("NotificationManager: started background task, remaining time: \(remainingStr)")
         } else {
             Logger.clauntty.warning("NotificationManager: failed to start background task")
         }
@@ -229,7 +229,7 @@ class NotificationManager: NSObject, ObservableObject {
         guard backgroundTaskId != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTaskId)
         backgroundTaskId = .invalid
-        Logger.clauntty.info("NotificationManager: ended background task")
+        Logger.clauntty.debugOnly("NotificationManager: ended background task")
     }
 }
 
@@ -266,7 +266,7 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
             Task { @MainActor in
                 self.pendingSessionSwitch = sessionId
                 self.pendingSessionIds.remove(sessionId)
-                Logger.clauntty.info("NotificationManager: stored pending session switch to \(sessionId.uuidString.prefix(8))")
+                Logger.clauntty.debugOnly("NotificationManager: stored pending session switch to \(sessionId.uuidString.prefix(8))")
             }
         }
 
@@ -278,7 +278,7 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         guard let sessionId = pendingSessionSwitch else { return }
         pendingSessionSwitch = nil
 
-        Logger.clauntty.info("NotificationManager: processing pending switch to session \(sessionId.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("NotificationManager: processing pending switch to session \(sessionId.uuidString.prefix(8))")
         NotificationCenter.default.post(
             name: .switchToSession,
             object: nil,

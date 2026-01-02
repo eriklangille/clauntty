@@ -12,7 +12,7 @@ struct PortsSheetView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        let _ = Logger.clauntty.info("PortsSheetView: body evaluated, isLoading=\(isLoading), errorMessage=\(errorMessage ?? "nil"), ports.count=\(ports.count)")
+        let _ = Logger.clauntty.debugOnly("PortsSheetView: body evaluated, isLoading=\(isLoading), errorMessage=\(errorMessage ?? "nil"), ports.count=\(ports.count)")
         NavigationStack {
             Group {
                 if isLoading {
@@ -164,8 +164,8 @@ struct PortsSheetView: View {
     }
 
     private func scanPorts() async {
-        Logger.clauntty.info("PortsSheetView: scanPorts called for session \(session.id.uuidString.prefix(8))")
-        Logger.clauntty.info("PortsSheetView: session.state=\(String(describing: session.state)), sshConnection=\(session.sshConnection != nil)")
+        Logger.clauntty.debugOnly("PortsSheetView: scanPorts called for session \(session.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("PortsSheetView: session.state=\(String(describing: session.state)), sshConnection=\(session.sshConnection != nil)")
 
         isLoading = true
         errorMessage = nil
@@ -180,13 +180,13 @@ struct PortsSheetView: View {
             return
         }
 
-        Logger.clauntty.info("PortsSheetView: Got connection, isConnected=\(connection.isConnected)")
+        Logger.clauntty.debugOnly("PortsSheetView: Got connection, isConnected=\(connection.isConnected)")
 
         do {
             let scanner = PortScanner(connection: connection)
-            Logger.clauntty.info("PortsSheetView: Calling listListeningPorts...")
+            Logger.clauntty.debugOnly("PortsSheetView: Calling listListeningPorts...")
             let discoveredPorts = try await scanner.listListeningPorts()
-            Logger.clauntty.info("PortsSheetView: Found \(discoveredPorts.count) ports")
+            Logger.clauntty.debugOnly("PortsSheetView: Found \(discoveredPorts.count) ports")
             await MainActor.run {
                 ports = discoveredPorts
                 isLoading = false

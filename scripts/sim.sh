@@ -363,11 +363,11 @@ for el in data:
         duration="${2:-stream}"
         if [ "$duration" = "stream" ]; then
             echo -e "${BLUE}Streaming Clauntty logs (Ctrl+C to stop)...${NC}"
-            xcrun simctl spawn booted log stream --info \
+            xcrun simctl spawn booted log stream --level debug \
                 --predicate 'subsystem == "com.clauntty" OR subsystem == "com.mitchellh.ghostty"'
         else
             echo -e "${BLUE}Showing last ${duration} of logs...${NC}"
-            xcrun simctl spawn booted log show --info --last "$duration" \
+            xcrun simctl spawn booted log show --debug --last "$duration" \
                 --predicate 'subsystem == "com.clauntty"' 2>&1 | tail -100
         fi
         ;;
@@ -476,7 +476,7 @@ for el in data:
         if [ -n "$show_logs" ]; then
             echo ""
             echo -e "${BLUE}=== Recent Logs (last $show_logs) ===${NC}"
-            xcrun simctl spawn booted log show --info --last "$show_logs" \
+            xcrun simctl spawn booted log show --debug --last "$show_logs" \
                 --predicate 'subsystem == "com.clauntty"' 2>&1 | \
                 grep -v "^Timestamp" | grep -v "^getpwuid" | tail -50
         fi

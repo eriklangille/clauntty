@@ -94,7 +94,7 @@ class GhosttyApp: ObservableObject {
     }
 
     init() {
-        Logger.clauntty.info("GhosttyApp initializing...")
+        Logger.clauntty.debugOnly("GhosttyApp initializing...")
 
         // Load saved theme ID or use empty string for first-launch default
         self.currentThemeId = UserDefaults.standard.string(forKey: "selectedThemeId") ?? ""
@@ -141,7 +141,7 @@ class GhosttyApp: ObservableObject {
         ghostty_app_set_color_scheme(app, colorScheme)
 
         self.readiness = .ready
-        Logger.clauntty.info("GhosttyApp initialized successfully with theme: \(self.currentTheme?.name ?? "default")")
+        Logger.clauntty.debugOnly("GhosttyApp initialized successfully with theme: \(self.currentTheme?.name ?? "default")")
     }
 
     // MARK: - Theme Management
@@ -205,7 +205,7 @@ class GhosttyApp: ObservableObject {
         // Store new config (old one is freed via didSet)
         self.config = cfg
 
-        Logger.clauntty.info("Theme changed to: \(theme.name)")
+        Logger.clauntty.debugOnly("Theme changed to: \(theme.name)")
 
         // Post notification for views that need to update
         NotificationCenter.default.post(name: .themeDidChange, object: theme)
@@ -247,7 +247,7 @@ class GhosttyApp: ObservableObject {
 
         case GHOSTTY_ACTION_SET_TITLE:
             // Extract title and route to the correct surface
-            Logger.clauntty.info("GHOSTTY_ACTION_SET_TITLE received")
+            Logger.clauntty.debugOnly("GHOSTTY_ACTION_SET_TITLE received")
             if target.tag == GHOSTTY_TARGET_SURFACE,
                let surfacePtr = target.target.surface {
                 let titlePtr = action.action.set_title.title
@@ -256,7 +256,7 @@ class GhosttyApp: ObservableObject {
                         if let view = TerminalSurfaceView.find(surface: surfacePtr) {
                             view.title = title
                             let hasCallback = view.onTitleChanged != nil
-                            Logger.clauntty.info("Title set: '\(title.prefix(30))', onTitleChanged=\(hasCallback)")
+                            Logger.clauntty.debugOnly("Title set: '\(title.prefix(30))', onTitleChanged=\(hasCallback)")
                             view.onTitleChanged?(title)
                         } else {
                             Logger.clauntty.warning("SET_TITLE: TerminalSurfaceView.find returned nil!")
@@ -331,7 +331,7 @@ class GhosttyApp: ObservableObject {
 
     /// Called when a surface should be closed
     static func closeSurface(_ userdata: UnsafeMutableRawPointer?, processAlive: Bool) {
-        Logger.clauntty.info("Surface closed, processAlive: \(processAlive)")
+        Logger.clauntty.debugOnly("Surface closed, processAlive: \(processAlive)")
         NotificationCenter.default.post(
             name: .ghosttySurfaceClosed,
             object: nil,

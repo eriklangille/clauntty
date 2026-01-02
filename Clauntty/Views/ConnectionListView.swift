@@ -181,7 +181,7 @@ struct ConnectionListView: View {
 
                     // Create a new session and tab
                     let session = sessionManager.createSession(for: connection)
-                    Logger.clauntty.info("ConnectionListView: created new session \(session.id.uuidString.prefix(8))")
+                    Logger.clauntty.debugOnly("ConnectionListView: created new session \(session.id.uuidString.prefix(8))")
 
                     // Save persistence immediately
                     sessionManager.savePersistence()

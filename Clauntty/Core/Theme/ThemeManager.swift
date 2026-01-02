@@ -101,7 +101,7 @@ class ThemeManager: ObservableObject {
                 return Theme(id: id, name: name, isLight: isLight, content: content)
             }.sorted { $0.name < $1.name }
 
-            Logger.clauntty.info("ThemeManager: Loaded \(self.themes.count) themes")
+            Logger.clauntty.debugOnly("ThemeManager: Loaded \(self.themes.count) themes")
         } catch {
             Logger.clauntty.error("ThemeManager: Failed to load themes: \(error)")
         }
@@ -145,7 +145,7 @@ class ThemeManager: ObservableObject {
         theme.content.withCString { ptr in
             ghostty_config_load_string(config, ptr, UInt(theme.content.utf8.count))
         }
-        Logger.clauntty.info("ThemeManager: Applied theme '\(theme.name)'")
+        Logger.clauntty.debugOnly("ThemeManager: Applied theme '\(theme.name)'")
     }
 
     // MARK: - Computed Properties
