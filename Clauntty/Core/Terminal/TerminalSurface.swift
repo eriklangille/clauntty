@@ -33,6 +33,13 @@ enum FontSizePreference {
     }
 }
 
+// MARK: - Notifications
+
+extension Notification.Name {
+    /// Posted to hide all terminal accessory bars (e.g., when showing web tab or tab selector)
+    static let hideAllAccessoryBars = Notification.Name("com.clauntty.hideAllAccessoryBars")
+}
+
 /// SwiftUI wrapper for the Ghostty terminal surface
 /// Based on: ~/Projects/ghostty/macos/Sources/Ghostty/SurfaceView_UIKit.swift
 struct TerminalSurface: UIViewRepresentable {
@@ -357,6 +364,27 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
         accessoryBar.onShowKeyboard = { [weak self] in
             self?.showSoftwareKeyboard()
+        }
+
+        // Listen for global hide notification (when switching to web tab or tab selector)
+        NotificationCenter.default.addObserver(
+            forName: .hideAllAccessoryBars,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            Logger.clauntty.debugOnly("[TAB_SELECTOR] hideAllAccessoryBars received by \(self.sessionId), isFirstResponder=\(self.isFirstResponder), isActiveTab=\(self.isActiveTab)")
+
+            // Mark as inactive to prevent delayed becomeFirstResponder calls
+            self.isActiveTab = false
+
+            self.accessoryBar.isHidden = true
+            self.accessoryBar.isUserInteractionEnabled = false
+            if self.isFirstResponder {
+                Logger.clauntty.debugOnly("[TAB_SELECTOR] \(self.sessionId) resigning first responder")
+                let result = self.resignFirstResponder()
+                Logger.clauntty.debugOnly("[TAB_SELECTOR] \(self.sessionId) resignFirstResponder result=\(result)")
+            }
         }
     }
 
@@ -1697,6 +1725,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
             // Show this tab's accessory bar and bring to front
             accessoryBar.isHidden = false
+            accessoryBar.isUserInteractionEnabled = true
             window?.bringSubviewToFront(accessoryBar)
 
             if !isFirstResponder {
@@ -1753,6 +1782,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
             // Hide this tab's accessory bar (the active tab's bar will show)
             accessoryBar.isHidden = true
+            accessoryBar.isUserInteractionEnabled = false
 
             focusDidChange(false)
             if isFirstResponder {

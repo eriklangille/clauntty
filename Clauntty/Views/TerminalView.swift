@@ -15,6 +15,9 @@ struct TerminalView: View {
     /// The session this terminal view is displaying
     @ObservedObject var session: Session
 
+    /// Whether the full tab selector is currently presented
+    var isTabSelectorPresented: Bool
+
     /// Reference to the terminal surface view for SSH data flow (wrapped in class for SwiftUI)
     @StateObject private var surfaceHolder = TerminalSurfaceHolder()
 
@@ -29,7 +32,7 @@ struct TerminalView: View {
 
     /// Whether this terminal is currently the active tab
     private var isActive: Bool {
-        sessionManager.activeTab == .terminal(session.id)
+        sessionManager.activeTab == .terminal(session.id) && !isTabSelectorPresented
     }
 
     var body: some View {
@@ -352,7 +355,7 @@ struct TerminalView: View {
     let session = Session(connectionConfig: config)
 
     return NavigationStack {
-        TerminalView(session: session)
+        TerminalView(session: session, isTabSelectorPresented: false)
             .environmentObject(GhosttyApp())
             .environmentObject(SessionManager())
     }

@@ -662,6 +662,10 @@ class KeyboardAccessoryView: UIView {
     /// Override hitTest to expand vertical hit areas for all buttons
     /// and horizontal hit areas for Tab and Ctrl
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // Hidden views must not receive touches
+        // UIKit normally skips hidden views, but we override hitTest so we must check manually
+        guard !isHidden else { return nil }
+
         // Check nipple FIRST - it's on top and overlaps the container
         let nippleFrame = nippleContainerView.frame
         if nippleFrame.contains(point) {

@@ -62,15 +62,15 @@ struct WebTabView: View {
             }
         }
         .onAppear {
-            // Dismiss terminal keyboard when web tab appears
+            // Hide all terminal accessory bars when web tab appears
             if isActive {
-                dismissKeyboard()
+                NotificationCenter.default.post(name: .hideAllAccessoryBars, object: nil)
             }
         }
         .onChange(of: isActive) { wasActive, nowActive in
-            // Dismiss keyboard when web tab becomes active (switching from terminal)
+            // Hide all terminal accessory bars when web tab becomes active
             if nowActive {
-                dismissKeyboard()
+                NotificationCenter.default.post(name: .hideAllAccessoryBars, object: nil)
             }
             // Capture screenshot when switching away from this tab
             if wasActive && !nowActive {
@@ -91,10 +91,6 @@ struct WebTabView: View {
         }
     }
 
-    /// Dismiss keyboard
-    private func dismissKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
 }
 
 // MARK: - WKWebView Container
