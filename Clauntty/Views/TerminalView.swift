@@ -290,8 +290,12 @@ struct TerminalView: View {
 
                 // Replay any scrollback buffer that was accumulated
                 if !session.scrollbackBuffer.isEmpty {
-                    await MainActor.run {
-                        surface.writeSSHOutput(session.scrollbackBuffer)
+                    if session.usesRtach {
+                        Logger.clauntty.debugOnly("Skipping local scrollback replay for rtach session \(session.id.uuidString.prefix(8))")
+                    } else {
+                        await MainActor.run {
+                            surface.writeSSHOutput(session.scrollbackBuffer)
+                        }
                     }
                 }
             } catch {

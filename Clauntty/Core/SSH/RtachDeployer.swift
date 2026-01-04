@@ -88,7 +88,8 @@ class RtachDeployer {
     /// 2.6.4 - Fix: Resume uses monotonic counter to flush buffered output correctly
     /// 2.6.5 - Fix: Proxy client waits for iOS upgrade before upgrading master
     /// 2.6.6 - Fix: Explicit proxy mode flag (avoid TTY detection mismatch)
-    static let expectedVersion = "2.6.6"
+    /// 2.7.0 - Interactive session picker: run 'rtach' with no args to select a session
+    static let expectedVersion = "2.7.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -681,6 +682,12 @@ class RtachDeployer {
         if !verified {
             throw RtachDeployError.deploymentFailed
         }
+
+        // Create/update symlink for easy command-line access
+        // This allows users to run 'rtach' instead of 'rtach-2.6.6'
+        _ = try await connection.executeCommand(
+            "ln -sf \(Self.remoteBinPath) ~/.clauntty/bin/rtach"
+        )
 
         Logger.clauntty.debugOnly("rtach deployed successfully")
     }

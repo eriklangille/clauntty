@@ -226,6 +226,9 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
+    /// Whether this session is currently using rtach protocol framing.
+    private(set) var usesRtach: Bool = false
+
     /// Storage key for persisting dynamic title
     private static func titleStorageKey(connectionId: UUID, rtachSessionId: String) -> String {
         return "session_title_\(connectionId.uuidString)_\(rtachSessionId)"
@@ -322,6 +325,7 @@ class Session: ObservableObject, Identifiable {
         self.channelHandler = handler
         self.parentConnection = connection
         self.state = .connected
+        self.usesRtach = expectsRtach
         onStateChanged?(.connected)
 
         // Reset scrollback tracking state for reconnects
