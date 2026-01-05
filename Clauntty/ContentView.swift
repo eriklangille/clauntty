@@ -10,6 +10,7 @@ struct ContentView: View {
   @State private var showingFullTabSelector = false
   @State private var portsSheetSession: Session?
   @State private var hasCheckedAutoConnect = false
+  @State private var showingSpeechModelDownload = false
 
   var body: some View {
     NavigationStack {
@@ -131,6 +132,19 @@ struct ContentView: View {
     }
     .onAppear {
       checkAutoConnect()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .promptSpeechModelDownload)) { _ in
+      showingSpeechModelDownload = true
+    }
+    .alert("Download Speech Model?", isPresented: $showingSpeechModelDownload) {
+      Button("Download") {
+        Task {
+          await SpeechManager.shared.downloadModel()
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This will download approximately 800 MB of data for on-device speech recognition. The model runs entirely on your device for privacy.")
     }
   }
 

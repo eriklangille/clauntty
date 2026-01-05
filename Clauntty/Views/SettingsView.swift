@@ -6,6 +6,8 @@ struct SettingsView: View {
     @ObservedObject var themeManager = ThemeManager.shared
     @ObservedObject var notificationManager = NotificationManager.shared
     @ObservedObject var powerManager = PowerManager.shared
+    @ObservedObject var speechManager = SpeechManager.shared
+    @State private var showingDownloadConfirmation = false
     @AppStorage("sessionManagementEnabled") private var sessionManagementEnabled = true
     @State private var fontSize: Float = FontSizePreference.current
     @Environment(\.dismiss) var dismiss
@@ -47,6 +49,14 @@ struct SettingsView: View {
                     Text("Sessions")
                 } footer: {
                     Text("When enabled, terminal sessions persist on the server using rtach. Reconnecting restores your session with scrollback history.")
+                }
+
+                Section {
+                    voiceInputContent
+                } header: {
+                    Text("Voice Input")
+                } footer: {
+                    Text("Speak commands instead of typing. Uses on-device speech recognition for privacy.")
                 }
 
                 Section {
@@ -100,6 +110,70 @@ struct SettingsView: View {
         }
         .onDisappear {
             appState.endInputSuppression()
+        }
+    }
+
+    @ViewBuilder
+    private var voiceInputContent: some View {
+        switch speechManager.modelState {
+        case .notDownloaded:
+            Button {
+                showingDownloadConfirmation = true
+            } label: {
+                HStack {
+                    Label("Enable Voice Input", systemImage: "mic.fill")
+                    Spacer()
+                    Text("~800 MB")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .alert("Download Speech Model?", isPresented: $showingDownloadConfirmation) {
+                Button("Download") {
+                    Task {
+                        await speechManager.downloadModel()
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will download approximately 800 MB of data for on-device speech recognition. The model runs entirely on your device for privacy.")
+            }
+
+        case .downloading(let progress):
+            HStack {
+                Label("Downloading...", systemImage: "arrow.down.circle")
+                Spacer()
+                if progress > 0 {
+                    ProgressView(value: Double(progress))
+                        .frame(width: 100)
+                } else {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+            }
+
+        case .ready:
+            HStack {
+                Label("Voice input enabled", systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                Spacer()
+            }
+            Button("Delete Speech Model", role: .destructive) {
+                speechManager.deleteModel()
+            }
+
+        case .failed(let error):
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Download failed", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Button("Retry") {
+                    Task {
+                        await speechManager.downloadModel()
+                    }
+                }
+            }
         }
     }
 

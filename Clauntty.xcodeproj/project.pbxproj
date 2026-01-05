@@ -54,6 +54,7 @@
 		C0000024 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000024 /* NotificationManager.swift */; };
 		C0000025 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000025 /* SettingsView.swift */; };
 		C0000026 /* PowerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000026 /* PowerManager.swift */; };
+		C0000027 /* SpeechManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000027 /* SpeechManager.swift */; };
 		C0000028 /* PortsSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000028 /* PortsSheetView.swift */; };
 		C0000029 /* PersistedWebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000029 /* PersistedWebTab.swift */; };
 		C80A313220D32B0F645D406F /* LiquidGlassTabBarRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA3DCC2DFC28098F2BC7C70 /* LiquidGlassTabBarRepresentable.swift */; };
@@ -147,6 +148,7 @@
 		C1000024 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		C1000025 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C1000026 /* PowerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerManager.swift; sourceTree = "<group>"; };
+		C1000027 /* SpeechManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechManager.swift; sourceTree = "<group>"; };
 		C1000028 /* PortsSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortsSheetView.swift; sourceTree = "<group>"; };
 		C1000029 /* PersistedWebTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedWebTab.swift; sourceTree = "<group>"; };
 		CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PersistedTab.swift; sourceTree = "<group>"; };
@@ -255,6 +257,7 @@
 				C3000009 /* Session */,
 				C3000030 /* Notifications */,
 				C3000031 /* Power */,
+				C3000032 /* Speech */,
 				B2C48404F3C2AD63C8301557 /* Theme */,
 			);
 			path = Core;
@@ -380,6 +383,14 @@
 			path = Power;
 			sourceTree = "<group>";
 		};
+		C3000032 /* Speech */ = {
+			isa = PBXGroup;
+			children = (
+				C1000027 /* SpeechManager.swift */,
+			);
+			path = Speech;
+			sourceTree = "<group>";
+		};
 		DFCD20EE71377F3F8FBB4C5E /* LiquidGlassTabBar */ = {
 			isa = PBXGroup;
 			children = (
@@ -424,6 +435,7 @@
 				C8000001 /* NIOPosix */,
 				C8000002 /* NIOSSH */,
 				C8000003 /* RtachClient */,
+				C8000004 /* FluidAudio */,
 			);
 			productName = Clauntty;
 			productReference = C1000000 /* Clauntty.app */;
@@ -493,6 +505,7 @@
 				C7000000 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
 				C7000001 /* XCRemoteSwiftPackageReference "swift-nio" */,
 				C7000002 /* XCLocalSwiftPackageReference "RtachClient" */,
+				C7000003 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 			);
 			productRefGroup = C3000011 /* Products */;
 			projectDirPath = "";
@@ -579,6 +592,7 @@
 				C0000025 /* SettingsView.swift in Sources */,
 				C0000028 /* PortsSheetView.swift in Sources */,
 				C0000026 /* PowerManager.swift in Sources */,
+				C0000027 /* SpeechManager.swift in Sources */,
 				70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */,
 				570C2F179E1D3237D5566647 /* TabBubble.swift in Sources */,
 				3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */,
@@ -952,6 +966,14 @@
 				minimumVersion = 2.62.0;
 			};
 		};
+		C7000003 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.7.9;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -973,6 +995,11 @@
 		C8000003 /* RtachClient */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RtachClient;
+		};
+		C8000004 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C7000003 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

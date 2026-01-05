@@ -20,6 +20,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.62.0"),
         // Local rtach client package
         .package(path: "RtachClient"),
+        // On-device speech-to-text (Parakeet model)
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
     ],
     targets: [
         .target(
@@ -29,6 +31,7 @@ let package = Package(
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 "RtachClient",
+                .product(name: "FluidAudio", package: "FluidAudio"),
             ],
             path: "Clauntty/Core"
         ),

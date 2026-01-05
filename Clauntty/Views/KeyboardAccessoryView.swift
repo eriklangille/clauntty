@@ -15,6 +15,21 @@ class KeyboardAccessoryView: UIView {
     /// Callback to show keyboard (become first responder)
     var onShowKeyboard: (() -> Void)?
 
+    /// Callback for voice input (transcribed text)
+    var onVoiceInput: ((String) -> Void)?
+
+    /// Callback to prompt model download (when mic tapped but model not ready)
+    var onPromptModelDownload: (() -> Void)?
+
+    /// Callback to start recording
+    var onStartRecording: (() -> Void)?
+
+    /// Callback to stop recording and transcribe
+    var onStopRecording: (() -> Void)?
+
+    /// Callback to cancel recording without transcribing
+    var onCancelRecording: (() -> Void)?
+
     /// Whether Ctrl modifier is active (sticky toggle)
     private var isCtrlActive = false {
         didSet {
@@ -30,6 +45,47 @@ class KeyboardAccessoryView: UIView {
 
     /// Track if keyboard is currently visible (for icon state)
     private(set) var isKeyboardShown = true
+
+    /// Track if mic is currently recording
+    private(set) var isRecording = false {
+        didSet {
+            updateMicButtonAppearance()
+        }
+    }
+
+    /// Track if speech model is ready
+    private(set) var isSpeechModelReady = false {
+        didSet {
+            updateMicButtonAppearance()
+        }
+    }
+
+    /// Track if speech model is downloading
+    private(set) var isSpeechModelDownloading = false {
+        didSet {
+            updateMicButtonAppearance()
+            updateDownloadProgressVisibility()
+        }
+    }
+
+    /// Download progress (0-1)
+    private(set) var downloadProgress: Float = 0 {
+        didSet {
+            updateDownloadProgress()
+        }
+    }
+
+    /// Track mic touch start time to differentiate tap vs hold
+    private var micTouchStartTime: Date?
+
+    /// Timer that fires when hold threshold is reached (starts push-to-talk)
+    private var micHoldTimer: Timer?
+
+    /// Whether we're in push-to-talk mode (started via hold, not tap)
+    private var isPushToTalkMode = false
+
+    /// Threshold to distinguish tap from hold (seconds)
+    private let holdThreshold: TimeInterval = 0.3
 
     // MARK: - Views
 
@@ -72,8 +128,14 @@ class KeyboardAccessoryView: UIView {
     /// Tab container reference for expanded hit area
     private var tabContainer: UIView?
 
-    /// Keyboard toggle button
-    private let keyboardToggleButton = UIButton(type: .system)
+    /// Mic button (replaces keyboard toggle)
+    private let micButton = UIButton(type: .system)
+
+    /// Progress indicator for model download
+    private let downloadProgressView = CircularProgressView()
+
+    /// Container for mic button and progress indicator
+    private var micContainer: UIStackView?
 
     /// Spacer views for equal edge spacing (equalSpacing distribution needs items at edges)
     private let leftLeadingSpacer = UIView()
@@ -118,6 +180,7 @@ class KeyboardAccessoryView: UIView {
         setupStackViews()
         setupButtons()
         setupConstraints()
+        setupDismissGestures()
     }
 
     // MARK: - Container Setup
@@ -166,15 +229,32 @@ class KeyboardAccessoryView: UIView {
         // Leading spacer (creates gap at left edge)
         leftStackView.addArrangedSubview(leftLeadingSpacer)
 
-        // Keyboard toggle button
-        updateKeyboardToggleIcon()
-        keyboardToggleButton.tintColor = .label
-        keyboardToggleButton.accessibilityIdentifier = "KeyboardToggle"
-        keyboardToggleButton.addAction(UIAction { [weak self] _ in
-            self?.toggleKeyboard()
-        }, for: .touchUpInside)
-        let keyboardContainer = createButtonWithHint(keyboardToggleButton, hint: nil)
-        leftStackView.addArrangedSubview(keyboardContainer)
+        // Mic button (replaces keyboard toggle)
+        updateMicButtonAppearance()
+        micButton.tintColor = .label
+        micButton.accessibilityIdentifier = "Mic"
+        micButton.addTarget(self, action: #selector(micTouchDown), for: .touchDown)
+        micButton.addTarget(self, action: #selector(micTouchUp), for: [.touchUpInside, .touchUpOutside])
+        micButton.addTarget(self, action: #selector(micTouchCancelled), for: .touchCancel)
+
+        // Setup download progress view (initially hidden)
+        downloadProgressView.isHidden = true
+        downloadProgressView.translatesAutoresizingMaskIntoConstraints = false
+
+        let micContainerStack = createButtonWithHint(micButton, hint: nil)
+        // Add progress view below the mic button stack
+        let micWithProgress = UIStackView(arrangedSubviews: [micContainerStack, downloadProgressView])
+        micWithProgress.axis = .vertical
+        micWithProgress.alignment = .center
+        micWithProgress.spacing = 2
+
+        NSLayoutConstraint.activate([
+            downloadProgressView.widthAnchor.constraint(equalToConstant: 24),
+            downloadProgressView.heightAnchor.constraint(equalToConstant: 4),
+        ])
+
+        leftStackView.addArrangedSubview(micWithProgress)
+        micContainer = micWithProgress
 
         // Esc button
         let escButton = createIconButton("escape", accessibilityId: "Esc", tooltip: "esc") { [weak self] in
@@ -411,42 +491,233 @@ class KeyboardAccessoryView: UIView {
         }
     }
 
-    private func updateKeyboardToggleIcon() {
-        let iconName = isKeyboardShown ? "keyboard.chevron.compact.down" : "keyboard"
-        keyboardToggleButton.setImage(
+    private func updateMicButtonAppearance() {
+        let iconName: String
+        let tintColor: UIColor
+
+        if isRecording {
+            iconName = "mic.circle.fill"
+            tintColor = .systemRed
+        } else if isSpeechModelDownloading {
+            iconName = "mic.fill"
+            tintColor = .systemBlue  // Blue while downloading
+        } else {
+            iconName = "mic.fill"
+            tintColor = isSpeechModelReady ? .label : .secondaryLabel
+        }
+
+        micButton.setImage(
             UIImage(systemName: iconName)?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
             ),
             for: .normal
         )
-    }
-
-    // MARK: - Keyboard Toggle
-
-    private func toggleKeyboard() {
-        Logger.clauntty.debugOnly("[AccessoryBar] toggleKeyboard called, isKeyboardShown=\(self.isKeyboardShown)")
-        if isKeyboardShown {
-            Logger.clauntty.debugOnly("[AccessoryBar] calling onDismissKeyboard")
-            onDismissKeyboard?()
-        } else {
-            Logger.clauntty.debugOnly("[AccessoryBar] calling onShowKeyboard")
-            onShowKeyboard?()
-        }
+        micButton.tintColor = tintColor
     }
 
     /// Called when keyboard visibility changes externally
     func setKeyboardVisible(_ visible: Bool) {
         Logger.clauntty.debugOnly("[AccessoryBar] setKeyboardVisible(\(visible)) called, was=\(self.isKeyboardShown)")
         isKeyboardShown = visible
-        updateKeyboardToggleIcon()
-        updateButtonsVisibility()
     }
 
-    /// Update bar state (no longer hides buttons - bar stays fully expanded)
-    private func updateButtonsVisibility() {
-        // Bar is always fully expanded - just log state change
-        let frame = containerEffectView.frame
-        Logger.clauntty.debugOnly("[AccessoryBar] updateButtonsVisibility: isKeyboardShown=\(self.isKeyboardShown), frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.width))x\(Int(frame.height))")
+    /// Update speech model ready state
+    func setSpeechModelReady(_ ready: Bool) {
+        isSpeechModelReady = ready
+    }
+
+    /// Update recording state
+    func setRecording(_ recording: Bool) {
+        isRecording = recording
+    }
+
+    /// Update speech model downloading state
+    func setSpeechModelDownloading(_ downloading: Bool) {
+        isSpeechModelDownloading = downloading
+    }
+
+    /// Update download progress (0-1)
+    func setDownloadProgress(_ progress: Float) {
+        downloadProgress = progress
+    }
+
+    private func updateDownloadProgressVisibility() {
+        downloadProgressView.isHidden = !isSpeechModelDownloading
+    }
+
+    private func updateDownloadProgress() {
+        downloadProgressView.progress = CGFloat(downloadProgress)
+    }
+
+    // MARK: - Dismiss Gestures
+
+    private func setupDismissGestures() {
+        // Swipe down = instant dismiss
+        let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeToDismiss))
+        swipeDown.direction = .down
+        containerEffectView.addGestureRecognizer(swipeDown)
+
+        // Swipe up = instant show keyboard
+        let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeToShow))
+        swipeUp.direction = .up
+        containerEffectView.addGestureRecognizer(swipeUp)
+
+        // Drag/pan = interactive dismiss/show
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture))
+        pan.delegate = self
+        containerEffectView.addGestureRecognizer(pan)
+    }
+
+    @objc private func handleSwipeToDismiss(_ gesture: UISwipeGestureRecognizer) {
+        Logger.clauntty.debugOnly("[AccessoryBar] swipe down to dismiss")
+        onDismissKeyboard?()
+    }
+
+    @objc private func handleSwipeToShow(_ gesture: UISwipeGestureRecognizer) {
+        Logger.clauntty.debugOnly("[AccessoryBar] swipe up to show keyboard")
+        onShowKeyboard?()
+    }
+
+    @objc private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: self)
+        let velocity = gesture.velocity(in: self)
+
+        switch gesture.state {
+        case .changed:
+            if translation.y > 0 {
+                // Dragging down - move container down
+                containerEffectView.transform = CGAffineTransform(translationX: 0, y: min(translation.y, 100))
+            } else if translation.y < 0 {
+                // Dragging up - move container up slightly for feedback
+                containerEffectView.transform = CGAffineTransform(translationX: 0, y: max(translation.y, -30))
+            }
+        case .ended, .cancelled:
+            if translation.y > 0 {
+                // Was dragging down - dismiss if far enough
+                let shouldDismiss = translation.y > 50 || velocity.y > 500
+
+                if shouldDismiss {
+                    UIView.animate(withDuration: 0.2) {
+                        self.containerEffectView.transform = CGAffineTransform(translationX: 0, y: 100)
+                    } completion: { _ in
+                        self.containerEffectView.transform = .identity
+                        self.onDismissKeyboard?()
+                    }
+                } else {
+                    // Snap back
+                    UIView.animate(withDuration: 0.2) {
+                        self.containerEffectView.transform = .identity
+                    }
+                }
+            } else if translation.y < 0 {
+                // Was dragging up - show keyboard if far enough
+                let shouldShow = translation.y < -30 || velocity.y < -500
+
+                UIView.animate(withDuration: 0.2) {
+                    self.containerEffectView.transform = .identity
+                }
+
+                if shouldShow {
+                    Logger.clauntty.debugOnly("[AccessoryBar] drag up to show keyboard")
+                    onShowKeyboard?()
+                }
+            } else {
+                UIView.animate(withDuration: 0.2) {
+                    self.containerEffectView.transform = .identity
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    // MARK: - Mic Button Actions
+
+    @objc private func micTouchDown() {
+        micTouchStartTime = Date()
+        isPushToTalkMode = false
+
+        // If model not ready or downloading, we'll handle on touch up
+        guard isSpeechModelReady, !isSpeechModelDownloading else { return }
+
+        // If already recording (toggle mode), don't start a new timer
+        guard !isRecording else { return }
+
+        // Start timer - if user holds past threshold, start push-to-talk recording
+        micHoldTimer = Timer.scheduledTimer(withTimeInterval: holdThreshold, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            self.isPushToTalkMode = true
+            self.startRecordingWithFeedback()
+            Logger.clauntty.debugOnly("[AccessoryBar] hold threshold reached, starting push-to-talk recording")
+        }
+    }
+
+    @objc private func micTouchUp() {
+        guard micTouchStartTime != nil else { return }
+        micTouchStartTime = nil
+
+        // Cancel the hold timer if it hasn't fired yet
+        micHoldTimer?.invalidate()
+        micHoldTimer = nil
+
+        // If model is downloading, show status tooltip instead of re-prompting
+        if isSpeechModelDownloading {
+            let progressPercent = Int(downloadProgress * 100)
+            showTooltip(above: micButton, text: "Downloading... \(progressPercent)%")
+            hideTooltipAfterDelay(delay: 1.5)
+            Logger.clauntty.debugOnly("[AccessoryBar] mic tap during download, progress: \(progressPercent)%")
+            return
+        }
+
+        // If model not ready, prompt download
+        guard isSpeechModelReady else {
+            Logger.clauntty.debugOnly("[AccessoryBar] mic tap, model not ready - prompting download")
+            onPromptModelDownload?()
+            return
+        }
+
+        if isPushToTalkMode {
+            // Was in push-to-talk mode, stop and transcribe on release
+            Logger.clauntty.debugOnly("[AccessoryBar] mic release, stopping push-to-talk recording")
+            isRecording = false
+            onStopRecording?()
+        } else {
+            // Tap mode - toggle recording
+            if isRecording {
+                // Was recording, stop and transcribe
+                Logger.clauntty.debugOnly("[AccessoryBar] mic tap to stop recording (toggle mode)")
+                isRecording = false
+                onStopRecording?()
+            } else {
+                // Not recording, start recording (will stop on next tap)
+                Logger.clauntty.debugOnly("[AccessoryBar] mic tap to start recording (toggle mode)")
+                startRecordingWithFeedback()
+            }
+        }
+
+        isPushToTalkMode = false
+    }
+
+    @objc private func micTouchCancelled() {
+        micTouchStartTime = nil
+        micHoldTimer?.invalidate()
+        micHoldTimer = nil
+        isPushToTalkMode = false
+
+        if isRecording {
+            onCancelRecording?()
+            isRecording = false
+            Logger.clauntty.debugOnly("[AccessoryBar] mic touch cancelled, recording stopped without transcription")
+        }
+    }
+
+    private func startRecordingWithFeedback() {
+        onStartRecording?()
+        isRecording = true
+
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
     }
 
     // MARK: - Key Actions
@@ -606,9 +877,9 @@ class KeyboardAccessoryView: UIView {
         activeTooltip = nil
     }
 
-    private func hideTooltipAfterDelay() {
+    private func hideTooltipAfterDelay(delay: TimeInterval = 0.1) {
         // Brief delay so the tooltip is visible momentarily
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.hideTooltip()
         }
     }
@@ -730,6 +1001,24 @@ class KeyboardAccessoryView: UIView {
         // Touch is outside visible elements - pass through to views below
         Logger.clauntty.verbose("[AccessoryBar] hitTest: passing through at \(Int(point.x)),\(Int(point.y))")
         return nil
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension KeyboardAccessoryView: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Allow pan gesture to work with other gestures
+        return true
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Only begin pan if it's primarily vertical (for dismiss)
+        if let pan = gestureRecognizer as? UIPanGestureRecognizer {
+            let velocity = pan.velocity(in: self)
+            return abs(velocity.y) > abs(velocity.x) && velocity.y > 0
+        }
+        return true
     }
 }
 
@@ -1047,5 +1336,61 @@ class ArrowNippleView: UIView {
         repeatDelayTimer = nil
         repeatTimer?.invalidate()
         repeatTimer = nil
+    }
+}
+
+// MARK: - Circular Progress View
+
+/// Simple linear progress bar for download indication
+private class CircularProgressView: UIView {
+
+    var progress: CGFloat = 0 {
+        didSet {
+            setNeedsLayout()
+        }
+    }
+
+    private let trackLayer = CALayer()
+    private let progressLayer = CALayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupView()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupView()
+    }
+
+    private func setupView() {
+        // Track (background)
+        trackLayer.backgroundColor = UIColor.secondarySystemFill.cgColor
+        layer.addSublayer(trackLayer)
+
+        // Progress fill
+        progressLayer.backgroundColor = UIColor.systemBlue.cgColor
+        layer.addSublayer(progressLayer)
+
+        // Rounded corners
+        layer.cornerRadius = 2
+        clipsToBounds = true
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        trackLayer.frame = bounds
+        trackLayer.cornerRadius = bounds.height / 2
+
+        let progressWidth = bounds.width * min(max(progress, 0), 1)
+        progressLayer.frame = CGRect(x: 0, y: 0, width: progressWidth, height: bounds.height)
+        progressLayer.cornerRadius = bounds.height / 2
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        trackLayer.backgroundColor = UIColor.secondarySystemFill.cgColor
+        progressLayer.backgroundColor = UIColor.systemBlue.cgColor
     }
 }

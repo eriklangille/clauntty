@@ -16,7 +16,7 @@
 		</dict>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Allow microphone access for web pages that request audio input</string>
+	<string>Clauntty uses the microphone for voice-to-text input in the terminal and for web pages that request audio input</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Allow camera access for web pages that request video input</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

@@ -38,6 +38,12 @@ enum FontSizePreference {
 extension Notification.Name {
     /// Posted to hide all terminal accessory bars (e.g., when showing web tab or tab selector)
     static let hideAllAccessoryBars = Notification.Name("com.clauntty.hideAllAccessoryBars")
+
+    /// Posted when speech model state changes
+    static let speechModelStateChanged = Notification.Name("com.clauntty.speechModelStateChanged")
+
+    /// Posted to prompt user for speech model download (from mic button tap when model not ready)
+    static let promptSpeechModelDownload = Notification.Name("com.clauntty.promptSpeechModelDownload")
 }
 
 /// SwiftUI wrapper for the Ghostty terminal surface
@@ -366,6 +372,46 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             self?.showSoftwareKeyboard()
         }
 
+        // Wire up voice input - send transcribed text to terminal
+        accessoryBar.onVoiceInput = { [weak self] text in
+            guard let self = self, let data = text.data(using: .utf8) else { return }
+            self.onTextInput?(data)
+        }
+
+        // Wire up model download prompt
+        accessoryBar.onPromptModelDownload = { [weak self] in
+            self?.promptSpeechModelDownload()
+        }
+
+        // Wire up recording callbacks
+        accessoryBar.onStartRecording = {
+            SpeechManager.shared.startRecording()
+        }
+
+        accessoryBar.onStopRecording = { [weak self] in
+            Task { @MainActor in
+                if let text = await SpeechManager.shared.stopRecording() {
+                    self?.accessoryBar.onVoiceInput?(text)
+                }
+            }
+        }
+
+        accessoryBar.onCancelRecording = {
+            SpeechManager.shared.stopRecordingWithoutTranscription()
+        }
+
+        // Update accessory bar with initial speech model state
+        updateSpeechModelState()
+
+        // Observe speech model state changes
+        speechModelObserver = NotificationCenter.default.addObserver(
+            forName: .speechModelStateChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateSpeechModelState()
+        }
+
         // Listen for global hide notification (when switching to web tab or tab selector)
         NotificationCenter.default.addObserver(
             forName: .hideAllAccessoryBars,
@@ -386,6 +432,31 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                 Logger.clauntty.debugOnly("[TAB_SELECTOR] \(self.sessionId) resignFirstResponder result=\(result)")
             }
         }
+    }
+
+    private var speechModelObserver: NSObjectProtocol?
+
+    private func updateSpeechModelState() {
+        let state = SpeechManager.shared.modelState
+
+        switch state {
+        case .ready:
+            accessoryBar.setSpeechModelReady(true)
+            accessoryBar.setSpeechModelDownloading(false)
+        case .downloading(let progress):
+            accessoryBar.setSpeechModelReady(false)
+            accessoryBar.setSpeechModelDownloading(true)
+            accessoryBar.setDownloadProgress(progress)
+        case .notDownloaded, .failed:
+            accessoryBar.setSpeechModelReady(false)
+            accessoryBar.setSpeechModelDownloading(false)
+        }
+    }
+
+    private func promptSpeechModelDownload() {
+        // Post notification to show download confirmation
+        // This will be handled by the view hierarchy (e.g., TerminalView or ContentView)
+        NotificationCenter.default.post(name: .promptSpeechModelDownload, object: nil)
     }
 
     // We don't use inputAccessoryView - we manage the accessory bar as our own subview
