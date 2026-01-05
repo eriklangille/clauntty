@@ -24,6 +24,8 @@ public enum MessageType: UInt8, Sendable {
     case pause = 8
     /// Resume terminal output streaming
     case resume = 9
+    /// Claim active client for window size and command routing
+    case claimActive = 10
 }
 
 // MARK: - Server → Client Response Types

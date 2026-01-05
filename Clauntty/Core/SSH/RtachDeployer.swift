@@ -89,7 +89,9 @@ class RtachDeployer {
     /// 2.6.5 - Fix: Proxy client waits for iOS upgrade before upgrading master
     /// 2.6.6 - Fix: Explicit proxy mode flag (avoid TTY detection mismatch)
     /// 2.7.0 - Interactive session picker: run 'rtach' with no args to select a session
-    static let expectedVersion = "2.7.0"
+    /// 2.7.1 - Set BROWSER env var to open-browser for CLI tools (gh, python, etc.)
+    /// 2.7.2 - Active client claims for window size + command routing
+    static let expectedVersion = "2.7.2"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -383,7 +385,29 @@ class RtachDeployer {
             "chmod +x ~/.clauntty/bin/open-tab"
         )
 
-        Logger.clauntty.debugOnly("Helper scripts deployed (forward-port, open-tab)")
+        // Deploy open-browser script (opens URL in iOS Safari)
+        // Uses RTACH_CMD_PIPE (FIFO path) to send commands to Clauntty
+        _ = try await connection.executeCommand(
+            "cat > ~/.clauntty/bin/open-browser << 'EOF'\n" +
+            "#!/bin/bash\n" +
+            "URL=\"$1\"\n" +
+            "if [ -z \"$URL\" ]; then\n" +
+            "  echo \"Usage: open-browser <url>\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "if [ -z \"$RTACH_CMD_PIPE\" ]; then\n" +
+            "  echo \"Error: RTACH_CMD_PIPE not set (not running in rtach session)\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "if ! echo \"browser;$URL\" > \"$RTACH_CMD_PIPE\" 2>/dev/null; then\n" +
+            "  echo \"Error: Failed to write to RTACH_CMD_PIPE\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "EOF\n" +
+            "chmod +x ~/.clauntty/bin/open-browser"
+        )
+
+        Logger.clauntty.debugOnly("Helper scripts deployed (forward-port, open-tab, open-browser)")
     }
 
     // MARK: - Claude Code Settings
@@ -420,7 +444,8 @@ class RtachDeployer {
         var allow = permissions["allow"] as? [String] ?? []
         let requiredPerms = [
             "Bash(~/.clauntty/bin/forward-port:*)",
-            "Bash(~/.clauntty/bin/open-tab:*)"
+            "Bash(~/.clauntty/bin/open-tab:*)",
+            "Bash(~/.clauntty/bin/open-browser:*)"
         ]
         for perm in requiredPerms {
             if !allow.contains(perm) {

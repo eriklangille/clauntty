@@ -30,7 +30,7 @@ class TabBubble: UIView {
     }
     /// Path for web tabs (e.g., /api/users)
     var webPath: String = "/" {
-        didSet { urlTextField.text = webPath }
+        didSet { syncURLTextFieldIfNeeded() }
     }
     /// Connection string like "ubuntu@devbox.example.com"
     var connectionInfo: String = "" {
@@ -45,11 +45,16 @@ class TabBubble: UIView {
             titleLabel.text = title
         }
     }
+    private func syncURLTextFieldIfNeeded() {
+        guard !isEditingURL else { return }
+        urlTextField.text = webPath
+    }
     var isActiveTab: Bool = false {
         didSet { updateActiveState() }
     }
     /// Skip animation on next isExpanded change (for slide transitions)
     private var skipExpandAnimation: Bool = false
+    private var isEditingURL: Bool = false
 
     var isExpanded: Bool = false {
         didSet {
@@ -274,7 +279,7 @@ class TabBubble: UIView {
     private let shareButton: UIButton = {
         let button = UIButton(type: .system)
         let config = UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)
-        button.setImage(UIImage(systemName: "square.and.arrow.up", withConfiguration: config), for: .normal)
+        button.setImage(UIImage(systemName: "globe", withConfiguration: config), for: .normal)
         button.tintColor = .label
         button.alpha = 0
         return button
@@ -468,7 +473,12 @@ class TabBubble: UIView {
 
     @objc private func handleShare() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        onShare?()
+        switch tabType {
+        case .web:
+            onPorts?()
+        case .terminal:
+            onShare?()
+        }
     }
 
     // MARK: - Layout
@@ -759,7 +769,7 @@ class TabBubble: UIView {
         // Update title
         updateTitleLabel()
         if !isTerminal {
-            urlTextField.text = webPath
+            syncURLTextFieldIfNeeded()
         }
 
         // Layout for expanded state
@@ -820,7 +830,7 @@ class TabBubble: UIView {
         // Update title
         updateTitleLabel()
         if !isTerminal {
-            urlTextField.text = webPath
+            syncURLTextFieldIfNeeded()
         }
 
         // Layout for expanded state (without animation)
@@ -905,7 +915,7 @@ class TabBubble: UIView {
 
         // Update URL text field text for web tabs (just the path, not port)
         if !isTerminal && isExpanded {
-            urlTextField.text = webPath
+            syncURLTextFieldIfNeeded()
         }
 
         // Layout content first so positions are correct
@@ -1113,7 +1123,13 @@ extension TabBubble: UITextFieldDelegate {
     }
 
     func textFieldDidBeginEditing(_ textField: UITextField) {
+        isEditingURL = true
         // Select all text for easy replacement
         textField.selectAll(nil)
+    }
+
+    func textFieldDidEndEditing(_ textField: UITextField) {
+        isEditingURL = false
+        syncURLTextFieldIfNeeded()
     }
 }

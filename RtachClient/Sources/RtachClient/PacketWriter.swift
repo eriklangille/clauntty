@@ -139,4 +139,12 @@ public enum PacketWriter {
         packet.append(0)
         return packet
     }
+
+    /// Create a claim-active packet to mark this client as active
+    public static func claimActive() -> Data {
+        var packet = Data(capacity: ProtocolConstants.clientHeaderSize)
+        packet.append(MessageType.claimActive.rawValue)
+        packet.append(0)
+        return packet
+    }
 }

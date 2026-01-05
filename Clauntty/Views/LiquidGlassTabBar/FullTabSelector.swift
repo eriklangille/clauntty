@@ -15,6 +15,7 @@ struct FullTabSelector: View {
 
     /// Currently dragging tab (for visual feedback)
     @State private var draggingTab: TabItem?
+    @State private var showingSettings = false
 
     var body: some View {
         ZStack {
@@ -27,18 +28,28 @@ struct FullTabSelector: View {
 
             VStack(spacing: 0) {
                 // Header
-                HStack {
-                    Text("\(allTabs.count) Tabs")
+                ZStack {
+                    HStack {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "gear")
+                                .font(.system(size: 22))
+                                .foregroundColor(.gray)
+                        }
+
+                        Spacer()
+
+                        Button(action: onDismiss) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundColor(.gray)
+                        }
+                    }
+
+                    Text("\(allTabs.count) Sessions")
                         .font(.headline)
                         .foregroundColor(.white)
-
-                    Spacer()
-
-                    Button(action: onDismiss) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(.gray)
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
@@ -129,6 +140,9 @@ struct FullTabSelector: View {
             }
         }
         .statusBarHidden(true)
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
+        }
     }
 
     // MARK: - Computed Properties

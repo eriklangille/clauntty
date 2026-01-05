@@ -343,8 +343,10 @@ struct TerminalView: View {
         // Set up callback for active state changes (power management)
         // Pause output streaming when tab is inactive, resume when active
         surface.onActiveStateChanged = { [weak session] active in
+            session?.setActiveState(active)
             if active {
                 session?.resumeOutput()
+                session?.claimActive()
             } else {
                 session?.pauseOutput()
             }

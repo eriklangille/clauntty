@@ -2,6 +2,7 @@ import Foundation
 import NIOCore
 import NIOSSH
 import os.log
+import UIKit
 
 /// Manages all terminal sessions, web tabs, and connection pooling
 /// Reuses SSH connections when opening multiple tabs to the same server
@@ -255,6 +256,10 @@ class SessionManager: ObservableObject {
         session.onOpenTabRequested = { [weak self, weak session] port in
             guard let self = self, let session = session else { return }
             self.handleOpenTabRequest(from: session, port: port)
+        }
+        session.onOpenBrowserRequested = { [weak self] urlString in
+            guard let self = self else { return }
+            self.handleOpenBrowserRequest(urlString: urlString)
         }
 
         // Wire up auto-reconnect callback for when send detects nil channel
@@ -908,6 +913,19 @@ class SessionManager: ObservableObject {
             } catch {
                 Logger.clauntty.error("SessionManager: failed to open tab for port \(port): \(error)")
             }
+        }
+    }
+
+    /// Handle a browser URL open request from a session (triggered by "browser;URL" command)
+    private func handleOpenBrowserRequest(urlString: String) {
+        guard let url = URL(string: urlString) else {
+            Logger.clauntty.warning("Invalid browser URL from rtach: \(urlString)")
+            return
+        }
+
+        Task { @MainActor in
+            await UIApplication.shared.open(url)
+            Logger.clauntty.debugOnly("Opened browser URL: \(urlString)")
         }
     }
 

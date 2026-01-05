@@ -208,11 +208,17 @@ class Session: ObservableObject, Identifiable {
     /// Whether output streaming is paused (tab is inactive/backgrounded)
     private(set) var isPaused: Bool = false
 
+    /// Whether this session's tab is currently active/foreground
+    private(set) var isActive: Bool = false
+
     /// Whether we're pre-fetching after idle (need to re-pause after receiving data)
     private var isPrefetchingOnIdle: Bool = false
 
     /// Whether we want to pause but are waiting for framed mode to be established
     private var pendingPause: Bool = false
+
+    /// Whether we want to claim active but are waiting for framed mode
+    private var pendingActiveClaim: Bool = false
 
     // MARK: - rtach Session
 
@@ -277,6 +283,9 @@ class Session: ObservableObject, Identifiable {
 
     /// Called when session needs reconnection (detected nil channel on send attempt)
     var onNeedsReconnect: (() -> Void)?
+
+    /// Called when a URL should be opened in the device browser
+    var onOpenBrowserRequested: ((String) -> Void)?
 
     // MARK: - rtach Protocol Session
 
@@ -513,6 +522,10 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
+    // TODO: The semicolon delimiter doesn't support multiple args if any arg contains semicolons.
+    // Current commands only use single args (port or URL), so maxSplits:1 works.
+    // If we need multi-arg commands, consider URL-encoding args or using a different delimiter.
+
     /// Handle a command received from rtach via command pipe
     /// Format: "command;arg1;arg2..."
     private func handleRtachCommand(_ command: String) {
@@ -529,6 +542,12 @@ class Session: ObservableObject, Identifiable {
             if parts.count > 1, let port = Int(parts[1]) {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command forward port \(port)")
                 onPortForwardRequested?(port)
+            }
+        case "browser":
+            if parts.count > 1 {
+                let urlString = String(parts[1])
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command browser \(urlString)")
+                onOpenBrowserRequested?(urlString)
             }
         default:
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
@@ -692,6 +711,14 @@ class Session: ObservableObject, Identifiable {
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): paused output streaming")
     }
 
+    /// Update active state for this session (foreground tab tracking)
+    func setActiveState(_ active: Bool) {
+        isActive = active
+        if !active {
+            pendingActiveClaim = false
+        }
+    }
+
     /// Resume terminal output streaming (when tab becomes active)
     /// rtach will flush any buffered output since pause
     func resumeOutput() {
@@ -714,6 +741,20 @@ class Session: ObservableObject, Identifiable {
         // Also request a full redraw from rtach to force TUI apps to repaint
         rtachProtocol.requestRedraw()
         Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SENT resume + redraw to rtach")
+    }
+
+    /// Claim active client for window size and command routing
+    func claimActive() {
+        guard rtachSessionId != nil else { return }
+        guard rtachProtocol.isFramedMode else {
+            pendingActiveClaim = true
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): claimActive deferred (not framed mode yet)")
+            return
+        }
+
+        pendingActiveClaim = false
+        rtachProtocol.sendClaimActive()
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): claimActive sent")
     }
 
     // MARK: - Scrollback Request
@@ -905,6 +946,14 @@ extension Session: RtachClient.RtachSessionDelegate {
             if self.pendingPause {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): applying deferred pause")
                 self.pauseOutput()
+            }
+
+            if self.pendingActiveClaim {
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): applying deferred active claim")
+                self.claimActive()
+            } else if self.isActive {
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): claiming active on connect")
+                self.claimActive()
             }
         }
     }
