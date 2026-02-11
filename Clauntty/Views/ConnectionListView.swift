@@ -223,12 +223,7 @@ struct ConnectionRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(connection.displayName)
                     .font(.headline)
-                HStack(spacing: 4) {
-                    Text("\(connection.username)@\(connection.host)")
-                    if connection.port != 22 {
-                        Text(":\(connection.port)")
-                    }
-                }
+                Text(connection.endpointDisplay)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
             }

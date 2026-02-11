@@ -32,6 +32,16 @@ struct SavedConnection: Codable, Identifiable, Hashable {
     var displayName: String {
         name.isEmpty ? "\(username)@\(host)" : name
     }
+
+    /// SSH endpoint with optional custom port.
+    /// Uses raw numeric port formatting (no locale grouping separators).
+    var endpointDisplay: String {
+        if port == 22 {
+            return "\(username)@\(host)"
+        }
+        
+        return "\(username)@\(host):\(port)"
+    }
 }
 
 /// Authentication method for SSH connections

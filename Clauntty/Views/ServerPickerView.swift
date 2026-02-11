@@ -94,7 +94,7 @@ struct ServerRow: View {
                     .font(.body)
                     .fontWeight(.medium)
 
-                Text("\(connection.username)@\(connection.host)")
+                Text(connection.endpointDisplay)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

@@ -466,12 +466,12 @@ struct ForwardedPortRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(":\(port.remotePort.port)")
+                Text(":\(String(port.remotePort.port))")
                     .font(.system(.body, design: .monospaced))
                     .fontWeight(.medium)
                     .foregroundColor(.white)
 
-                Text("localhost:\(port.localPort) → \(port.connectionConfig.host)")
+                Text("localhost:\(String(port.localPort)) → \(port.connectionConfig.host)")
                     .font(.caption)
                     .foregroundColor(.gray)
             }

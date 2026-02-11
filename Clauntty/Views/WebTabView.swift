@@ -19,7 +19,7 @@ struct WebTabView: View {
             case .connecting:
                 VStack(spacing: 16) {
                     ProgressView()
-                    Text("Connecting to port \(webTab.remotePort.port)...")
+                    Text("Connecting to port \(String(webTab.remotePort.port))...")
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
