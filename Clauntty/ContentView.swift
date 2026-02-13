@@ -153,6 +153,8 @@ struct ContentView: View {
     guard !hasCheckedAutoConnect else { return }
     hasCheckedAutoConnect = true
 
+    _ = seedConnectionFromLaunchArgsIfNeeded()
+
     guard let connectionName = LaunchArgs.autoConnectName() else { return }
 
     Logger.clauntty.debugOnly("Auto-connect requested for: \(connectionName)")
@@ -263,6 +265,83 @@ struct ContentView: View {
       } catch {
         Logger.clauntty.error("Auto-connect failed: \(error.localizedDescription)")
       }
+    }
+  }
+
+  private func normalized(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  }
+
+  /// Optional launch-time profile seeding.
+  /// This is idempotent: same flags update an existing matching profile instead of creating duplicates.
+  @discardableResult
+  private func seedConnectionFromLaunchArgsIfNeeded() -> SavedConnection? {
+    switch LaunchArgs.seedConnectionSpec() {
+    case .none:
+      return nil
+    case .invalid(let reason):
+      Logger.clauntty.error("Seed connection args invalid: \(reason)")
+      return nil
+    case .spec(let spec):
+      let normalizedName = normalized(spec.name)
+      let normalizedHost = normalized(spec.host)
+      let normalizedUser = normalized(spec.username)
+
+      let existingByName = connectionStore.connections.first {
+        normalized($0.name) == normalizedName
+      }
+      let existingByEndpoint = connectionStore.connections.first {
+        normalized($0.host) == normalizedHost
+          && normalized($0.username) == normalizedUser
+          && $0.port == spec.port
+      }
+      let existing = existingByName ?? existingByEndpoint
+
+      let authMethod: AuthMethod
+      let authLabel: String
+      switch spec.authMethod {
+      case .password:
+        authMethod = .password
+        authLabel = "password"
+      case .sshKey(let keyId):
+        authMethod = .sshKey(keyId: keyId)
+        authLabel = "sshKey:\(keyId)"
+      }
+
+      let seeded = SavedConnection(
+        id: existing?.id ?? UUID(),
+        name: spec.name,
+        host: spec.host,
+        port: spec.port,
+        username: spec.username,
+        authMethod: authMethod,
+        lastConnected: existing?.lastConnected
+      )
+
+      if existing != nil {
+        connectionStore.update(seeded)
+      } else {
+        connectionStore.add(seeded)
+      }
+
+      if case .password = spec.authMethod {
+        if let password = spec.password {
+          do {
+            try KeychainHelper.savePassword(for: seeded.id, password: password)
+          } catch {
+            Logger.clauntty.error("Seed connection: failed to save password to keychain: \(error)")
+          }
+        } else {
+          Logger.clauntty.warning(
+            "Seed connection: auth=password but CLAUNTTY_SEED_PASSWORD not provided")
+        }
+      }
+
+      let action = existing == nil ? "created" : "updated"
+      Logger.clauntty.info(
+        "Seed connection: \(action) '\(seeded.name)' (\(seeded.username)@\(seeded.host):\(seeded.port), auth=\(authLabel))"
+      )
+      return seeded
     }
   }
 

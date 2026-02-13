@@ -455,6 +455,40 @@ Enable on Mac: System Settings > General > Sharing > Remote Login
 
 In simulator, connect to `localhost:22` with your Mac username.
 
+### Network Chaos Testing (netfuzz)
+
+Tests SSH+rtach resilience under degraded networks. Docker container with `tc netem` + headless Swift test harness.
+
+```bash
+# Start chaos server (port 2222, testuser/testpass, rtach pre-installed)
+./scripts/netfuzz/netfuzz.sh start
+
+# Apply chaos conditions
+./scripts/netfuzz/netfuzz.sh throttle 200 5         # 200ms latency + 5% loss
+./scripts/netfuzz/netfuzz.sh drop 5                  # 5s total blackout
+./scripts/netfuzz/netfuzz.sh bandwidth 256           # 256 kbps limit
+./scripts/netfuzz/netfuzz.sh flicker 10 2            # 10 disconnect/reconnect cycles
+./scripts/netfuzz/netfuzz.sh scenario flaky          # 2 min random chaos
+./scripts/netfuzz/netfuzz.sh clear                   # remove all chaos rules
+./scripts/netfuzz/netfuzz.sh status                  # show active rules
+
+# Automated Swift harness test (SSH + RtachClient, no simulator)
+./scripts/netfuzz/netfuzz.sh test-rtach              # default: 5s drop
+./scripts/netfuzz/netfuzz.sh test-rtach "drop 10"    # custom chaos
+./scripts/netfuzz/netfuzz.sh test-rtach "throttle 500 10"
+
+# Manual harness
+cd scripts/netfuzz/harness && swift build
+.build/debug/NetfuzzHarness --duration 30 --help
+
+# Stop
+./scripts/netfuzz/netfuzz.sh stop
+```
+
+Available scenarios: `reconnect-storm`, `degraded`, `mobile-switch`, `satellite`, `lossy`, `flaky`.
+
+The Swift harness (`scripts/netfuzz/harness/`) is a standalone SPM package that imports `RtachClient` directly. It connects via real SwiftNIO SSH to the netfuzz container, runs `rtach --proxy`, and logs all protocol events. Key detail: rtach requires `--proxy` flag for external clients (the iOS app uses this too — see `RtachDeployer.swift`).
+
 ## Simulator Automation (IDB)
 
 Facebook IDB allows automated interaction with the simulator without taking over your screen. Taps, swipes, and text input run inside the simulator process.

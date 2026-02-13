@@ -190,6 +190,11 @@ class Session: ObservableObject, Identifiable {
     /// Channel handler for data flow
     private(set) var channelHandler: SSHChannelHandler?
 
+    /// Whether this session currently has an attached, writable SSH channel
+    var hasAttachedChannel: Bool {
+        sshChannel != nil && channelHandler != nil
+    }
+
     /// Reference to parent connection (for sending data)
     weak var parentConnection: SSHConnection?
 
@@ -392,8 +397,19 @@ class Session: ObservableObject, Identifiable {
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): handling channel inactive")
 
         // Clear channel references
+        parentConnection = nil
+        sshConnection = nil
         sshChannel = nil
         channelHandler = nil
+
+        // Reset protocol/transport state so reconnect starts cleanly
+        rtachProtocol.reset()
+        usesRtach = false
+        isPaused = false
+        isPrefetchingOnIdle = false
+        pendingPause = false
+        pendingActiveClaim = false
+        isWaitingForInput = false
 
         // Update state to disconnected
         state = .disconnected

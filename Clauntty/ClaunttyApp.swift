@@ -91,6 +91,102 @@ enum LaunchArgs {
 
         return specs.isEmpty ? nil : specs
     }
+
+    enum SeedAuthMethod: Equatable {
+        case password
+        case sshKey(keyId: String)
+    }
+
+    struct SeedConnectionSpec: Equatable {
+        let name: String
+        let host: String
+        let port: Int
+        let username: String
+        let authMethod: SeedAuthMethod
+        let password: String?
+    }
+
+    enum SeedConnectionParseResult: Equatable {
+        case none
+        case invalid(String)
+        case spec(SeedConnectionSpec)
+    }
+
+    private static func value(after flag: String, in args: [String]) -> String? {
+        guard let idx = args.firstIndex(of: flag), idx + 1 < args.count else {
+            return nil
+        }
+        return args[idx + 1]
+    }
+
+    static func seedConnectionSpec() -> SeedConnectionParseResult {
+        let args = CommandLine.arguments
+        let hasSeedFlags = args.contains { $0.hasPrefix("--seed-") }
+        if !hasSeedFlags {
+            return .none
+        }
+
+        let name = value(after: "--seed-name", in: args)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let host = value(after: "--seed-host", in: args)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let username = value(after: "--seed-user", in: args)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let portRaw = value(after: "--seed-port", in: args)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "22"
+        let authRaw = value(after: "--seed-auth", in: args)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "password"
+
+        guard !name.isEmpty else {
+            return .invalid("missing required --seed-name")
+        }
+        guard !host.isEmpty else {
+            return .invalid("missing required --seed-host")
+        }
+        guard !username.isEmpty else {
+            return .invalid("missing required --seed-user")
+        }
+        guard let port = Int(portRaw), (1...65535).contains(port) else {
+            return .invalid("invalid --seed-port '\(portRaw)' (must be 1...65535)")
+        }
+
+        let authLower = authRaw.lowercased()
+        let authMethod: SeedAuthMethod
+        if authLower == "password" {
+            authMethod = .password
+        } else if authLower.hasPrefix("sshkey:") {
+            let keyId = String(authRaw.dropFirst("sshkey:".count)).trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            guard !keyId.isEmpty else {
+                return .invalid("invalid --seed-auth '\(authRaw)' (missing ssh key id)")
+            }
+            authMethod = .sshKey(keyId: keyId)
+        } else if authLower.hasPrefix("ssh-key:") {
+            let keyId = String(authRaw.dropFirst("ssh-key:".count)).trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            guard !keyId.isEmpty else {
+                return .invalid("invalid --seed-auth '\(authRaw)' (missing ssh key id)")
+            }
+            authMethod = .sshKey(keyId: keyId)
+        } else {
+            return .invalid("invalid --seed-auth '\(authRaw)' (use 'password' or 'sshKey:<keyId>')")
+        }
+
+        let passwordEnv = ProcessInfo.processInfo.environment["CLAUNTTY_SEED_PASSWORD"]?
+            .trimmingCharacters(in: .newlines)
+        let password = (passwordEnv?.isEmpty == false) ? passwordEnv : nil
+
+        return .spec(
+            SeedConnectionSpec(
+                name: name,
+                host: host,
+                port: port,
+                username: username,
+                authMethod: authMethod,
+                password: password
+            )
+        )
+    }
 }
 
 @main
@@ -231,9 +327,13 @@ struct AppContentView: View {
 
             // Only reconnect/resume the ACTIVE session (lazy reconnect for others)
             if let activeSession = sessionManager.activeSession {
-                if activeSession.state == .disconnected {
-                    // Active session is disconnected - reconnect it
-                    Logger.clauntty.debugOnly("APP_LIFECYCLE: reconnecting disconnected active session")
+                let needsReconnect =
+                    activeSession.state == .disconnected ||
+                    (activeSession.state == .connected && !activeSession.hasAttachedChannel)
+
+                if needsReconnect {
+                    // Active session is disconnected (or lost its channel) - reconnect it
+                    Logger.clauntty.debugOnly("APP_LIFECYCLE: reconnecting active session (state=\(activeSession.stateDescription), channel=\(activeSession.hasAttachedChannel ? "attached" : "missing"))")
                     Task {
                         try? await sessionManager.reconnect(session: activeSession)
                     }

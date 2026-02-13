@@ -290,8 +290,18 @@ class SessionManager: ObservableObject {
     /// Reconnect a disconnected session
     /// Uses the session's existing rtach session ID to reattach
     func reconnect(session: Session) async throws {
-        guard session.state == .disconnected else {
-            Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) not disconnected, skipping reconnect")
+        let needsReconnect: Bool
+        switch session.state {
+        case .disconnected:
+            needsReconnect = true
+        case .connected:
+            needsReconnect = !session.hasAttachedChannel
+        case .connecting, .error, .remotelyDeleted:
+            needsReconnect = false
+        }
+
+        guard needsReconnect else {
+            Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) is healthy (state=\(session.stateDescription)), skipping reconnect")
             return
         }
 
@@ -308,7 +318,7 @@ class SessionManager: ObservableObject {
             throw SessionError.notConnected
         }
 
-        Logger.clauntty.debugOnly("SessionManager: reconnecting session \(session.id.uuidString.prefix(8)) to rtach session \(rtachSessionId.prefix(8))")
+        Logger.clauntty.debugOnly("SessionManager: reconnecting session \(session.id.uuidString.prefix(8)) (state=\(session.stateDescription), channel=\(session.hasAttachedChannel ? "attached" : "missing")) to rtach session \(rtachSessionId.prefix(8))")
 
         // Ensure rtach deployer exists for this connection
         let config = session.connectionConfig
@@ -464,8 +474,8 @@ class SessionManager: ObservableObject {
         activeSessionId = session.id
         Logger.clauntty.debugOnly("TAB_TAP: activeSessionId set to \(sessionId)")
 
-        // If the session is disconnected, trigger lazy reconnect
-        if session.state == .disconnected {
+        // If the session is disconnected or channel-less, trigger lazy reconnect
+        if session.state == .disconnected || (session.state == .connected && !session.hasAttachedChannel) {
             Logger.clauntty.debugOnly("SessionManager: lazy reconnecting session \(session.id.uuidString.prefix(8))")
             Task {
                 do {
