@@ -6,28 +6,45 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  SwiftUI Views              Direct I/O          SwiftNIO SSH │
-│  ┌──────────────┐         ┌───────────┐      ┌────────────┐  │
-│  │ Terminal UI  │ ──────► │ SSH Data  │ ───► │ SSH Channel│  │
-│  │ + Keyboard   │ ◄────── │ Flow      │ ◄─── │ (remote)   │  │
-│  └──────────────┘         └───────────┘      └────────────┘  │
-│         │                                          │         │
-│         ▼                                          ▼         │
-│  GhosttyKit.xcframework                     Remote Server    │
-│  (Metal rendering)                                           │
-└─────────────────────────────────────────────────────────────┘
+│  SwiftUI Views                                              │
+│  ┌──────────────┐  ┌─────────────────┐  ┌────────────────┐  │
+│  │ Terminal UI  │  │ Connection List │  │ Keyboard Bar   │  │
+│  └──────┬───────┘  └─────────────────┘  └────────────────┘  │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ SessionManager                                        │   │
+│  │ - Manages tabs (terminal + web)                       │   │
+│  │ - Connection pooling (reuse SSH to same server)       │   │
+│  │ - Lazy reconnect (only active tab connected)          │   │
+│  └──────┬───────────────────────────────────────────────┘   │
+│         │                                                    │
+│  ┌──────┴──────┐  ┌─────────────────┐  ┌────────────────┐   │
+│  │ Session     │  │ GhosttyKit      │  │ RtachClient    │   │
+│  │ (per tab)   │  │ (Metal render)  │  │ (protocol)     │   │
+│  └──────┬──────┘  └────────┬────────┘  └───────┬────────┘   │
+│         │                  │                    │            │
+│         └──────────────────┴────────────────────┘            │
+│                            │                                 │
+│                    SSHConnection (SwiftNIO)                  │
+└────────────────────────────┼─────────────────────────────────┘
+                             │
+                             ▼
+                      Remote Server
+                    (rtach + $SHELL)
 ```
 
 **Data Flow**:
-- **SSH → Terminal**: `SSHChannelHandler.channelRead()` → `ghostty_surface_write_pty_output()` → rendered
-- **Keyboard → SSH**: `insertText()` → `SSHConnection.sendData()` → SSH channel
+- **Input**: User types → Keyboard → RtachClient (frame) → SSH channel → rtach server → PTY → shell
+- **Output**: Shell → PTY → rtach server → SSH channel → RtachClient (parse) → GhosttyKit → Metal
 
 ## Repository Layout
 
 ```
-~/Projects/clauntty/
+clauntty/
 ├── clauntty/          # iOS app (this repo)
-├── ghostty/           # Forked ghostty (git@github.com:eriklangille/ghostty.git)
+├── ghostty/           # Forked ghostty (branch: clauntty)
+├── rtach/             # Session persistence daemon
 └── libxev/            # Local libxev fork (iOS fixes)
 ```
 
@@ -40,16 +57,38 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 | `../ghostty/src/renderer/Metal.zig` | Metal renderer |
 | `../libxev/src/backend/kqueue.zig` | Event loop (iOS fixes) |
 | `Clauntty/Core/Terminal/` | GhosttyApp, TerminalSurface, GhosttyBridge |
-| `Clauntty/Core/SSH/` | SSHConnection, SSHAuthenticator |
+| `Clauntty/Core/SSH/` | SSHConnection, SSHAuthenticator, RtachDeployer |
+| `Clauntty/Core/Session/` | SessionManager, Session |
+| `RtachClient/` | rtach protocol parsing (Swift module) |
 | `Clauntty/Core/Terminal/GhosttyApp.swift` | GhosttyApp + Logger extension with `debugOnly()`, `verbose()` |
 
 ## Build Commands
+
+### Justfile (recommended)
+
+The project includes a Justfile that automates setup, dependency builds, and app compilation. Install with `brew install just`.
+
+```bash
+just setup              # Clone sibling repos + checkout correct branches
+just doctor             # Preflight checks (Xcode, Zig, Metal, layout)
+just deps               # Build all deps (ghostty + rtach in parallel) + link framework
+just build-only         # Build for simulator (fast iteration)
+just build              # Full build (deps + build)
+just test               # Run unit tests on simulator
+just archive            # Build .xcarchive for device (signing required)
+just ipa                # Export .ipa from archive
+just configure <bundle_id> <team_id> <url_scheme>  # Patch fork identity
+just clean              # Clean everything
+just -l                 # List all recipes
+```
+
+### Manual commands
 
 **Always use `./scripts/sim.sh` instead of raw `xcrun simctl` or `xcodebuild` commands.**
 
 ```bash
 # Build GhosttyKit (after ghostty changes)
-cd ../ghostty && zig build -Demit-xcframework
+cd ../ghostty && zig build -Demit-xcframework -Doptimize=ReleaseFast
 
 # Build & Run (use sim.sh)
 ./scripts/sim.sh build              # Build app
@@ -224,13 +263,13 @@ The `ghostty_surface_write_pty_output` function feeds data directly to the termi
 - Text selection + copy (long press to select) ✓
 - Connection editing (swipe left → Edit) ✓
 - Duplicate connection detection ✓
+- Multiple sessions/tabs ✓
+- rtach integration (session persistence) ✓
+- RtachClient Swift module (protocol parsing) ✓
 
 **TODO:**
 - [ ] RSA/ECDSA key support
 - [ ] Host key verification
-- [ ] Multiple sessions/tabs
-- [ ] rtach integration (session persistence)
-- [ ] Extract rtach protocol parsing to separate Swift module (enables fast unit tests without simulator)
 
 ## rtach Integration
 
