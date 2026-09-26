@@ -2185,7 +2185,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         default:
             // Check for Ctrl+key combinations
-            if key.modifierFlags.contains(.control), let char = key.characters.first {
+            if key.modifierFlags.contains(.control), let char = key.charactersIgnoringModifiers.first {
                 let asciiValue = char.asciiValue ?? 0
                 // Ctrl+A through Ctrl+Z = 0x01 through 0x1A
                 if asciiValue >= 97 && asciiValue <= 122 {  // a-z
