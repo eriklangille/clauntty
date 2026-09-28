@@ -27,7 +27,7 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 ```
 ~/Projects/clauntty/
 ├── clauntty/          # iOS app (this repo)
-├── ghostty/           # Forked ghostty (git@github.com:eriklangille/ghostty.git), branch clauntty-2
+├── ghostty/           # Forked ghostty (git@github.com:eriklangille/ghostty.git), branch clauntty
 ├── rtach/             # Session persistence daemon (bundled into Clauntty/Resources/rtach/)
 ├── libxev/            # Local libxev fork (iOS fixes), used by rtach
 └── libtailscale/      # Upstream libtailscale (github.com/tailscale/libtailscale); builds TailscaleKit.xcframework
@@ -35,10 +35,10 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 
 `Frameworks/GhosttyKit.xcframework` is a symlink into `../ghostty/macos/`.
 
-The ghostty fork's `clauntty-2` branch is upstream Ghostty (Sep 2026) plus a few patches. Two patches
+The ghostty fork's `clauntty` branch is upstream Ghostty (Sep 2026) plus a few patches. Two patches
 restore upstream's dropped iOS xcframework slices. The rest add the `manual` termio backend and the
 iOS C API below. The audit of every patch is in `~/Projects/plans/2026-09-27-clauntty-ghostty-upgrade.md`.
-The old fork is kept on the `clauntty` branch.
+`main` tracks upstream; the pre-upgrade fork is tagged `clauntty-old`.
 
 `Frameworks/TailscaleKit.xcframework` is a symlink into `../libtailscale/swift/build/`. A fresh checkout
 needs `brew install go`, the libtailscale clone, and `./scripts/build-tailscalekit.sh` before Xcode builds.
