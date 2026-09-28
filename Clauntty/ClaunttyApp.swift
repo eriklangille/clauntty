@@ -14,6 +14,7 @@ enum GhosttyGlobal {
         guard !initialized else { return }
         initialized = true
 
+        StderrCapture.start()
         Logger.clauntty.debugOnly("Initializing GhosttyKit global state...")
         // TailscaleKit's Go runtime initializes on a background thread at load and installs
         // its own crash-signal handlers, remembering whatever was installed before it as the
@@ -45,11 +46,15 @@ enum GhosttyGlobal {
     private static func removeGhosttyCrashReporter(restoring saved: CrashSignalHandlers) {
         for delay in [2.0, 15.0] {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) {
-                let restored = saved.restoreWhereReplaced(bySymbolContaining: "breakpad")
-                if !restored.isEmpty {
-                    Logger.clauntty.debugOnly("Removed Ghostty's breakpad crash handler for \(restored)")
-                }
-                CrashSignalHandlers.record("after \(delay)s (restored \(restored))")
+                _ = saved.restoreWhereReplaced(bySymbolContaining: "breakpad")
+                // With breakpad gone the Go runtime's handler is on SIGSEGV/SIGBUS/SIGFPE. For a
+                // fault on a non-Go thread (e.g. main) with nothing to forward to, Go prints a
+                // fatal error to stderr and exit(2)s: the app vanishes with no crash report.
+                // Use the system default so any crash produces a normal iOS crash report. Go
+                // doesn't need these for normal operation (a nil deref inside Go code would
+                // crash instead of panicking).
+                let reset = CrashSignalHandlers.resetToDefault(whereSymbolContains: ["breakpad", "runtime."])
+                CrashSignalHandlers.record("after \(delay)s (reset to default \(reset))")
             }
         }
     }
@@ -83,6 +88,23 @@ struct CrashSignalHandlers {
             }
         }
         return restored.sorted()
+    }
+
+    /// Set crash signals whose handler's symbol contains any of `fragments` back to SIG_DFL.
+    /// Returns the signals that were reset.
+    static func resetToDefault(whereSymbolContains fragments: [String]) -> [Int32] {
+        var reset: [Int32] = []
+        for sig in signals {
+            let name = handlerName(sig)
+            guard fragments.contains(where: { name.contains($0) }) else { continue }
+            var action = sigaction()
+            action.__sigaction_u.__sa_handler = SIG_DFL
+            sigemptyset(&action.sa_mask)
+            if sigaction(sig, &action, nil) == 0 {
+                reset.append(sig)
+            }
+        }
+        return reset
     }
 
     /// Append the current handler of each crash signal to Library/Caches/crash-handlers.log,
@@ -493,5 +515,23 @@ class AppState: ObservableObject {
 
     func endInputSuppression() {
         inputSuppressionCount = max(0, inputSuppressionCount - 1)
+    }
+}
+
+/// Sends the process's stderr to Library/Caches/stderr.log (previous launch kept as
+/// stderr.prev.log). On a device stderr is otherwise discarded, which loses fatal error
+/// messages from the Go runtime (TailscaleKit) and Ghostty's logs.
+enum StderrCapture {
+    static func start() {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        let current = caches.appendingPathComponent("stderr.log")
+        let previous = caches.appendingPathComponent("stderr.prev.log")
+        try? FileManager.default.removeItem(at: previous)
+        try? FileManager.default.moveItem(at: current, to: previous)
+        let fd = open(current.path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0o644)
+        guard fd >= 0 else { return }
+        dup2(fd, STDERR_FILENO)
+        close(fd)
+        fputs("stderr capture started \(Date())\n", stderr)
     }
 }
