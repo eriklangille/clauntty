@@ -35,13 +35,14 @@ Most mobile terminals lose your session when the app backgrounds or your connect
 - **Xcode 15+** (full app, not just command-line tools — needed for iOS SDK, simulator, and signing)
 - **iOS 17.0+**
 - **Zig 0.15.2+** — install via `brew install zig` or from [ziglang.org/download](https://ziglang.org/download/)
+- **Go** — install via `brew install go`; builds the embedded Tailscale framework. Any recent Go works: the build script downloads the exact version libtailscale's `go.mod` pins
 - **Apple Developer account** — free Apple ID works for simulator and personal device builds; paid ($99/year) required for TestFlight distribution
 
 ## Building
 
 ### 1. Clone the repos
 
-The project is a monorepo with 4 sibling repos. **The directory layout matters** — ghostty references `../libxev` at build time.
+The project is a monorepo of sibling repos. **The directory layout matters**: ghostty references `../libxev` and the app references `../libtailscale` at build time.
 
 ```bash
 mkdir clauntty && cd clauntty
@@ -49,6 +50,7 @@ git clone https://github.com/eriklangille/clauntty.git clauntty
 git clone https://github.com/eriklangille/ghostty.git ghostty
 git clone https://github.com/eriklangille/rtach.git rtach
 git clone https://github.com/eriklangille/libxev.git libxev
+git clone https://github.com/tailscale/libtailscale.git libtailscale
 ```
 
 You should end up with:
@@ -57,7 +59,8 @@ clauntty/
 ├── clauntty/   # iOS app (this repo)
 ├── ghostty/    # Ghostty fork (terminal emulator)
 ├── rtach/      # Session persistence daemon
-└── libxev/     # Event loop (iOS fixes)
+├── libxev/     # Event loop (iOS fixes)
+└── libtailscale/  # Tailscale's embeddable tsnet library (upstream)
 ```
 
 ### 2. Build dependencies
@@ -70,12 +73,17 @@ cd ghostty && zig build -Demit-xcframework -Doptimize=ReleaseFast && cd ..
 
 # 2. Build rtach Linux binaries (auto-copies to clauntty/Clauntty/Resources/rtach/)
 cd rtach && zig build cross && cd ..
+
+# 3. Build TailscaleKit framework (requires Go and libtailscale at ../libtailscale).
+#    Creates the clauntty/Frameworks/TailscaleKit.xcframework symlink target.
+cd clauntty && ./scripts/build-tailscalekit.sh && cd ..
 ```
 
-After building, verify the framework symlink exists:
+After building, verify both framework symlinks resolve:
 ```bash
-ls clauntty/Frameworks/GhosttyKit.xcframework
+ls clauntty/Frameworks/GhosttyKit.xcframework clauntty/Frameworks/TailscaleKit.xcframework
 ```
+The app won't build without both. If only TailscaleKit is missing, run step 3 again.
 If missing, create it:
 ```bash
 ln -s ../../ghostty/zig-out/GhosttyKit.xcframework clauntty/Frameworks/GhosttyKit.xcframework
@@ -133,6 +141,7 @@ Clauntty/
 │   ├── Terminal/          # GhosttyApp, TerminalSurface, GhosttyBridge
 │   ├── SSH/               # SSHConnection, SSHAuthenticator, RtachDeployer
 │   ├── Session/           # SessionManager, Session
+│   ├── Tailscale/         # TailscaleManager (embedded tsnet node)
 │   └── Storage/           # ConnectionStore, SSHKeyStore, KeychainHelper
 ├── Views/                 # SwiftUI views
 ├── Models/                # Data models
@@ -142,7 +151,7 @@ Clauntty/
     └── shell-integration/ # Shell scripts for title updates
 
 RtachClient/               # Swift module for rtach protocol parsing
-Frameworks/                # GhosttyKit.xcframework (symlink)
+Frameworks/                # GhosttyKit.xcframework, TailscaleKit.xcframework (symlinks)
 scripts/                   # Build and test automation
 ```
 

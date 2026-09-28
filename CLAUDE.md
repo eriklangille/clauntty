@@ -28,8 +28,13 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 ~/Projects/clauntty/
 ├── clauntty/          # iOS app (this repo)
 ├── ghostty/           # Forked ghostty (git@github.com:eriklangille/ghostty.git)
-└── libxev/            # Local libxev fork (iOS fixes)
+├── libxev/            # Local libxev fork (iOS fixes)
+└── libtailscale/      # Upstream libtailscale (github.com/tailscale/libtailscale); builds TailscaleKit.xcframework
 ```
+
+`Frameworks/TailscaleKit.xcframework` is a symlink into `../libtailscale/swift/build/`. A fresh checkout
+needs `brew install go`, the libtailscale clone, and `./scripts/build-tailscalekit.sh` before Xcode builds.
+The script pins Go to libtailscale's `go.mod` version (newer Go breaks a pinned dependency).
 
 ## Key Files
 
