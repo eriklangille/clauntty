@@ -16,7 +16,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUNDLE_ID="com.octerm.clauntty"
 SCREENSHOTS_DIR="$PROJECT_DIR/screenshots"
-DEVICE_NAME="iPhone 17"
+# Simulator to boot when none is running. Commands use whichever simulator is
+# already booted, so this only matters from a cold start. Same env var and default
+# as sim-stream, so the simulator you watch is the one these commands drive.
+DEVICE_NAME="${SIM_DEVICE:-iPhone 18 Pro}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -55,6 +58,27 @@ start_companion() {
             idb connect localhost "$port" >/dev/null 2>&1
         fi
     fi
+}
+
+# xcodebuild destination: the booted simulator if there is one, else DEVICE_NAME
+sim_destination() {
+    local udid=$(get_udid)
+    if [ -n "$udid" ]; then
+        echo "platform=iOS Simulator,id=$udid"
+    else
+        echo "platform=iOS Simulator,name=$DEVICE_NAME"
+    fi
+}
+
+# Screen size in points of the booted simulator, as "width height"
+screen_size() {
+    local udid=$(get_udid)
+    idb ui describe-all --udid "$udid" --json 2>/dev/null | python3 -c "
+import sys, json
+for e in json.load(sys.stdin):
+    if e.get('type') == 'Application':
+        f = e['frame']; print(int(f['width']), int(f['height'])); break
+" 2>/dev/null || echo "402 874"
 }
 
 # Ensure simulator is booted and IDB is connected
@@ -97,9 +121,10 @@ case "${1:-help}" in
         fi
         duration="${3:-0.5}"
 
-        # Screen center and swipe offsets (iPhone 17: 393x852)
-        cx=196
-        cy=426
+        # Screen center and swipe offsets
+        read -r sw sh <<< "$(screen_size)"
+        cx=$((sw / 2))
+        cy=$((sh / 2))
         offset=200
 
         case "$2" in
@@ -213,7 +238,7 @@ EOF
         echo -e "${BLUE}Building Clauntty...${NC}"
         cd "$PROJECT_DIR"
         xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
-            -destination "platform=iOS Simulator,name=$DEVICE_NAME" \
+            -destination "$(sim_destination)" \
             -quiet build
         echo -e "${GREEN}Build complete${NC}"
         ;;
@@ -383,6 +408,12 @@ for el in data:
         wait_time=8
         show_logs="30s"
         tabs_spec=""
+        seed_name=""
+        seed_host=""
+        seed_port=""
+        seed_user=""
+        seed_auth=""
+        seed_tailscale=""
 
         while [ $# -gt 0 ]; do
             case "$1" in
@@ -410,12 +441,46 @@ for el in data:
                     tabs_spec="$2"
                     shift 2
                     ;;
+                --seed-name)
+                    seed_name="$2"
+                    shift 2
+                    ;;
+                --seed-host)
+                    seed_host="$2"
+                    shift 2
+                    ;;
+                --seed-port)
+                    seed_port="$2"
+                    shift 2
+                    ;;
+                --seed-user)
+                    seed_user="$2"
+                    shift 2
+                    ;;
+                --seed-auth)
+                    seed_auth="$2"
+                    shift 2
+                    ;;
+                --seed-tailscale)
+                    seed_tailscale=1
+                    shift
+                    ;;
                 *)
                     connection="$1"
                     shift
                     ;;
             esac
         done
+
+        # Validate seed args if any were provided
+        if [ -n "$seed_name$seed_host$seed_port$seed_user$seed_auth" ]; then
+            if [ -z "$seed_name" ] || [ -z "$seed_host" ] || [ -z "$seed_user" ]; then
+                echo -e "${RED}Seed args require: --seed-name, --seed-host, --seed-user${NC}"
+                exit 1
+            fi
+            [ -z "$seed_port" ] && seed_port="22"
+            [ -z "$seed_auth" ] && seed_auth="password"
+        fi
 
         echo -e "${BLUE}=== Debug Session ===${NC}"
 
@@ -424,7 +489,7 @@ for el in data:
             echo -e "${BLUE}[1/5] Building...${NC}"
             cd "$PROJECT_DIR"
             xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
-                -destination "platform=iOS Simulator,name=$DEVICE_NAME" \
+                -destination "$(sim_destination)" \
                 -quiet build
             echo -e "${GREEN}Build complete${NC}"
         else
@@ -441,13 +506,33 @@ for el in data:
         echo -e "${BLUE}[3/5] Launching (verbose logging enabled)...${NC}"
         xcrun simctl terminate booted "$BUNDLE_ID" 2>/dev/null || true
         sleep 0.5
-        # SIMCTL_CHILD_ prefix passes env vars to launched app
-        if [ -n "$connection" ] && [ -n "$tabs_spec" ]; then
-            SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID" -- --connect "$connection" --tabs "$tabs_spec"
-            echo -e "${GREEN}Launched with --connect $connection --tabs $tabs_spec${NC}"
-        elif [ -n "$connection" ]; then
-            SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID" -- --connect "$connection"
-            echo -e "${GREEN}Launched with --connect $connection${NC}"
+        # Build launch args for app (pass-through via `--`)
+        launch_args=()
+        if [ -n "$connection" ]; then
+            launch_args+=(--connect "$connection")
+        fi
+        if [ -n "$tabs_spec" ]; then
+            launch_args+=(--tabs "$tabs_spec")
+        fi
+        if [ -n "$seed_name" ]; then
+            launch_args+=(--seed-name "$seed_name")
+            launch_args+=(--seed-host "$seed_host")
+            launch_args+=(--seed-port "$seed_port")
+            launch_args+=(--seed-user "$seed_user")
+            launch_args+=(--seed-auth "$seed_auth")
+            [ -n "$seed_tailscale" ] && launch_args+=(--seed-tailscale)
+        fi
+
+        # SIMCTL_CHILD_ prefix passes env vars to launched app.
+        # If CLAUNTTY_SEED_PASSWORD is set in caller env, forward it to the app.
+        if [ "${#launch_args[@]}" -gt 0 ]; then
+            if [ -n "${CLAUNTTY_SEED_PASSWORD:-}" ]; then
+                SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 SIMCTL_CHILD_CLAUNTTY_SEED_PASSWORD="$CLAUNTTY_SEED_PASSWORD" \
+                    xcrun simctl launch booted "$BUNDLE_ID" -- "${launch_args[@]}"
+            else
+                SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID" -- "${launch_args[@]}"
+            fi
+            echo -e "${GREEN}Launched with args: ${launch_args[*]}${NC}"
         else
             SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID"
             echo -e "${GREEN}Launched${NC}"
@@ -497,12 +582,11 @@ for el in data:
     tabs)
         # Show tab coordinates for tapping
         # Tab bar is 44pt tall, positioned below status bar (~54pt on Dynamic Island devices)
-        # Available width = 393 - 44 (+ button) - 4 (padding) = 345pt for tabs
+        # Available width = screen width - 44 (+ button) - 4 (padding) for tabs
         udid=$(ensure_ready)
         num_tabs="${2:-2}"
 
-        # Screen width for iPhone 17 is 393pt
-        screen_width=393
+        read -r screen_width _ <<< "$(screen_size)"
         plus_button_width=44
         padding=4
         status_bar_height=54  # Dynamic Island area
@@ -523,7 +607,7 @@ for el in data:
         done
 
         echo ""
-        echo -e "  + Button: ${GREEN}./scripts/sim.sh tap 371 $tab_y${NC}"
+        echo -e "  + Button: ${GREEN}./scripts/sim.sh tap $((screen_width - 22)) $tab_y${NC}"
         echo ""
         echo "To open multiple tabs:"
         echo -e "  ${YELLOW}./scripts/sim.sh debug devbox --tabs \"0,1\"${NC}      # 2 existing sessions"
@@ -536,7 +620,7 @@ for el in data:
         tab_num="${2:-1}"
         num_tabs="${3:-2}"
 
-        screen_width=393
+        read -r screen_width _ <<< "$(screen_size)"
         plus_button_width=44
         padding=4
         status_bar_height=54
@@ -1039,6 +1123,13 @@ Debug (all-in-one):
       --logs|-l TIME       Show logs from last TIME (default: 30s)
       --no-logs            Don't show logs
       --no-build           Skip build step
+      --seed-name NAME     Seed/update connection profile name (idempotent)
+      --seed-host HOST     Seed/update host
+      --seed-port PORT     Seed/update port (default: 22)
+      --seed-user USER     Seed/update username
+      --seed-auth AUTH     Seed/update auth: password or sshKey:<keyId>
+                           Password can be provided via CLAUNTTY_SEED_PASSWORD env
+      --seed-tailscale     Seeded connection connects via embedded Tailscale
   quick|q [conn] [opts]    Same as 'debug --no-build'
 
 Tab Helpers:
@@ -1097,6 +1188,7 @@ Examples:
   $0 debug devbox --tabs "0,1"       # Open 2 existing sessions
   $0 debug devbox --tabs "0,new"     # 1 existing + 1 new session
   $0 debug devbox -t "ls -la"        # Connect and type command
+  CLAUNTTY_SEED_PASSWORD=testpass $0 debug netfuzz --seed-name netfuzz --seed-host localhost --seed-port 2222 --seed-user testuser --seed-auth password
   $0 quick devbox                    # Skip build, just reinstall & test
   $0 tabs 3                          # Show coordinates for 3 tabs
   $0 tap-tab 2 3                     # Tap tab 2 (of 3 total)
