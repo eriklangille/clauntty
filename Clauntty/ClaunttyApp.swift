@@ -12,12 +12,75 @@ enum GhosttyGlobal {
         initialized = true
 
         Logger.clauntty.debugOnly("Initializing GhosttyKit global state...")
+        let handlersBeforeGhostty = CrashSignalHandlers.save()
         let result = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         if result != 0 {
             Logger.clauntty.error("ghostty_init failed with code: \(result)")
         } else {
             Logger.clauntty.debugOnly("GhosttyKit global state initialized successfully")
         }
+
+        removeGhosttyCrashReporter(restoring: handlersBeforeGhostty)
+    }
+
+    /// ghostty_init starts Sentry with its breakpad backend on a background thread. On iOS
+    /// breakpad's signal handler hangs when the app crashes, so a crash becomes a 10-30s
+    /// freeze until the watchdog kills the app, and the real crash gets buried under
+    /// breakpad frames. sentry_close() doesn't uninstall it, so put back the handlers that
+    /// were installed before ghostty_init (the Go runtime's, for TailscaleKit) wherever
+    /// breakpad replaced them. Init takes microseconds; the second pass covers a slow start.
+    private static func removeGhosttyCrashReporter(restoring saved: CrashSignalHandlers) {
+        for delay in [2.0, 15.0] {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) {
+                let restored = saved.restoreWhereReplaced(bySymbolContaining: "breakpad")
+                if !restored.isEmpty {
+                    Logger.clauntty.debugOnly("Removed Ghostty's breakpad crash handler for \(restored)")
+                }
+                Logger.clauntty.debugOnly("Crash handlers after \(delay)s: SIGSEGV -> \(CrashSignalHandlers.handlerName(SIGSEGV))")
+            }
+        }
+    }
+}
+
+/// Snapshot of the process's handlers for crash signals
+struct CrashSignalHandlers {
+    static let signals: [Int32] = [SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS]
+
+    private var actions: [Int32: sigaction] = [:]
+
+    static func save() -> CrashSignalHandlers {
+        var snapshot = CrashSignalHandlers()
+        for sig in signals {
+            var action = sigaction()
+            if sigaction(sig, nil, &action) == 0 {
+                snapshot.actions[sig] = action
+            }
+        }
+        return snapshot
+    }
+
+    /// Restore the saved handler for each signal whose current handler's symbol name
+    /// contains `fragment`. Returns the signals that were restored.
+    func restoreWhereReplaced(bySymbolContaining fragment: String) -> [Int32] {
+        var restored: [Int32] = []
+        for (sig, saved) in actions where Self.handlerName(sig).contains(fragment) {
+            var action = saved
+            if sigaction(sig, &action, nil) == 0 {
+                restored.append(sig)
+            }
+        }
+        return restored.sorted()
+    }
+
+    /// Symbol name of the function currently handling `sig`
+    static func handlerName(_ sig: Int32) -> String {
+        var action = sigaction()
+        guard sigaction(sig, nil, &action) == 0 else { return "?" }
+        guard let handler = unsafeBitCast(action.__sigaction_u, to: UnsafeRawPointer?.self) else { return "default" }
+        if Int(bitPattern: handler) == 1 { return "ignore" }
+        var info = Dl_info()
+        guard dladdr(handler, &info) != 0, let name = info.dli_sname else { return "unknown" }
+        return String(cString: name)
     }
 }
 

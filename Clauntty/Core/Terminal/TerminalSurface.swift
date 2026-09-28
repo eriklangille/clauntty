@@ -104,8 +104,9 @@ struct TerminalSurface: UIViewRepresentable {
         uiView.onTerminalSizeChanged = onTerminalSizeChanged
         uiView.onFontSizeChanged = onFontSizeChanged
 
-        // Handle focus changes when active state changes
-        uiView.setActive(isActive)
+        // Handle focus changes when active state changes. updateUIView runs on every
+        // SwiftUI update (e.g. each terminal title change), so only act on real changes.
+        uiView.updateActiveFromSwiftUI(isActive)
 
         // Call onSurfaceReady on first update (when coordinator.surfaceView is set but not yet notified)
         // This ensures SwiftUI state updates work properly
@@ -226,10 +227,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     private var isRotating = false
 
     /// Empty view to replace keyboard when hidden (zero height to avoid gray bar)
+    /// Frame-sized, no Auto Layout: iOS re-hosts input views in the keyboard's own window
+    /// when the keyboard resumes, and a view carrying its own constraints there is fragile.
     private let emptyInputView: UIView = {
-        let view = UIView(frame: .zero)
-        view.translatesAutoresizingMaskIntoConstraints = false
-        view.heightAnchor.constraint(equalToConstant: 0).isActive = true
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 0))
+        view.autoresizingMask = []
         return view
     }()
 
@@ -772,6 +774,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             name: UIApplication.willEnterForegroundNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
     }
 
     @objc private func appDidEnterBackground() {
@@ -792,11 +800,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             ghostty_surface_set_occlusion(surface, true)
             Logger.clauntty.debugOnly("Surface visible (app foregrounded, active tab)")
 
-            // Force redraw after coming back from background
-            // This fixes frozen TUI apps (Claude Code spinner/timer) that stopped updating
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.forceRedraw()
-            }
+            // Force a redraw once the app is active again (appDidBecomeActive). This fixes
+            // frozen TUI apps (Claude Code spinner/timer) that stopped updating. Not done here:
+            // UIKit re-activates the keyboard during willEnterForeground, and touching the
+            // first responder's view mid-resume has crashed Auto Layout.
+            needsRedrawAfterForeground = true
         } else {
             Logger.clauntty.debugOnly("Surface stays occluded (app foregrounded, inactive tab)")
         }
@@ -1713,6 +1721,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// This works by briefly changing the size, which forces Ghostty to
     /// recalculate and redraw everything. Useful after tab switches or
     /// reconnections where the Metal layer may have stale content.
+    /// Set on foreground for the active tab; consumed by appDidBecomeActive
+    private var needsRedrawAfterForeground = false
+
+    @objc private func appDidBecomeActive() {
+        guard needsRedrawAfterForeground else { return }
+        needsRedrawAfterForeground = false
+        guard isActiveTab else { return }
+        forceRedraw()
+    }
+
     func forceRedraw() {
         Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: forceRedraw called, isRedrawing=\(self.isForceRedrawing), surface=\(self.surface != nil)")
         guard !isForceRedrawing else {
@@ -1742,9 +1760,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let gridBefore = ghostty_surface_size(surface)
         Logger.clauntty.debugOnly("forceRedraw: BEFORE grid=\(gridBefore.columns)x\(gridBefore.rows), effectiveSize=\(Int(self.bounds.width))x\(Int(effectiveHeight))")
 
-        // Hide and show the view to force Metal layer to get new drawable
-        self.isHidden = true
-        self.isHidden = false
+        // Hide and show Ghostty's drawing layers to force a new drawable. Don't toggle the
+        // view's own isHidden: this view is the keyboard's first responder, and hiding it
+        // while the keyboard is (re)activating leaves UIKit's keyboard/layout state broken.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.sublayers?.forEach { $0.isHidden = true }
+        layer.sublayers?.forEach { $0.isHidden = false }
+        CATransaction.commit()
 
         // Also do size toggle
         ghostty_surface_set_size(surface, w, h - 40)
@@ -1774,7 +1797,22 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Set whether this terminal surface is the active tab
     /// Inactive surfaces don't render their cursor and lose keyboard focus
+    /// Whether setActive has run at least once (isActiveTab defaults to true, so the
+    /// first activation can't be detected as a change)
+    private var hasAppliedActiveState = false
+
+    /// Called from SwiftUI's updateUIView, which runs on every state update (title changes
+    /// included). setActive(true) reorders window subviews, toggles focus, resizes, redraws
+    /// and sends SIGWINCH, and the SIGWINCH makes TUIs like Claude Code repaint and retitle,
+    /// which updates SwiftUI again: a loop of UI churn several times a second. Only apply
+    /// the first call and real changes; explicit tab switches still call setActive directly.
+    func updateActiveFromSwiftUI(_ active: Bool) {
+        guard !hasAppliedActiveState || active != isActiveTab else { return }
+        setActive(active)
+    }
+
     func setActive(_ active: Bool) {
+        hasAppliedActiveState = true
         let surfaceExists = self.surface != nil
         Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: setActive(\(active)) starting, wasActive=\(self.isActiveTab), appBg=\(self.isAppBackgrounded), surface=\(surfaceExists)")
         let stateChanged = active != isActiveTab
