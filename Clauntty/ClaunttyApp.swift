@@ -2,6 +2,9 @@ import SwiftUI
 import GhosttyKit
 import UserNotifications
 import os.log
+#if canImport(TailscaleKit)
+import TailscaleKit
+#endif
 
 /// Initializes GhosttyKit global state - must be called before any other GhosttyKit functions
 enum GhosttyGlobal {
@@ -12,7 +15,17 @@ enum GhosttyGlobal {
         initialized = true
 
         Logger.clauntty.debugOnly("Initializing GhosttyKit global state...")
+        // TailscaleKit's Go runtime initializes on a background thread at load and installs
+        // its own crash-signal handlers, remembering whatever was installed before it as the
+        // handler to forward to. If it finishes after ghostty_init, it forwards to breakpad
+        // and the restore below can't see breakpad. Block until Go is up first: any call
+        // into an exported Go function waits for runtime init. (Unknown handle: EBADF, no-op.)
+        #if canImport(TailscaleKit)
+        var errBuf = [CChar](repeating: 0, count: 8)
+        _ = tailscale_errmsg(-1, &errBuf, errBuf.count)
+        #endif
         let handlersBeforeGhostty = CrashSignalHandlers.save()
+        CrashSignalHandlers.record("before ghostty_init")
         let result = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         if result != 0 {
             Logger.clauntty.error("ghostty_init failed with code: \(result)")
@@ -36,7 +49,7 @@ enum GhosttyGlobal {
                 if !restored.isEmpty {
                     Logger.clauntty.debugOnly("Removed Ghostty's breakpad crash handler for \(restored)")
                 }
-                Logger.clauntty.debugOnly("Crash handlers after \(delay)s: SIGSEGV -> \(CrashSignalHandlers.handlerName(SIGSEGV))")
+                CrashSignalHandlers.record("after \(delay)s (restored \(restored))")
             }
         }
     }
@@ -70,6 +83,24 @@ struct CrashSignalHandlers {
             }
         }
         return restored.sorted()
+    }
+
+    /// Append the current handler of each crash signal to Library/Caches/crash-handlers.log,
+    /// so the state can be checked on a device (devicectl copy from the app container)
+    static func record(_ label: String) {
+        let names = signals.map { "\($0)=\(handlerName($0))" }.joined(separator: " ")
+        let line = "\(Date()) \(label): \(names)\n"
+        Logger.clauntty.debugOnly("Crash handlers \(line)")
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        let url = caches.appendingPathComponent("crash-handlers.log")
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
+        }
     }
 
     /// Symbol name of the function currently handling `sig`
