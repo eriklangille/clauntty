@@ -525,9 +525,13 @@ class RtachDeployer {
 
         let data = try encoder.encode(metadata)
 
-        // Write metadata file
+        // Write a temp file and rename it into place. Several tabs and devices save at
+        // once, and two overlapping `cat >` writes left a shorter file with the longer
+        // one's tail ("Unexpected '}' after top-level value"), which then loaded as empty
+        // and got saved back without the other sessions. A rename is atomic.
+        let path = Self.remoteMetadataPath
         try await connection.executeWithStdin(
-            "cat > \(Self.remoteMetadataPath)",
+            "tmp=$(mktemp \(path).XXXXXX) && { cat > \"$tmp\" && mv -f \"$tmp\" \(path) || { rm -f \"$tmp\"; exit 1; }; }",
             stdinData: data
         )
 

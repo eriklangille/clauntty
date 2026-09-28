@@ -392,11 +392,11 @@ class SessionManager: ObservableObject {
             }
         }
 
-        // Remove from persistence
-        removePersistedTab(session.id)
-
-        // Remove from sessions list
+        // Remove from sessions list, then persistence: removePersistedTab saves the tab list
+        // built from `sessions`, so saving first wrote the closed tab back and it
+        // reappeared on the next launch
         sessions.removeAll { $0.id == session.id }
+        removePersistedTab(session.id)
 
         // Remove from global tab order
         tabOrder.removeAll { $0 == session.id }

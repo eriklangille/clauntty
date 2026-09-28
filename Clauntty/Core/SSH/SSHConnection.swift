@@ -470,7 +470,16 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
     /// Callback when channel becomes inactive (connection lost)
     private let onChannelInactive: (() -> Void)?
 
-    private var context: ChannelHandlerContext?
+    /// The context owns this handler, so holding it is a cycle until handlerRemoved clears
+    /// it. Before that was done, every closed channel (including each executeCommand) left
+    /// its handler and context behind. Locked: sendToRemote reads it off the event loop.
+    private var _context: ChannelHandlerContext?
+    private let contextLock = NSLock()
+    private var context: ChannelHandlerContext? {
+        contextLock.lock()
+        defer { contextLock.unlock() }
+        return _context
+    }
 
     init(onDataReceived: ((Data) -> Void)?, onChannelInactive: (() -> Void)? = nil) {
         self.onDataReceived = onDataReceived
@@ -478,7 +487,15 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
     }
 
     func handlerAdded(context: ChannelHandlerContext) {
-        self.context = context
+        contextLock.lock()
+        _context = context
+        contextLock.unlock()
+    }
+
+    func handlerRemoved(context: ChannelHandlerContext) {
+        contextLock.lock()
+        _context = nil
+        contextLock.unlock()
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
