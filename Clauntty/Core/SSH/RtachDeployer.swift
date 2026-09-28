@@ -148,9 +148,11 @@ class RtachDeployer {
     func listSessions() async throws -> [RtachSession] {
         // Use stat to get modification times (epoch format for easy parsing)
         // Format: filename epoch_time
+        // `stat -c` is GNU (Linux); macOS/BSD stat needs `-f '%N %m'`. Without the fallback a
+        // macOS host lists nothing, and every session on it gets marked remotely deleted.
         let output = try await connection.executeCommand(
             "for f in \(Self.remoteSessionsPath)/*; do " +
-            "[ -S \"$f\" ] && stat -c '%n %Y' \"$f\" 2>/dev/null; " +
+            "[ -S \"$f\" ] && { stat -c '%n %Y' \"$f\" 2>/dev/null || stat -f '%N %m' \"$f\" 2>/dev/null; }; " +
             "done || true"
         )
 
