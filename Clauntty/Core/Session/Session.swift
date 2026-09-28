@@ -758,10 +758,12 @@ class Session: ObservableObject, Identifiable {
         isPaused = false
         isPrefetchingOnIdle = false
         rtachProtocol.sendResume()
-        // Also request a full redraw from rtach to force TUI apps to repaint
-        rtachProtocol.requestRedraw()
-        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SENT resume + redraw to rtach")
+        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SENT resume to rtach")
     }
+        // No redraw request: resume already makes rtach send SIGWINCH so full-screen apps
+        // repaint, and on the normal screen rtach answers redraw by resending all stored
+        // output. That was harmless only while the proxy dropped redraw (before 2.7.5);
+        // since then every tab switch appended a copy of the history.
 
     /// Claim active client for window size and command routing
     func claimActive() {
