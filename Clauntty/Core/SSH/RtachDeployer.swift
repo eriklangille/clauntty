@@ -92,7 +92,8 @@ class RtachDeployer {
     /// 2.7.1 - Set BROWSER env var to open-browser for CLI tools (gh, python, etc.)
     /// 2.7.2 - Active client claims for window size + command routing
     /// 2.7.3 - CLI handshake detection matches Swift (no leaked headers)
-    static let expectedVersion = "2.7.3"
+    /// 2.7.4 - Fix: complete partial socket writes; chunk large resume flushes (garbled screen)
+    static let expectedVersion = "2.7.4"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
