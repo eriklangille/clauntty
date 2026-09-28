@@ -531,6 +531,22 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
         }
     }
 
+    /// Log how the remote side ends the channel (exit status, signal, EOF) to tell a
+    /// remote exit apart from a local close
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        switch event {
+        case let status as SSHChannelRequestEvent.ExitStatus:
+            Logger.clauntty.debugOnly("SSH channel: remote exit status \(status.exitStatus)")
+        case let signal as SSHChannelRequestEvent.ExitSignal:
+            Logger.clauntty.debugOnly("SSH channel: remote exit signal \(signal.signalName)")
+        case ChannelEvent.inputClosed:
+            Logger.clauntty.debugOnly("SSH channel: remote EOF")
+        default:
+            break
+        }
+        context.fireUserInboundEventTriggered(event)
+    }
+
     func channelInactive(context: ChannelHandlerContext) {
         Logger.clauntty.debugOnly("SSH channel became inactive (connection lost)")
         DispatchQueue.main.async { [weak self] in

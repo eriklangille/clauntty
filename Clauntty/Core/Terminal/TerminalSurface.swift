@@ -175,6 +175,10 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Current terminal grid size (rows, columns)
     private(set) var terminalSize: (rows: UInt16, columns: UInt16) = (24, 80)
 
+    /// Size the terminal has actually resized to (from the pty resize callback); what the
+    /// remote should see
+    private var appliedTerminalSize: (rows: UInt16, columns: UInt16)?
+
     /// Callback when terminal grid size changes (for SSH window resize)
     var onTerminalSizeChanged: ((UInt16, UInt16) -> Void)?
 
@@ -521,6 +525,21 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // Must dispatch to main thread since Session is @MainActor
             DispatchQueue.main.async {
                 view.onTextInput?(inputData)
+            }
+        }
+
+        // Resize the remote (SSH window change) only once the terminal itself has resized.
+        // ghostty_surface_set_size applies the resize later on the termio thread (after a
+        // 25ms coalescing delay); telling the remote earlier let a full-screen app's redraw
+        // for the new size land in the old one (Claude Code's 29-row frame clamped to 8
+        // rows after rotating to portrait). Called on the termio thread.
+        ghostty_surface_set_pty_resize_callback(surface) { (userdata, columns, rows, _, _) in
+            guard let userdata = userdata else { return }
+            let view = Unmanaged<TerminalSurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            DispatchQueue.main.async {
+                Logger.clauntty.debugOnly("TAB_SWITCH[\(view.sessionId)]: terminal resized to \(columns)x\(rows), notifying SSH")
+                view.appliedTerminalSize = (rows, columns)
+                view.onTerminalSizeChanged?(rows, columns)
             }
         }
 
@@ -968,9 +987,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             let newCols = surfaceSize.columns
 
             if newRows != self.terminalSize.rows || newCols != self.terminalSize.columns {
+                // The remote is told from the pty resize callback
                 self.terminalSize = (newRows, newCols)
                 Logger.clauntty.debugOnly("Font change: terminal now \(newCols)x\(newRows)")
-                self.onTerminalSizeChanged?(newRows, newCols)
             }
         }
     }
@@ -1616,13 +1635,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let scrollOffset = ghostty_surface_scrollback_offset(surface)
         Logger.clauntty.debugOnly("handleRotationComplete: grid=\(gridSize.columns)x\(gridSize.rows), scrollOffset=\(scrollOffset), isAltScreen=\(self.isAlternateScreen), bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height))")
 
-        // For alternate screen apps (Claude Code, vim, etc.), scroll to bottom
-        // to ensure cursor and content are visible
-        if isAlternateScreen {
-            Logger.clauntty.debugOnly("handleRotationComplete: scrolling to bottom for alt screen")
-            // Scroll to bottom of viewport (0 offset = at bottom/current content)
-            ghostty_surface_mouse_scroll(surface, 0, -1000, 0)  // Large negative = scroll to bottom
-        }
+        // No scrolling on the alternate screen: it has no scrollback, and Ghostty turns wheel
+        // events there into arrow keys (alternate scroll mode), which sent the remote app
+        // hundreds of arrow presses per rotation.
 
         // Force complete redraw
         Logger.clauntty.debugOnly("handleRotationComplete: calling forceRedraw")
@@ -1632,7 +1647,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self = self else { return }
             Logger.clauntty.debugOnly("handleRotationComplete: sending SIGWINCH \(self.terminalSize.columns)x\(self.terminalSize.rows)")
-            self.onTerminalSizeChanged?(self.terminalSize.rows, self.terminalSize.columns)
+            if let size = self.appliedTerminalSize {
+                self.onTerminalSizeChanged?(size.rows, size.columns)
+            }
         }
     }
 
@@ -1703,8 +1720,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         if newRows != terminalSize.rows || newCols != terminalSize.columns {
             terminalSize = (newRows, newCols)
-            Logger.clauntty.debugOnly("Terminal size changed, notifying SSH: \(newCols)x\(newRows)")
-            onTerminalSizeChanged?(newRows, newCols)
+            // The remote is told from the pty resize callback, once the terminal has resized
+            Logger.clauntty.debugOnly("Terminal size changed: \(newCols)x\(newRows)")
 
             // Force re-render after size change with slight delay
             // Skip if already in forceRedraw (to avoid infinite loop)
@@ -1898,7 +1915,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self = self else { return }
                 Logger.clauntty.debugOnly("TAB_SWITCH: onTerminalSizeChanged callback is \(self.onTerminalSizeChanged == nil ? "nil" : "set")")
-                self.onTerminalSizeChanged?(self.terminalSize.rows, self.terminalSize.columns)
+                if let size = self.appliedTerminalSize {
+                    self.onTerminalSizeChanged?(size.rows, size.columns)
+                }
                 Logger.clauntty.debugOnly("TAB_SWITCH: SIGWINCH sent \(self.terminalSize.columns)x\(self.terminalSize.rows)")
             }
         } else {

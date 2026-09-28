@@ -27,7 +27,8 @@ extension Logger {
     func debugOnly(_ message: @autoclosure () -> String) {
         #if DEBUG
         let msg = message()
-        self.debug("\(msg)")
+        // Public: interpolated messages are otherwise redacted and dropped from device logs
+        self.debug("\(msg, privacy: .public)")
         #endif
     }
 
@@ -39,7 +40,7 @@ extension Logger {
         #if DEBUG
         if Self.isVerbose {
             let msg = message()
-            self.info("\(msg)")
+            self.info("\(msg, privacy: .public)")
         }
         #endif
     }

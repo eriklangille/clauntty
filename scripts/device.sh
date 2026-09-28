@@ -64,8 +64,13 @@ install() {
 }
 
 launch() {
-    xcrun devicectl device process launch --terminate-existing --device "$DEVICE_ID" "$BUNDLE_ID" > /dev/null
-    echo "Launched $BUNDLE_ID."
+    # CLAUNTTY_VERBOSE=1 ./scripts/device.sh run  -> verbose app logging
+    local env_args=()
+    if [ -n "${CLAUNTTY_VERBOSE:-}" ]; then
+        env_args=(--environment-variables '{"CLAUNTTY_VERBOSE":"1"}')
+    fi
+    xcrun devicectl device process launch --terminate-existing ${env_args[@]+"${env_args[@]}"} --device "$DEVICE_ID" "$BUNDLE_ID" > /dev/null
+    echo "Launched $BUNDLE_ID${CLAUNTTY_VERBOSE:+ (verbose)}."
 }
 
 doctor() {
