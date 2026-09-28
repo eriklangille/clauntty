@@ -104,6 +104,7 @@ enum LaunchArgs {
         let username: String
         let authMethod: SeedAuthMethod
         let password: String?
+        var useTailscale: Bool = false
     }
 
     enum SeedConnectionParseResult: Equatable {
@@ -183,7 +184,8 @@ enum LaunchArgs {
                 port: port,
                 username: username,
                 authMethod: authMethod,
-                password: password
+                password: password,
+                useTailscale: args.contains("--seed-tailscale")
             )
         )
     }
@@ -219,6 +221,9 @@ struct ClaunttyApp: App {
 
         // Set up notification delegate
         UNUserNotificationCenter.current().delegate = NotificationManager.shared
+
+        // Bring the embedded Tailscale node up early so tailnet connections don't wait on it
+        TailscaleManager.shared.startIfLoggedIn()
     }
 
     var body: some Scene {

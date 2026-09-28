@@ -141,7 +141,8 @@ class SessionManager: ObservableObject {
                 port: config.port,
                 username: config.username,
                 authMethod: config.authMethod,
-                connectionId: config.id
+                connectionId: config.id,
+                useTailscale: config.useTailscale
             )
 
             try await connection.connect()
@@ -183,7 +184,8 @@ class SessionManager: ObservableObject {
             port: config.port,
             username: config.username,
             authMethod: config.authMethod,
-            connectionId: config.id
+            connectionId: config.id,
+            useTailscale: config.useTailscale
         )
         try await connection.connect()
         Logger.clauntty.debugOnly("SessionManager: SSH connection established for \(session.id.uuidString.prefix(8))")
@@ -331,7 +333,8 @@ class SessionManager: ObservableObject {
                 port: config.port,
                 username: config.username,
                 authMethod: config.authMethod,
-                connectionId: config.id
+                connectionId: config.id,
+                useTailscale: config.useTailscale
             )
             try await connection.connect()
             connectionPool[poolKey] = connection
@@ -427,7 +430,8 @@ class SessionManager: ObservableObject {
                 port: config.port,
                 username: config.username,
                 authMethod: config.authMethod,
-                connectionId: config.id
+                connectionId: config.id,
+                useTailscale: config.useTailscale
             )
             do {
                 try await connection.connect()
@@ -578,7 +582,8 @@ class SessionManager: ObservableObject {
                 port: config.port,
                 username: config.username,
                 authMethod: config.authMethod,
-                connectionId: config.id
+                connectionId: config.id,
+                useTailscale: config.useTailscale
             )
             try await connection.connect()
             connectionPool[poolKey] = connection
@@ -682,7 +687,8 @@ class SessionManager: ObservableObject {
                 port: config.port,
                 username: config.username,
                 authMethod: config.authMethod,
-                connectionId: config.id
+                connectionId: config.id,
+                useTailscale: config.useTailscale
             )
             try await connection.connect()
             connectionPool[poolKey] = connection
@@ -1043,7 +1049,8 @@ class SessionManager: ObservableObject {
                 port: config.port,
                 username: config.username,
                 authMethod: config.authMethod,
-                connectionId: config.id
+                connectionId: config.id,
+                useTailscale: config.useTailscale
             )
             try await connection.connect()
             connectionPool[poolKey] = connection

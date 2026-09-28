@@ -30,6 +30,8 @@ class SSHConnection: ObservableObject {
     let host: String
     let port: Int
     let username: String
+    /// Dial through the embedded Tailscale node instead of the device network
+    let useTailscale: Bool
     private let authMethod: AuthMethod
     private let connectionId: UUID
 
@@ -65,11 +67,13 @@ class SSHConnection: ObservableObject {
         port: Int = 22,
         username: String,
         authMethod: AuthMethod,
-        connectionId: UUID
+        connectionId: UUID,
+        useTailscale: Bool = false
     ) {
         self.host = host
         self.port = port
         self.username = username
+        self.useTailscale = useTailscale
         self.authMethod = authMethod
         self.connectionId = connectionId
     }
@@ -78,7 +82,7 @@ class SSHConnection: ObservableObject {
 
     func connect() async throws {
         state = .connecting
-        Logger.clauntty.debugOnly("SSH connecting to \(self.host):\(self.port)")
+        Logger.clauntty.debugOnly("SSH connecting to \(self.host):\(self.port)\(self.useTailscale ? " via Tailscale" : "")")
 
         do {
             // Use global singleton event loop group - never creates new threads on reconnect
@@ -113,7 +117,13 @@ class SSHConnection: ObservableObject {
                 .connectTimeout(.seconds(30))
 
             // Connect
-            let channel = try await bootstrap.connect(host: host, port: port).get()
+            let channel: Channel
+            if useTailscale {
+                let fd = try await TailscaleManager.shared.dial(host: host, port: port)
+                channel = try await bootstrap.withConnectedSocket(fd).get()
+            } else {
+                channel = try await bootstrap.connect(host: host, port: port).get()
+            }
             self.channel = channel
             Logger.clauntty.debugOnly("SSH TCP connection established")
 

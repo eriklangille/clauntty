@@ -16,6 +16,11 @@ struct NewConnectionView: View {
     @State private var savePassword: Bool = true
     @State private var selectedKeyId: String?
     @State private var showingKeyImportSheet = false
+    @State private var useTailscale = false
+    /// Once the user flips the toggle, stop auto-suggesting it from the host
+    @State private var tailscaleTouched = false
+    @ObservedObject private var tailscale = TailscaleManager.shared
+    @State private var showAllTailnetMachines = false
 
     // Validation
     @State private var showingValidationError = false
@@ -37,6 +42,8 @@ struct NewConnectionView: View {
             _host = State(initialValue: existing.host)
             _port = State(initialValue: String(existing.port))
             _username = State(initialValue: existing.username)
+            _useTailscale = State(initialValue: existing.useTailscale)
+            _tailscaleTouched = State(initialValue: true)
             switch existing.authMethod {
             case .password:
                 _authType = State(initialValue: .password)
@@ -55,6 +62,10 @@ struct NewConnectionView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !isEditing && tailscale.isRunning && !tailnetMachines.isEmpty {
+                    tailnetSection
+                }
+
                 Section("Server") {
                     TextField("Name (optional)", text: $name)
                         .textInputAutocapitalization(.never)
@@ -70,6 +81,19 @@ struct NewConnectionView: View {
                     TextField("Username", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                }
+
+                Section {
+                    Toggle("Connect via Tailscale", isOn: Binding(
+                        get: { useTailscale },
+                        set: { useTailscale = $0; tailscaleTouched = true }
+                    ))
+                } footer: {
+                    if useTailscale && !tailscale.isRunning {
+                        Text("Log in to Tailscale in Settings to use this. Clauntty joins your tailnet itself; the Tailscale app isn't needed.")
+                    } else {
+                        Text("Reach this server over your tailnet. Only Clauntty's connections use Tailscale.")
+                    }
                 }
 
                 Section("Authentication") {
@@ -114,12 +138,91 @@ struct NewConnectionView: View {
                 Text(validationError)
             }
         }
+        .onChange(of: host) { _, newHost in
+            if !tailscaleTouched {
+                useTailscale = SavedConnection.looksLikeTailnetHost(newHost.trimmingCharacters(in: .whitespaces))
+            }
+        }
         .onAppear {
             appState.beginInputSuppression()
             dismissTerminalInput()
         }
         .onDisappear {
             appState.endInputSuppression()
+        }
+    }
+
+    // MARK: - Tailnet Machines
+
+    private var tailnetMachines: [TailnetPeer] {
+        tailscale.peers.filter(\.isLikelyServer)
+    }
+
+    private static let collapsedMachineCount = 5
+
+    @ViewBuilder
+    private var tailnetSection: some View {
+        let machines = tailnetMachines
+        let shown = showAllTailnetMachines ? machines : Array(machines.prefix(Self.collapsedMachineCount))
+        Section {
+            ForEach(shown) { peer in
+                Button {
+                    selectTailnetMachine(peer)
+                } label: {
+                    tailnetRow(peer)
+                }
+                .buttonStyle(.plain)
+            }
+            if machines.count > Self.collapsedMachineCount {
+                Button(showAllTailnetMachines ? "Show fewer" : "Show all \(machines.count)") {
+                    showAllTailnetMachines.toggle()
+                }
+            }
+        } header: {
+            Text("Tailnet Machines")
+        } footer: {
+            Text("Tap a machine to fill in its address.")
+        }
+    }
+
+    private func tailnetRow(_ peer: TailnetPeer) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(peer.online ? Color.green : Color.secondary.opacity(0.4))
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(peer.name)
+                    .foregroundColor(peer.online ? .primary : .secondary)
+                Text(peer.ip ?? peer.dnsName)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(peer.os)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if !peer.online, let lastSeen = peer.lastSeen {
+                    Text(lastSeen, format: .relative(presentation: .named))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            if host == peer.host {
+                Image(systemName: "checkmark")
+                    .foregroundColor(.accentColor)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func selectTailnetMachine(_ peer: TailnetPeer) {
+        host = peer.host
+        port = "22"
+        useTailscale = true
+        tailscaleTouched = true
+        if name.trimmingCharacters(in: .whitespaces).isEmpty {
+            name = peer.name
         }
     }
 
@@ -224,7 +327,8 @@ struct NewConnectionView: View {
             port: portNumber,
             username: trimmedUsername,
             authMethod: authMethod,
-            lastConnected: existingConnection?.lastConnected
+            lastConnected: existingConnection?.lastConnected,
+            useTailscale: useTailscale
         )
 
         // Check for duplicate (same host, port, username, and name)

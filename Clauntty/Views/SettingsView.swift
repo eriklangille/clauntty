@@ -7,6 +7,10 @@ struct SettingsView: View {
     @ObservedObject var notificationManager = NotificationManager.shared
     @ObservedObject var powerManager = PowerManager.shared
     @ObservedObject var speechManager = SpeechManager.shared
+    @ObservedObject var tailscale = TailscaleManager.shared
+    /// Open the login page as soon as the node reports it
+    @State private var tailscaleLoginRequested = false
+    @Environment(\.openURL) private var openURL
     @State private var showingDownloadConfirmation = false
     @AppStorage("sessionManagementEnabled") private var sessionManagementEnabled = true
     @State private var fontSize: Float = FontSizePreference.current
@@ -49,6 +53,14 @@ struct SettingsView: View {
                     Text("Sessions")
                 } footer: {
                     Text("When enabled, terminal sessions persist on the server using rtach. Reconnecting restores your session with scrollback history.")
+                }
+
+                Section {
+                    tailscaleContent
+                } header: {
+                    Text("Tailscale")
+                } footer: {
+                    Text("Clauntty joins your tailnet as its own device, so servers marked \"Connect via Tailscale\" work without the Tailscale app. Other apps are unaffected.")
                 }
 
                 Section {
@@ -108,8 +120,88 @@ struct SettingsView: View {
             appState.beginInputSuppression()
             dismissTerminalInput()
         }
+        .onChange(of: tailscale.state) { _, state in
+            if tailscaleLoginRequested, case .needsLogin(let url?) = state {
+                tailscaleLoginRequested = false
+                openURL(url)
+            }
+        }
         .onDisappear {
             appState.endInputSuppression()
+        }
+    }
+
+    @ViewBuilder
+    private var tailscaleContent: some View {
+        switch tailscale.state {
+        case .stopped:
+            Button {
+                tailscaleLoginRequested = true
+                tailscale.start()
+            } label: {
+                Label("Log in to Tailscale", systemImage: "network")
+            }
+
+        case .starting:
+            HStack {
+                Text("Starting…")
+                Spacer()
+                ProgressView()
+            }
+
+        case .needsLogin(let url):
+            if let url {
+                Button {
+                    openURL(url)
+                } label: {
+                    Label("Log in to Tailscale", systemImage: "network")
+                }
+            } else {
+                HStack {
+                    Text("Preparing login…")
+                    Spacer()
+                    ProgressView()
+                }
+            }
+            Button("Cancel", role: .destructive) {
+                tailscaleLoginRequested = false
+                Task { await tailscale.logOut() }
+            }
+
+        case .running(let ip):
+            HStack {
+                Label("Connected", systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                Spacer()
+                if let name = tailscale.tailnetName {
+                    Text(name)
+                        .foregroundColor(.secondary)
+                }
+            }
+            if let ip {
+                HStack {
+                    Text("This device")
+                    Spacer()
+                    Text("\(TailscaleManager.hostName) · \(ip)")
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            Button("Log Out", role: .destructive) {
+                Task { await tailscale.logOut() }
+            }
+
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Tailscale failed to start", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Button("Retry") {
+                    tailscale.start()
+                }
+            }
         }
     }
 

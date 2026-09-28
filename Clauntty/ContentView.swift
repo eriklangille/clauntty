@@ -315,7 +315,8 @@ struct ContentView: View {
         port: spec.port,
         username: spec.username,
         authMethod: authMethod,
-        lastConnected: existing?.lastConnected
+        lastConnected: existing?.lastConnected,
+        useTailscale: spec.useTailscale
       )
 
       if existing != nil {
