@@ -640,9 +640,13 @@ class Session: ObservableObject, Identifiable {
         rtachProtocol.sendKeyboardInput(data)
     }
 
+    /// Last size sent to the remote, for forcing a repaint after reattach
+    private var lastWindowSize: (rows: UInt16, columns: UInt16)?
+
     /// Send window size change
     func sendWindowChange(rows: UInt16, columns: UInt16) {
         Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange called \(columns)x\(rows)")
+        lastWindowSize = (rows, columns)
         guard let channel = sshChannel else {
             // Expected during connection setup - size will be sent after channel is established
             Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange SKIPPED (no channel)")
@@ -950,6 +954,22 @@ extension Session: RtachClient.RtachSessionDelegate {
         }
     }
 
+    /// Make the remote program repaint by briefly changing the terminal size by one row
+    private func forceRemoteRepaint() {
+        guard let size = lastWindowSize, size.rows > 2 else {
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): no size yet, skipping repaint nudge")
+            return
+        }
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): repaint nudge \(size.columns)x\(size.rows)")
+        sendWindowChange(rows: size.rows - 1, columns: size.columns)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, let current = self.lastWindowSize else { return }
+            // Restore the latest real size (a resize may have happened in between)
+            let rows = current.rows == size.rows - 1 && current.columns == size.columns ? size.rows : current.rows
+            self.sendWindowChange(rows: rows, columns: current.columns)
+        }
+    }
+
     nonisolated func rtachSessionDidEnterFramedMode(_ session: RtachClient.RtachSession) {
         Task { @MainActor in
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): entered framed mode")
@@ -963,6 +983,13 @@ extension Session: RtachClient.RtachSessionDelegate {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): applying deferred pause")
                 self.pauseOutput()
             }
+
+            // On reattach, rtach skips replaying the screen when the program is on the
+            // alternate screen (Claude Code, vim), relying on it to redraw. Programs only
+            // redraw on a real size change (Node ignores a SIGWINCH at the same size), and
+            // reattaching at the same size sends none, so the screen stays blank until
+            // something resizes (e.g. rotating). Nudge the remote size by one row and back.
+            self.forceRemoteRepaint()
 
             if self.pendingActiveClaim {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): applying deferred active claim")
