@@ -1805,10 +1805,30 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// included). setActive(true) reorders window subviews, toggles focus, resizes, redraws
     /// and sends SIGWINCH, and the SIGWINCH makes TUIs like Claude Code repaint and retitle,
     /// which updates SwiftUI again: a loop of UI churn several times a second. Only apply
-    /// the first call and real changes; explicit tab switches still call setActive directly.
+    /// the first call and real changes.
     func updateActiveFromSwiftUI(_ active: Bool) {
-        guard !hasAppliedActiveState || active != isActiveTab else { return }
-        setActive(active)
+        scheduleSetActive(active, force: false)
+    }
+
+    /// Latest requested active state waiting to be applied after the current SwiftUI update
+    private var pendingActive: (active: Bool, force: Bool)?
+
+    /// Apply setActive after the current SwiftUI update, never inside it. setActive changes
+    /// the first responder, and UIKit then asks the SwiftUI hosting view whether it can become
+    /// first responder, which re-enters SwiftUI's graph mid-update: an AttributeGraph cycle
+    /// (hundreds per session on the phone), leaving keyboard/responder state inconsistent.
+    /// Calls within one update coalesce to the latest state. `force` applies even without a
+    /// change (explicit tab switches).
+    func scheduleSetActive(_ active: Bool, force: Bool) {
+        let alreadyScheduled = pendingActive != nil
+        pendingActive = (active, force || (pendingActive?.force ?? false))
+        guard !alreadyScheduled else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let pending = self.pendingActive else { return }
+            self.pendingActive = nil
+            guard pending.force || !self.hasAppliedActiveState || pending.active != self.isActiveTab else { return }
+            self.setActive(pending.active)
+        }
     }
 
     func setActive(_ active: Bool) {

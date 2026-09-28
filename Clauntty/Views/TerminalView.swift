@@ -211,9 +211,10 @@ struct TerminalView: View {
 
             guard wasActive != nowActive else { return }
 
-            // Update surface active state when tab visibility changes
+            // Update surface active state when tab visibility changes. Deferred: onChange runs
+            // during a SwiftUI update, and changing the first responder there re-enters the graph.
             if let surface = surfaceHolder.surface {
-                surface.setActive(nowActive)
+                surface.scheduleSetActive(nowActive, force: true)
             }
 
             // Capture screenshot when switching away from this tab

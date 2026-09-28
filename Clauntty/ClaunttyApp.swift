@@ -44,18 +44,34 @@ enum GhosttyGlobal {
     /// were installed before ghostty_init (the Go runtime's, for TailscaleKit) wherever
     /// breakpad replaced them. Init takes microseconds; the second pass covers a slow start.
     private static func removeGhosttyCrashReporter(restoring saved: CrashSignalHandlers) {
-        for delay in [2.0, 15.0] {
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) {
-                _ = saved.restoreWhereReplaced(bySymbolContaining: "breakpad")
-                // With breakpad gone the Go runtime's handler is on SIGSEGV/SIGBUS/SIGFPE. For a
-                // fault on a non-Go thread (e.g. main) with nothing to forward to, Go prints a
-                // fatal error to stderr and exit(2)s: the app vanishes with no crash report.
-                // Use the system default so any crash produces a normal iOS crash report. Go
-                // doesn't need these for normal operation (a nil deref inside Go code would
-                // crash instead of panicking).
-                let reset = CrashSignalHandlers.resetToDefault(whereSymbolContains: ["breakpad", "runtime."])
-                CrashSignalHandlers.record("after \(delay)s (reset to default \(reset))")
-            }
+        // On the phone Sentry sometimes installs breakpad more than 15s after launch, so keep
+        // checking: every 10s, and whenever the app goes to the background (the crash happens
+        // while resuming). Cheap: a few sigaction reads unless something needs resetting.
+        let queue = DispatchQueue(label: "clauntty.crash-handlers", qos: .utility)
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 2, repeating: 10)
+        timer.setEventHandler { enforceDefaultCrashHandlers(saved, reason: "timer") }
+        timer.resume()
+        crashHandlerTimer = timer
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil
+        ) { _ in
+            queue.async { enforceDefaultCrashHandlers(saved, reason: "background") }
+        }
+    }
+
+    private static var crashHandlerTimer: DispatchSourceTimer?
+
+    /// With breakpad gone the Go runtime's handler is on SIGSEGV/SIGBUS/SIGFPE. For a fault on a
+    /// non-Go thread (e.g. main) with nothing to forward to, Go prints a fatal error to stderr
+    /// and exit(2)s: the app vanishes with no crash report. Use the system default so any
+    /// crash produces a normal iOS crash report. Go doesn't need these for normal operation
+    /// (a nil deref inside Go code would crash instead of panicking).
+    private static func enforceDefaultCrashHandlers(_ saved: CrashSignalHandlers, reason: String) {
+        _ = saved.restoreWhereReplaced(bySymbolContaining: "breakpad")
+        let reset = CrashSignalHandlers.resetToDefault(whereSymbolContains: ["breakpad", "runtime."])
+        if !reset.isEmpty {
+            CrashSignalHandlers.record("\(reason): reset to default \(reset)")
         }
     }
 }
