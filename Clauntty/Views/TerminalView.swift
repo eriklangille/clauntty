@@ -202,10 +202,10 @@ struct TerminalView: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .captureTerminalText)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .captureTerminalText)) { note in
             // Only capture if this is the active terminal
             guard isActive, let surface = surfaceHolder.surface else { return }
-            handleCaptureTerminalText(surface: surface)
+            handleCaptureTerminalText(surface: surface, wholeScreen: note.userInfo?["wholeScreen"] as? Bool ?? false)
         }
         .onChange(of: sessionManager.activeTab) { oldTab, newTab in
             // Compute active state from the actual tab change
@@ -229,10 +229,10 @@ struct TerminalView: View {
     }
 
     /// Handle request to capture terminal text (from URL scheme)
-    private func handleCaptureTerminalText(surface: TerminalSurfaceView) {
+    private func handleCaptureTerminalText(surface: TerminalSurfaceView, wholeScreen: Bool) {
         Logger.clauntty.debugOnly("Capturing terminal text for session \(session.id.uuidString.prefix(8))")
 
-        guard let text = surface.captureVisibleText() else {
+        guard let text = surface.captureVisibleText(wholeScreen: wholeScreen) else {
             Logger.clauntty.error("Failed to capture terminal text")
             return
         }

@@ -2129,7 +2129,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Capture all visible text in the terminal viewport.
     /// Used for automated testing to verify rendering is correct.
     /// - Returns: The visible terminal text as a string, or nil if capture failed
-    func captureVisibleText() -> String? {
+    /// - Parameter wholeScreen: include the scrollback, not just the viewport
+    func captureVisibleText(wholeScreen: Bool = false) -> String? {
         guard let surface = self.surface else {
             Logger.clauntty.warning("captureVisibleText: no surface")
             return nil
@@ -2151,11 +2152,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Create selection spanning entire visible viewport
         var sel = ghostty_selection_s()
-        sel.top_left.tag = GHOSTTY_POINT_VIEWPORT
+        let tag = wholeScreen ? GHOSTTY_POINT_SCREEN : GHOSTTY_POINT_VIEWPORT
+        sel.top_left.tag = tag
         sel.top_left.coord = GHOSTTY_POINT_COORD_TOP_LEFT
         sel.top_left.x = 0
         sel.top_left.y = 0
-        sel.bottom_right.tag = GHOSTTY_POINT_VIEWPORT
+        sel.bottom_right.tag = tag
         sel.bottom_right.coord = GHOSTTY_POINT_COORD_BOTTOM_RIGHT
         sel.bottom_right.x = 0
         sel.bottom_right.y = 0

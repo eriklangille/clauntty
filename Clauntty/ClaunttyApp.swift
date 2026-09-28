@@ -278,16 +278,19 @@ struct ClaunttyApp: App {
 
         switch url.host {
         case "dump-text":
-            dumpTerminalText()
+            // ?scope=screen includes the scrollback, not just the viewport
+            let scope = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "scope" })?.value
+            dumpTerminalText(wholeScreen: scope == "screen")
         default:
             Logger.clauntty.warning("Unknown URL command: \(url.host ?? "nil")")
         }
     }
 
     /// Dump the active terminal's visible text to /tmp/clauntty_dump.txt
-    private func dumpTerminalText() {
+    private func dumpTerminalText(wholeScreen: Bool) {
         // Post notification to request text capture from active terminal
-        NotificationCenter.default.post(name: .captureTerminalText, object: nil)
+        NotificationCenter.default.post(name: .captureTerminalText, object: nil, userInfo: ["wholeScreen": wholeScreen])
     }
 }
 
