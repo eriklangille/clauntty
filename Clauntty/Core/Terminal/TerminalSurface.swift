@@ -137,18 +137,46 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     // MARK: - Surface Registry (for routing Ghostty callbacks)
 
-    /// Registry to look up surfaces by pointer (for routing Ghostty action callbacks)
+    /// Registries to find a view from Ghostty callbacks: by surface pointer (app action
+    /// callbacks) and by the surface's userdata ID (pty callbacks). Entries are weak so a
+    /// closed tab's view, and with it the Ghostty surface, can be freed; they used to be
+    /// strong and were only removed in deinit, which therefore never ran.
     /// Access must be synchronized via registryLock since Ghostty callbacks may come from any thread
-    private static var surfaceRegistry: [UnsafeRawPointer: TerminalSurfaceView] = [:]
+    private final class WeakView {
+        weak var view: TerminalSurfaceView?
+        init(_ view: TerminalSurfaceView) { self.view = view }
+    }
+    private static var surfaceRegistry: [UnsafeRawPointer: WeakView] = [:]
+    private static var idRegistry: [UInt: WeakView] = [:]
+    private static var nextRegistryID: UInt = 1
     private static let registryLock = NSLock()
+
+    /// Surface userdata: an ID rather than a pointer to the view, so a callback that
+    /// fires while the view is being freed finds nothing instead of a dead object
+    private var registryID: UInt = 0
 
     /// Look up surface view by Ghostty surface pointer (thread-safe)
     static func find(surface: ghostty_surface_t) -> TerminalSurfaceView? {
         let ptr = UnsafeRawPointer(surface)
         registryLock.lock()
         defer { registryLock.unlock() }
-        return surfaceRegistry[ptr]
+        return surfaceRegistry[ptr]?.view
     }
+
+    /// Look up a surface view from a pty callback's userdata. Main thread only, so the
+    /// strong reference it returns can't end up being the last one off the main thread.
+    private static func find(userdata: UnsafeMutableRawPointer?) -> TerminalSurfaceView? {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let id = UInt(bitPattern: userdata)
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        return idRegistry[id]?.view
+    }
+
+    #if DEBUG
+    /// Live views, to spot leaks in the logs
+    private static var liveCount = 0
+    #endif
 
     // MARK: - Published Properties
 
@@ -487,8 +515,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
 
         // Create surface configuration for iOS
+        Self.registryLock.lock()
+        registryID = Self.nextRegistryID
+        Self.nextRegistryID += 1
+        Self.idRegistry[registryID] = WeakView(self)
+        Self.registryLock.unlock()
+
         var config = ghostty_surface_config_new()
-        config.userdata = Unmanaged.passUnretained(self).toOpaque()
+        config.userdata = UnsafeMutableRawPointer(bitPattern: registryID)
         config.platform_tag = GHOSTTY_PLATFORM_IOS
         config.platform = ghostty_platform_u(ios: ghostty_platform_ios_s(
             uiview: Unmanaged.passUnretained(self).toOpaque()
@@ -514,8 +548,6 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // IMPORTANT: This callback is called from Ghostty's internal thread,
         // so we must dispatch to main thread for Session (which is @MainActor)
         ghostty_surface_set_pty_input_callback(surface) { (userdata, data, len) in
-            guard let userdata = userdata else { return }
-            let view = Unmanaged<TerminalSurfaceView>.fromOpaque(userdata).takeUnretainedValue()
             guard len > 0, let data = data else { return }
             let inputData = Data(bytes: data, count: Int(len))
             // Log PTY input - show first 50 bytes hex for debugging paste
@@ -524,7 +556,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // Forward to SSH via the same callback as keyboard input
             // Must dispatch to main thread since Session is @MainActor
             DispatchQueue.main.async {
-                view.onTextInput?(inputData)
+                TerminalSurfaceView.find(userdata: userdata)?.onTextInput?(inputData)
             }
         }
 
@@ -534,9 +566,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // for the new size land in the old one (Claude Code's 29-row frame clamped to 8
         // rows after rotating to portrait). Called on the termio thread.
         ghostty_surface_set_pty_resize_callback(surface) { (userdata, columns, rows, _, _) in
-            guard let userdata = userdata else { return }
-            let view = Unmanaged<TerminalSurfaceView>.fromOpaque(userdata).takeUnretainedValue()
             DispatchQueue.main.async {
+                guard let view = TerminalSurfaceView.find(userdata: userdata) else { return }
                 Logger.clauntty.debugOnly("TAB_SWITCH[\(view.sessionId)]: terminal resized to \(columns)x\(rows), notifying SSH")
                 view.appliedTerminalSize = (rows, columns)
                 view.onTerminalSizeChanged?(rows, columns)
@@ -546,8 +577,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Register in static registry for Ghostty callback routing (thread-safe)
         let ptr = UnsafeRawPointer(surface)
         Self.registryLock.lock()
-        Self.surfaceRegistry[ptr] = self
+        Self.surfaceRegistry[ptr] = WeakView(self)
         Self.registryLock.unlock()
+
+        #if DEBUG
+        Self.liveCount += 1
+        Logger.clauntty.debugOnly("TerminalSurfaceView created [\(self.sessionId)], live=\(Self.liveCount)")
+        #endif
 
         // Set initial power mode
         updatePowerMode(PowerManager.shared.currentMode)
@@ -574,14 +610,28 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Remove accessory bar from window
         accessoryBar.removeFromSuperview()
 
+        Self.registryLock.lock()
+        Self.idRegistry.removeValue(forKey: registryID)
         if let surface = self.surface {
-            // Unregister from static registry (thread-safe)
-            let ptr = UnsafeRawPointer(surface)
-            Self.registryLock.lock()
-            Self.surfaceRegistry.removeValue(forKey: ptr)
-            Self.registryLock.unlock()
+            Self.surfaceRegistry.removeValue(forKey: UnsafeRawPointer(surface))
+        }
+        Self.registryLock.unlock()
 
-            ghostty_surface_free(surface)
+        if let surface = self.surface {
+            #if DEBUG
+            Self.liveCount -= 1
+            Logger.clauntty.debugOnly("TerminalSurfaceView freed [\(self.sessionId)], live=\(Self.liveCount)")
+            #endif
+            // Free after work already queued on terminalIOQueue, which captured the raw
+            // surface (output writes, font changes), then on the main thread like the rest
+            // of UIKit/CoreAnimation teardown. Ghostty only used this view at creation (to
+            // add its layer), so the surface can outlive it briefly.
+            let surfaceToFree = SendableSurface(surface)
+            terminalIOQueue.async {
+                DispatchQueue.main.async {
+                    ghostty_surface_free(surfaceToFree.surface)
+                }
+            }
         }
     }
 
@@ -2001,17 +2051,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Dispatch to background queue to avoid main thread deadlock
         // The surface mailbox is consumed by the main thread, so calling
         // ghostty_surface_write_pty_output from main = self-deadlock when queue fills
-        terminalIOQueue.async { [weak self] in
-            guard let self = self else { return }
-
-            Logger.clauntty.verbose("DATA_FLOW[\(self.sessionId)]: ghostty_surface_write_pty_output \(data.count) bytes")
+        // Captures the surface, not the view: holding the view here could make this queue
+        // drop the last reference, freeing a UIView off the main thread. deinit frees the
+        // surface only after this queue's pending work.
+        let sessionId = self.sessionId
+        terminalIOQueue.async {
+            Logger.clauntty.verbose("DATA_FLOW[\(sessionId)]: ghostty_surface_write_pty_output \(data.count) bytes")
 
             data.withUnsafeBytes { buffer in
                 guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
                 ghostty_surface_write_pty_output(surface, ptr, UInt(data.count))
             }
 
-            Logger.clauntty.verbose("DATA_FLOW[\(self.sessionId)]: ghostty_surface_write_pty_output completed")
+            Logger.clauntty.verbose("DATA_FLOW[\(sessionId)]: ghostty_surface_write_pty_output completed")
         }
     }
 
@@ -2296,4 +2348,10 @@ extension TerminalSurfaceView: UIEditMenuInteractionDelegate {
 #Preview {
     TerminalSurface(ghosttyApp: GhosttyApp())
         .ignoresSafeArea()
+}
+
+/// A surface pointer handed to the queues that free it after its view is gone
+private struct SendableSurface: @unchecked Sendable {
+    let surface: ghostty_surface_t
+    init(_ surface: ghostty_surface_t) { self.surface = surface }
 }

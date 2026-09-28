@@ -4,7 +4,11 @@ import os.log
 /// Wrapper class to hold terminal surface reference (works with SwiftUI @StateObject)
 @MainActor
 class TerminalSurfaceHolder: ObservableObject {
-    @Published var surface: TerminalSurfaceView?
+    /// Weak: the surface's callbacks (onTextInput, onFontSizeChanged...) capture this
+    /// TerminalView, holder included, so a strong reference was a cycle that kept every
+    /// closed tab's view, Ghostty surface and session alive. SwiftUI owns the view while
+    /// it's on screen. Not @Published: nothing renders from it, it's used from callbacks.
+    weak var surface: TerminalSurfaceView?
 }
 
 struct TerminalView: View {
@@ -312,8 +316,10 @@ struct TerminalView: View {
         // Set up callback for session data → terminal display
         // This is called from Session.processTerminalData which is @MainActor isolated.
         // writeSSHOutput internally dispatches to terminalIOQueue, so no threading needed here.
-        session.onDataReceived = { data in
-            surface.writeSSHOutput(data)
+        // Weak: the surface holds the session (its input callback), so a strong
+        // reference here kept closed tabs' views and Ghostty surfaces alive
+        session.onDataReceived = { [weak surface] data in
+            surface?.writeSSHOutput(data)
         }
 
         // Set up callback for old scrollback → prepend to terminal
