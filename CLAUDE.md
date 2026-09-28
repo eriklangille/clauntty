@@ -27,10 +27,18 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 ```
 ~/Projects/clauntty/
 ├── clauntty/          # iOS app (this repo)
-├── ghostty/           # Forked ghostty (git@github.com:eriklangille/ghostty.git)
-├── libxev/            # Local libxev fork (iOS fixes)
+├── ghostty/           # Forked ghostty (git@github.com:eriklangille/ghostty.git), branch clauntty-2
+├── rtach/             # Session persistence daemon (bundled into Clauntty/Resources/rtach/)
+├── libxev/            # Local libxev fork (iOS fixes), used by rtach
 └── libtailscale/      # Upstream libtailscale (github.com/tailscale/libtailscale); builds TailscaleKit.xcframework
 ```
+
+`Frameworks/GhosttyKit.xcframework` is a symlink into `../ghostty/macos/`.
+
+The ghostty fork's `clauntty-2` branch is upstream Ghostty (Sep 2026) plus a few patches. Two patches
+restore upstream's dropped iOS xcframework slices. The rest add the `manual` termio backend and the
+iOS C API below. The audit of every patch is in `~/Projects/plans/2026-09-27-clauntty-ghostty-upgrade.md`.
+The old fork is kept on the `clauntty` branch.
 
 `Frameworks/TailscaleKit.xcframework` is a symlink into `../libtailscale/swift/build/`. A fresh checkout
 needs `brew install go`, the libtailscale clone, and `./scripts/build-tailscalekit.sh` before Xcode builds.
@@ -41,9 +49,8 @@ The script pins Go to libtailscale's `go.mod` version (newer Go breaks a pinned 
 | Location | Purpose |
 |----------|---------|
 | `../ghostty/include/ghostty.h` | C API header |
-| `../ghostty/src/termio/Exec.zig` | iOS process/PTY handling |
-| `../ghostty/src/renderer/Metal.zig` | Metal renderer |
-| `../libxev/src/backend/kqueue.zig` | Event loop (iOS fixes) |
+| `../ghostty/src/termio/Manual.zig` | iOS termio backend: no process/pty, the app feeds output and gets input |
+| `../ghostty/src/apprt/embedded.zig` | C API exports, including the iOS ones |
 | `Clauntty/Core/Terminal/` | GhosttyApp, TerminalSurface, GhosttyBridge |
 | `Clauntty/Core/SSH/` | SSHConnection, SSHAuthenticator |
 | `Clauntty/Core/Terminal/GhosttyApp.swift` | GhosttyApp + Logger extension with `debugOnly()`, `verbose()` |
@@ -53,8 +60,8 @@ The script pins Go to libtailscale's `go.mod` version (newer Go breaks a pinned 
 **Always use `./scripts/sim.sh` instead of raw `xcrun simctl` or `xcodebuild` commands.**
 
 ```bash
-# Build GhosttyKit (after ghostty changes)
-cd ../ghostty && zig build -Demit-xcframework
+# Build GhosttyKit (after ghostty changes). Zig 0.16 (`brew install zig`); ~2 min cold
+cd ../ghostty && zig build -Demit-xcframework -Demit-macos-app=false -Doptimize=ReleaseFast -Dsentry=false
 
 # Build TailscaleKit (embedded Tailscale; needs Go, uses ../libtailscale)
 ./scripts/build-tailscalekit.sh
@@ -82,14 +89,9 @@ cd ../ghostty && zig build -Demit-xcframework
 xcodebuild test -project Clauntty.xcodeproj -scheme ClaunttyTests \
   -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 
-# Build for physical iPhone
-xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
-  -destination 'platform=iOS,name=iPhone 16' -quiet build
-
-# Install and launch on iPhone
-xcrun devicectl device install app --device "iPhone 16" \
-  ~/Library/Developer/Xcode/DerivedData/Clauntty-*/Build/Products/Debug-iphoneos/Clauntty.app
-xcrun devicectl device process launch --device "iPhone 16" com.octerm.clauntty
+# Build, install and launch on the connected iPhone (doctor = keychain/signing state)
+./scripts/device.sh run
+CLAUNTTY_VERBOSE=1 ./scripts/device.sh run   # with verbose logging
 ```
 
 ## IPA / TestFlight
@@ -203,11 +205,19 @@ void ghostty_surface_set_focus(ghostty_surface_t, bool);
 void ghostty_surface_key(ghostty_surface_t, ghostty_input_key_s);
 void ghostty_surface_text(ghostty_surface_t, const char*, size_t);
 
-// Output (SSH → terminal display) - iOS-specific
-void ghostty_surface_write_pty_output(ghostty_surface_t, const char*, size_t);
+// iOS (manual termio backend): the app is the other end of the "pty"
+void ghostty_surface_write_pty_output(ghostty_surface_t, const char*, uintptr_t);   // SSH output → terminal
+void ghostty_surface_set_pty_input_callback(ghostty_surface_t, ghostty_surface_pty_input_cb);   // keys, mouse, query replies → SSH
+void ghostty_surface_set_pty_resize_callback(ghostty_surface_t, ghostty_surface_pty_resize_cb); // terminal resized → SSH window change
+bool ghostty_surface_is_alternate_screen(ghostty_surface_t);
+bool ghostty_surface_prepend_scrollback(ghostty_surface_t, const char*, uintptr_t);
+uintptr_t ghostty_surface_scrollback_offset(ghostty_surface_t);
+void ghostty_surface_set_power_mode(ghostty_surface_t, int);   // 0 normal, 1 low power
 ```
 
-The `ghostty_surface_write_pty_output` function feeds data directly to the terminal for rendering, bypassing the PTY. This is used on iOS to display SSH output since no local process is spawned.
+Send the SSH window change from the resize callback, not after `ghostty_surface_set_size`. The terminal
+resizes about 25ms later on the termio thread, so telling the remote earlier lets a full-screen app's redraw
+for the new size land in the old one (half-drawn Claude Code after rotating).
 
 ## Current Status
 
@@ -281,13 +291,12 @@ The `ghostty_surface_write_pty_output` function feeds data directly to the termi
 
 ### Build rtach
 
+rtach still needs Zig 0.15 (`brew install zig@0.15`); the default `zig` is 0.16 for ghostty.
+
 ```bash
 cd ../rtach
-zig build cross         # Build Linux binaries
-ls zig-out/bin/rtach-*  # x86_64 + aarch64, ~100KB each
-
-# Copy to iOS app resources (required after rtach changes)
-cp zig-out/bin/rtach-* ../clauntty/Clauntty/Resources/rtach/
+$(brew --prefix zig@0.15)/bin/zig build cross   # all targets, gzipped into ../clauntty/Clauntty/Resources/rtach/
+# Bump src/main.zig version and RtachDeployer.expectedVersion together, or phones won't redeploy it
 
 # Clean iOS build to pick up new binaries (Xcode caches resources)
 xcodebuild -project ../clauntty/Clauntty.xcodeproj -scheme Clauntty clean
@@ -301,48 +310,18 @@ bun test                # 24 tests, all should pass
 bun run load-test.ts    # Performance: ~16K msg/sec
 ```
 
-## iOS Fixes Applied
+## iOS Support in the Ghostty Fork
 
-### libxev mach_port Fix
-**File**: `../libxev/src/backend/kqueue.zig`
-
-Changed `.macos` checks to `.isDarwin()` to include iOS:
-```zig
-// Line 957 & 1073: .macos → .isDarwin()
-```
-
-ghostty's `build.zig.zon` uses local libxev: `.path = "../libxev"`
-
-### Ghostty Exec.zig
-**File**: `../ghostty/src/termio/Exec.zig`
-
-- Skip process spawn on iOS (sandbox restriction)
-- PTY created for external data source (SSH)
-
-### Ghostty embedded.zig (iOS API)
-**File**: `../ghostty/src/apprt/embedded.zig`
-
-Added `ghostty_surface_write_pty_output()` function to write SSH data directly to terminal:
-```zig
-export fn ghostty_surface_write_pty_output(
-    surface: *Surface,
-    ptr: [*]const u8,
-    len: usize,
-) void {
-    surface.core_surface.io.processOutput(ptr[0..len]);
-}
-```
-
-### Metal.zig
-**File**: `../ghostty/src/renderer/Metal.zig` line 127
-
-- Fixed selector: `addSublayer` → `addSublayer:` (needs colon for ObjC parameter)
+- **Build**: upstream dropped iOS from the full library in Aug 2026. Two patches bring it back: a revert of `7a171895d`, and `-fblocks` for iOS in `pkg/macos/build.zig`. Upstream no longer builds iOS, so an upgrade may need more fixes like these.
+- **termio `manual` backend** (`src/termio/Manual.zig`): iOS can't spawn processes, so the surface uses a backend with no process or pty. It passes resizes to the embedder and sets `shell_redraws_prompt = .false`, since a remote shell doesn't redraw its prompt after a resize.
+- **Rendering**: Ghostty adds its Metal layer to the view's layer directly; the app adopts and sizes it (`adoptGhosttySublayer`).
+- **Sentry is off** (`-Dsentry=false`): its crash handlers broke the app's own handling.
 
 ## Key Info
 
 - **Bundle ID**: `com.octerm.clauntty`
 - **iOS target**: 17.0+
-- **Zig version**: 0.15.2+
+- **Zig version**: 0.16 for ghostty, 0.15 for rtach
 - **Dependencies**: swift-nio-ssh 0.12.0, swift-nio 2.92.0
 - Metal tests require simulator (headless XCTest won't work)
 
