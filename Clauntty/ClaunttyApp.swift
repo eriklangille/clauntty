@@ -15,141 +15,35 @@ enum GhosttyGlobal {
         initialized = true
 
         StderrCapture.start()
+        useDefaultCrashHandlers()
+
         Logger.clauntty.debugOnly("Initializing GhosttyKit global state...")
-        // TailscaleKit's Go runtime initializes on a background thread at load and installs
-        // its own crash-signal handlers, remembering whatever was installed before it as the
-        // handler to forward to. If it finishes after ghostty_init, it forwards to breakpad
-        // and the restore below can't see breakpad. Block until Go is up first: any call
-        // into an exported Go function waits for runtime init. (Unknown handle: EBADF, no-op.)
-        #if canImport(TailscaleKit)
-        var errBuf = [CChar](repeating: 0, count: 8)
-        _ = tailscale_errmsg(-1, &errBuf, errBuf.count)
-        #endif
-        let handlersBeforeGhostty = CrashSignalHandlers.save()
-        CrashSignalHandlers.record("before ghostty_init")
         let result = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         if result != 0 {
             Logger.clauntty.error("ghostty_init failed with code: \(result)")
         } else {
             Logger.clauntty.debugOnly("GhosttyKit global state initialized successfully")
         }
-
-        removeGhosttyCrashReporter(restoring: handlersBeforeGhostty)
     }
 
-    /// ghostty_init starts Sentry with its breakpad backend on a background thread. On iOS
-    /// breakpad's signal handler hangs when the app crashes, so a crash becomes a 10-30s
-    /// freeze until the watchdog kills the app, and the real crash gets buried under
-    /// breakpad frames. sentry_close() doesn't uninstall it, so put back the handlers that
-    /// were installed before ghostty_init (the Go runtime's, for TailscaleKit) wherever
-    /// breakpad replaced them. Init takes microseconds; the second pass covers a slow start.
-    private static func removeGhosttyCrashReporter(restoring saved: CrashSignalHandlers) {
-        // On the phone Sentry sometimes installs breakpad more than 15s after launch, so keep
-        // checking: every 10s, and whenever the app goes to the background (the crash happens
-        // while resuming). Cheap: a few sigaction reads unless something needs resetting.
-        let queue = DispatchQueue(label: "clauntty.crash-handlers", qos: .utility)
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 2, repeating: 10)
-        timer.setEventHandler { enforceDefaultCrashHandlers(saved, reason: "timer") }
-        timer.resume()
-        crashHandlerTimer = timer
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil
-        ) { _ in
-            queue.async { enforceDefaultCrashHandlers(saved, reason: "background") }
-        }
-    }
-
-    private static var crashHandlerTimer: DispatchSourceTimer?
-
-    /// With breakpad gone the Go runtime's handler is on SIGSEGV/SIGBUS/SIGFPE. For a fault on a
-    /// non-Go thread (e.g. main) with nothing to forward to, Go prints a fatal error to stderr
-    /// and exit(2)s: the app vanishes with no crash report. Use the system default so any
-    /// crash produces a normal iOS crash report. Go doesn't need these for normal operation
-    /// (a nil deref inside Go code would crash instead of panicking).
-    private static func enforceDefaultCrashHandlers(_ saved: CrashSignalHandlers, reason: String) {
-        _ = saved.restoreWhereReplaced(bySymbolContaining: "breakpad")
-        let reset = CrashSignalHandlers.resetToDefault(whereSymbolContains: ["breakpad", "runtime."])
-        if !reset.isEmpty {
-            CrashSignalHandlers.record("\(reason): reset to default \(reset)")
-        }
-    }
-}
-
-/// Snapshot of the process's handlers for crash signals
-struct CrashSignalHandlers {
-    static let signals: [Int32] = [SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS]
-
-    private var actions: [Int32: sigaction] = [:]
-
-    static func save() -> CrashSignalHandlers {
-        var snapshot = CrashSignalHandlers()
-        for sig in signals {
-            var action = sigaction()
-            if sigaction(sig, nil, &action) == 0 {
-                snapshot.actions[sig] = action
-            }
-        }
-        return snapshot
-    }
-
-    /// Restore the saved handler for each signal whose current handler's symbol name
-    /// contains `fragment`. Returns the signals that were restored.
-    func restoreWhereReplaced(bySymbolContaining fragment: String) -> [Int32] {
-        var restored: [Int32] = []
-        for (sig, saved) in actions where Self.handlerName(sig).contains(fragment) {
-            var action = saved
-            if sigaction(sig, &action, nil) == 0 {
-                restored.append(sig)
-            }
-        }
-        return restored.sorted()
-    }
-
-    /// Set crash signals whose handler's symbol contains any of `fragments` back to SIG_DFL.
-    /// Returns the signals that were reset.
-    static func resetToDefault(whereSymbolContains fragments: [String]) -> [Int32] {
-        var reset: [Int32] = []
-        for sig in signals {
-            let name = handlerName(sig)
-            guard fragments.contains(where: { name.contains($0) }) else { continue }
+    /// TailscaleKit's Go runtime installs handlers for SIGSEGV/SIGBUS/SIGFPE. For a fault on a
+    /// non-Go thread (e.g. main) with nothing to forward to, Go prints a fatal error and
+    /// exit(2)s: the app vanishes with no crash report. Put them back to the system default
+    /// so any crash leaves a normal iOS crash report. Go doesn't need them for normal
+    /// operation (a nil deref inside Go code crashes instead of panicking).
+    private static func useDefaultCrashHandlers() {
+        #if canImport(TailscaleKit)
+        // Go initializes on a background thread at load; any call into an exported Go
+        // function waits for that to finish. (Unknown handle: returns EBADF, no-op.)
+        var errBuf = [CChar](repeating: 0, count: 8)
+        _ = tailscale_errmsg(-1, &errBuf, errBuf.count)
+        for sig in [SIGSEGV, SIGBUS, SIGFPE] {
             var action = sigaction()
             action.__sigaction_u.__sa_handler = SIG_DFL
             sigemptyset(&action.sa_mask)
-            if sigaction(sig, &action, nil) == 0 {
-                reset.append(sig)
-            }
+            sigaction(sig, &action, nil)
         }
-        return reset
-    }
-
-    /// Append the current handler of each crash signal to Library/Caches/crash-handlers.log,
-    /// so the state can be checked on a device (devicectl copy from the app container)
-    static func record(_ label: String) {
-        let names = signals.map { "\($0)=\(handlerName($0))" }.joined(separator: " ")
-        let line = "\(Date()) \(label): \(names)\n"
-        Logger.clauntty.debugOnly("Crash handlers \(line)")
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
-        let url = caches.appendingPathComponent("crash-handlers.log")
-        guard let data = line.data(using: .utf8) else { return }
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            try? data.write(to: url)
-        }
-    }
-
-    /// Symbol name of the function currently handling `sig`
-    static func handlerName(_ sig: Int32) -> String {
-        var action = sigaction()
-        guard sigaction(sig, nil, &action) == 0 else { return "?" }
-        guard let handler = unsafeBitCast(action.__sigaction_u, to: UnsafeRawPointer?.self) else { return "default" }
-        if Int(bitPattern: handler) == 1 { return "ignore" }
-        var info = Dl_info()
-        guard dladdr(handler, &info) != 0, let name = info.dli_sname else { return "unknown" }
-        return String(cString: name)
+        #endif
     }
 }
 

@@ -119,8 +119,12 @@ class GhosttyApp: ObservableObject {
             supports_selection_clipboard: false,  // iOS doesn't have selection clipboard
             wakeup_cb: { userdata in GhosttyApp.wakeup(userdata) },
             action_cb: { app, target, action in GhosttyApp.action(app!, target: target, action: action) },
-            read_clipboard_cb: { userdata, loc, state in GhosttyApp.readClipboard(userdata, location: loc, state: state) },
-            confirm_read_clipboard_cb: { userdata, str, state, request in GhosttyApp.confirmReadClipboard(userdata, string: str, state: state, request: request) },
+            read_clipboard_cb: { _, _, _, _, _, _ in
+                // Clauntty pastes through its own UI (ghostty_surface_text), so
+                // terminal-initiated clipboard reads (e.g. OSC 52 read) aren't offered.
+                GHOSTTY_CLIPBOARD_READ_UNSUPPORTED
+            },
+            confirm_read_clipboard_cb: { _, _, _, _ in },
             write_clipboard_cb: { userdata, loc, content, len, confirm in GhosttyApp.writeClipboard(userdata, location: loc, content: content, len: len, confirm: confirm) },
             close_surface_cb: { userdata, processAlive in GhosttyApp.closeSurface(userdata, processAlive: processAlive) }
         )
@@ -277,34 +281,6 @@ class GhosttyApp: ObservableObject {
         }
     }
 
-    /// Read from iOS clipboard
-    static func readClipboard(
-        _ userdata: UnsafeMutableRawPointer?,
-        location: ghostty_clipboard_e,
-        state: UnsafeMutableRawPointer?
-    ) {
-        guard let userdata = userdata else { return }
-        let _ = Unmanaged<GhosttyApp>.fromOpaque(userdata).takeUnretainedValue()
-
-        // Read from UIPasteboard
-        let content = UIPasteboard.general.string ?? ""
-        Logger.clauntty.debug("Clipboard read: \(content.prefix(20))...")
-
-        // Complete the request if we have a surface
-        // Note: This needs the surface reference to complete - will be wired up in Phase 2
-    }
-
-    /// Confirm clipboard read (for security prompts)
-    static func confirmReadClipboard(
-        _ userdata: UnsafeMutableRawPointer?,
-        string: UnsafePointer<CChar>?,
-        state: UnsafeMutableRawPointer?,
-        request: ghostty_clipboard_request_e
-    ) {
-        // iOS auto-confirms clipboard reads (no security prompt needed)
-        Logger.clauntty.debug("Clipboard confirm read")
-    }
-
     /// Write to iOS clipboard
     static func writeClipboard(
         _ userdata: UnsafeMutableRawPointer?,
@@ -321,7 +297,9 @@ class GhosttyApp: ObservableObject {
             if let mime = item.mime,
                String(cString: mime) == "text/plain",
                let data = item.data {
-                let text = String(cString: data)
+                // Binary-safe with an explicit length; not necessarily NUL-terminated
+                let bytes = UnsafeRawBufferPointer(start: data, count: item.len)
+                let text = String(decoding: bytes, as: UTF8.self)
                 UIPasteboard.general.string = text
                 Logger.clauntty.debug("Clipboard write: \(text.prefix(20))...")
                 break

@@ -142,9 +142,15 @@ class ThemeManager: ObservableObject {
 
     /// Apply a theme to a ghostty config
     func applyTheme(_ theme: Theme, to config: ghostty_config_t) {
-        theme.content.withCString { ptr in
-            ghostty_config_load_string(config, ptr, UInt(theme.content.utf8.count))
+        // Ghostty loads config from files; write the theme to a temp file.
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("clauntty-theme.conf")
+        do {
+            try theme.content.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            Logger.clauntty.error("ThemeManager: failed to write theme file: \(error.localizedDescription)")
+            return
         }
+        url.path.withCString { ghostty_config_load_file(config, $0) }
         Logger.clauntty.debugOnly("ThemeManager: Applied theme '\(theme.name)'")
     }
 

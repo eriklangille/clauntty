@@ -501,6 +501,10 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         self.surface = surface
 
+        // Ghostty's Metal renderer adds its IOSurfaceLayer to our layer during
+        // ghostty_surface_new. Track it so we can size it (see sizeDidChange).
+        adoptGhosttySublayer()
+
         // Set up the PTY input callback for iOS
         // This routes mouse events and other PTY input through to SSH
         // IMPORTANT: This callback is called from Ghostty's internal thread,
@@ -1518,18 +1522,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     // NOTE: We do NOT override layerClass to CAMetalLayer because Ghostty
     // adds its own IOSurfaceLayer as a sublayer. Using default CALayer.
 
-    /// Called by GhosttyKit's Metal renderer to add its IOSurfaceLayer
-    /// GhosttyKit calls this on the view, but it's a CALayer method,
-    /// so we forward to our layer and set the sublayer's frame.
-    @objc(addSublayer:)
-    func addSublayer(_ sublayer: CALayer) {
-        Logger.clauntty.debugOnly("addSublayer called, layer.bounds=\(NSCoder.string(for: self.layer.bounds))")
-
-        // Store reference first
+    /// Pick up the IOSurfaceLayer Ghostty's Metal renderer added to our layer and size
+    /// it. Ghostty adds it directly to `view.layer` (older GhosttyKit builds sent
+    /// `addSublayer:` to the view, which we used to intercept).
+    private func adoptGhosttySublayer() {
+        guard ghosttySublayer == nil, let sublayer = layer.sublayers?.last else {
+            Logger.clauntty.warning("adoptGhosttySublayer: no Ghostty sublayer found")
+            return
+        }
         ghosttySublayer = sublayer
-
-        // Add to layer hierarchy
-        self.layer.addSublayer(sublayer)
+        Logger.clauntty.debugOnly("adoptGhosttySublayer: \(type(of: sublayer)), layer.bounds=\(NSCoder.string(for: self.layer.bounds))")
 
         // Immediately trigger size update with current bounds
         // This ensures the sublayer gets the correct size even if layoutSubviews hasn't run yet
