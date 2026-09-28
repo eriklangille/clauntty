@@ -26,6 +26,9 @@ public enum MessageType: UInt8, Sendable {
     case resume = 9
     /// Claim active client for window size and command routing
     case claimActive = 10
+    /// Request a page of history before a stream position (masters with
+    /// ProtocolConstants.handshakeFlagHistory only)
+    case requestHistory = 11
 }
 
 // MARK: - Server → Client Response Types
@@ -44,6 +47,8 @@ public enum ResponseType: UInt8, Sendable {
     case idle = 4
     /// Protocol handshake
     case handshake = 5
+    /// Page of scrollback history with HistoryPageMeta
+    case historyPage = 6
 }
 
 // MARK: - Protocol Constants
@@ -81,6 +86,15 @@ public enum ProtocolConstants {
 
     /// Scrollback page metadata size
     public static let scrollbackMetaSize: Int = 8
+
+    /// History page metadata size (start: u64, end: u64, oldest: u64)
+    public static let historyMetaSize: Int = 24
+
+    /// Handshake flag: the master supports request_history
+    public static let handshakeFlagHistory: UInt16 = 1 << 0
+
+    /// request_history `before` meaning "where my attach replay started"
+    public static let historyBeforeReplay: UInt64 = .max
 
     /// Handshake payload size
     public static let handshakeSize: Int = 8
@@ -141,6 +155,37 @@ public struct ScrollbackPageMeta: Sendable, Equatable {
         self.totalLength = UInt32(data[0]) | (UInt32(data[1]) << 8) | (UInt32(data[2]) << 16) | (UInt32(data[3]) << 24)
         self.offset = UInt32(data[4]) | (UInt32(data[5]) << 8) | (UInt32(data[6]) << 16) | (UInt32(data[7]) << 24)
     }
+}
+
+// MARK: - History Page Metadata
+
+/// Metadata for a history page. Positions are absolute stream positions (bytes written
+/// since the session started). The page covers start..<end minus alternate-screen
+/// output; request the next one with before = start. Complete when start <= oldest.
+public struct HistoryPageMeta: Sendable, Equatable {
+    public let start: UInt64
+    public let end: UInt64
+    public let oldest: UInt64
+
+    public init(start: UInt64, end: UInt64, oldest: UInt64) {
+        self.start = start
+        self.end = end
+        self.oldest = oldest
+    }
+
+    public init?(from data: Data) {
+        guard data.count >= ProtocolConstants.historyMetaSize else { return nil }
+        let bytes = [UInt8](data.prefix(ProtocolConstants.historyMetaSize))
+        func u64(_ at: Int) -> UInt64 {
+            (0..<8).reduce(UInt64(0)) { $0 | (UInt64(bytes[at + $1]) << (8 * UInt64($1))) }
+        }
+        self.start = u64(0)
+        self.end = u64(8)
+        self.oldest = u64(16)
+    }
+
+    /// No older history is stored
+    public var reachedOldest: Bool { start <= oldest }
 }
 
 // MARK: - Window Size

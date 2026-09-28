@@ -11,6 +11,9 @@ public protocol RtachSessionDelegate: AnyObject {
     /// Called when paginated scrollback is received
     func rtachSession(_ session: RtachSession, didReceiveScrollbackPage meta: ScrollbackPageMeta, data: Data)
 
+    /// Called when a page of history (requestHistory) is received
+    func rtachSession(_ session: RtachSession, didReceiveHistoryPage meta: HistoryPageMeta, data: Data)
+
     /// Called when a command is received from server
     func rtachSession(_ session: RtachSession, didReceiveCommand data: Data)
 
@@ -23,6 +26,10 @@ public protocol RtachSessionDelegate: AnyObject {
 
     /// Called when framed mode is established (after handshake)
     func rtachSessionDidEnterFramedMode(_ session: RtachSession)
+}
+
+public extension RtachSessionDelegate {
+    func rtachSession(_ session: RtachSession, didReceiveHistoryPage meta: HistoryPageMeta, data: Data) {}
 }
 
 /// State machine managing rtach protocol communication
@@ -73,6 +80,13 @@ public final class RtachSession {
     /// Whether rtach is detected (received valid handshake)
     public var isRtachRunning: Bool {
         handshake?.isValid == true
+    }
+
+    /// Whether the master pages history with requestHistory (older masters don't, and
+    /// must not be sent the request)
+    public var supportsHistory: Bool {
+        guard let h = handshake, h.isValid else { return false }
+        return h.flags & ProtocolConstants.handshakeFlagHistory != 0
     }
 
     /// Protocol version string (e.g., "2.0")
@@ -224,6 +238,9 @@ public final class RtachSession {
         case .scrollbackPage(let meta, let data):
             delegate?.rtachSession(self, didReceiveScrollbackPage: meta, data: data)
 
+        case .historyPage(let meta, let data):
+            delegate?.rtachSession(self, didReceiveHistoryPage: meta, data: data)
+
         case .command(let data):
             delegate?.rtachSession(self, didReceiveCommand: data)
 
@@ -283,6 +300,14 @@ public final class RtachSession {
         guard isFramedMode else { return }
         let packet = PacketWriter.redraw()
         delegate?.rtachSession(self, sendData: packet)
+    }
+
+    /// Request the page of history ending at `before` (absolute stream position; pass
+    /// ProtocolConstants.historyBeforeReplay for the page before the attach replay).
+    /// Only when supportsHistory.
+    public func requestHistory(before: UInt64, limit: UInt32) {
+        guard isFramedMode, supportsHistory else { return }
+        delegate?.rtachSession(self, sendData: PacketWriter.historyRequest(before: before, limit: limit))
     }
 
     /// Request scrollback page

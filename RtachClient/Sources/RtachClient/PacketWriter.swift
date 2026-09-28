@@ -113,6 +113,17 @@ public enum PacketWriter {
     }
 
     /// Create a legacy scrollback request (requests all at once)
+    /// Request a page of history ending at `before` (absolute stream position, or
+    /// ProtocolConstants.historyBeforeReplay)
+    public static func historyRequest(before: UInt64, limit: UInt32) -> Data {
+        var packet = Data(capacity: ProtocolConstants.clientHeaderSize + 12)
+        packet.append(MessageType.requestHistory.rawValue)
+        packet.append(12)
+        withUnsafeBytes(of: before.littleEndian) { packet.append(contentsOf: $0) }
+        withUnsafeBytes(of: limit.littleEndian) { packet.append(contentsOf: $0) }
+        return packet
+    }
+
     public static func scrollbackRequest() -> Data {
         var packet = Data(capacity: ProtocolConstants.clientHeaderSize)
         packet.append(MessageType.requestScrollback.rawValue)

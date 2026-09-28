@@ -2079,6 +2079,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             return false
         }
 
+        // An empty page (all alternate-screen output) adds nothing; not a failure
+        guard !data.isEmpty else { return true }
+
         Logger.clauntty.debugOnly("prependScrollback: starting with \(data.count) bytes")
 
         // Copy to contiguous array to ensure proper alignment

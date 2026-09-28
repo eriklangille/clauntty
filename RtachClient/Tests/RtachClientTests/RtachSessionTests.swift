@@ -29,13 +29,50 @@ final class RtachSessionTests: XCTestCase {
         return frame
     }
 
-    func makeHandshake(versionMajor: UInt8 = 2, versionMinor: UInt8 = 0) -> Data {
+    func makeHandshake(versionMajor: UInt8 = 2, versionMinor: UInt8 = 0, flags: UInt16 = 0) -> Data {
         var payload = Data()
         withUnsafeBytes(of: ProtocolConstants.handshakeMagic.littleEndian) { payload.append(contentsOf: $0) }
         payload.append(versionMajor)
         payload.append(versionMinor)
-        payload.append(contentsOf: [0, 0]) // flags
+        withUnsafeBytes(of: flags.littleEndian) { payload.append(contentsOf: $0) }
         return makeFrame(type: .handshake, payload: payload)
+    }
+
+    // MARK: - History
+
+    func testHistoryIsNotRequestedFromOlderMasters() {
+        // Older masters read an unknown packet type into an exhaustive enum (undefined
+        // behavior), so without the handshake flag nothing may be sent
+        session.connect()
+        session.processIncomingData(makeHandshake())
+        delegate.sentData.removeAll()
+
+        XCTAssertFalse(session.supportsHistory)
+        session.requestHistory(before: ProtocolConstants.historyBeforeReplay, limit: 16384)
+        XCTAssertTrue(delegate.sentData.isEmpty)
+    }
+
+    func testHistoryRequestAndPage() {
+        session.connect()
+        session.processIncomingData(makeHandshake(flags: ProtocolConstants.handshakeFlagHistory))
+        delegate.sentData.removeAll()
+        XCTAssertTrue(session.supportsHistory)
+
+        session.requestHistory(before: ProtocolConstants.historyBeforeReplay, limit: 16384)
+        XCTAssertEqual(delegate.sentData, [Data([11, 12] + [UInt8](repeating: 0xff, count: 8) + [0x00, 0x40, 0, 0])])
+
+        var payload = Data()
+        for value: UInt64 in [4096, 20480, 1024] {
+            withUnsafeBytes(of: value.littleEndian) { payload.append(contentsOf: $0) }
+        }
+        payload.append(Data("line 1\r\nline 2\r\n".utf8))
+        session.processIncomingData(makeFrame(type: .historyPage, payload: payload))
+
+        XCTAssertEqual(delegate.historyPages.count, 1)
+        let page = delegate.historyPages[0]
+        XCTAssertEqual(page.meta, HistoryPageMeta(start: 4096, end: 20480, oldest: 1024))
+        XCTAssertFalse(page.meta.reachedOldest)
+        XCTAssertEqual(page.data, Data("line 1\r\nline 2\r\n".utf8))
     }
 
     // MARK: - Initial State
@@ -455,6 +492,7 @@ final class MockDelegate: RtachSessionDelegate {
     var terminalData: [Data] = []
     var scrollbackData: [Data] = []
     var scrollbackPages: [(meta: ScrollbackPageMeta, data: Data)] = []
+    var historyPages: [(meta: HistoryPageMeta, data: Data)] = []
     var commands: [Data] = []
     var sentData: [Data] = []
     var idleCount: Int = 0
@@ -469,6 +507,10 @@ final class MockDelegate: RtachSessionDelegate {
 
     func rtachSession(_ session: RtachSession, didReceiveScrollbackPage meta: ScrollbackPageMeta, data: Data) {
         scrollbackPages.append((meta, data))
+    }
+
+    func rtachSession(_ session: RtachSession, didReceiveHistoryPage meta: HistoryPageMeta, data: Data) {
+        historyPages.append((meta, data))
     }
 
     func rtachSession(_ session: RtachSession, didReceiveCommand data: Data) {

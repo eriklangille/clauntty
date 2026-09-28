@@ -306,11 +306,16 @@ class Session: ObservableObject, Identifiable {
     /// Page size for scrollback requests (16KB)
     private let scrollbackPageSize = 16 * 1024
 
-    /// Current offset into scrollback (0 = oldest data)
-    private var scrollbackLoadedOffset: Int = 0
+    /// History is paged backwards: each page ends where the previous one (at first, the
+    /// attach replay) started. Absolute stream position, or historyBeforeReplay before
+    /// the first page. (Paging used to go forward from the oldest byte while prepending
+    /// each page, so history came out out of order, with gaps and duplicates.)
+    private var historyBefore: UInt64 = ProtocolConstants.historyBeforeReplay
 
-    /// Total scrollback size (set when first page received)
-    private var scrollbackTotalSize: Int?
+    /// Consecutive pages that came back empty (all alternate-screen output); bounded so
+    /// a long full-screen session can't keep requesting
+    private var emptyHistoryPages = 0
+    private let maxEmptyHistoryPages = 8
 
     /// Whether we've finished loading all scrollback
     private var scrollbackFullyLoaded: Bool = false
@@ -344,8 +349,8 @@ class Session: ObservableObject, Identifiable {
 
         // Reset scrollback tracking state for reconnects
         // rtach will send scrollback when we reconnect to an existing session
-        scrollbackLoadedOffset = 0
-        scrollbackTotalSize = nil
+        historyBefore = ProtocolConstants.historyBeforeReplay
+        emptyHistoryPages = 0
         scrollbackFullyLoaded = false
         scrollbackPageRequestPending = false
 
@@ -757,13 +762,13 @@ class Session: ObservableObject, Identifiable {
 
         isPaused = false
         isPrefetchingOnIdle = false
-        rtachProtocol.sendResume()
-        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SENT resume to rtach")
-    }
         // No redraw request: resume already makes rtach send SIGWINCH so full-screen apps
         // repaint, and on the normal screen rtach answers redraw by resending all stored
         // output. That was harmless only while the proxy dropped redraw (before 2.7.5);
         // since then every tab switch appended a copy of the history.
+        rtachProtocol.sendResume()
+        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SENT resume to rtach")
+    }
 
     /// Claim active client for window size and command routing
     func claimActive() {
@@ -807,12 +812,19 @@ class Session: ObservableObject, Identifiable {
             return
         }
 
+        // Masters from before history paging (sessions started by rtach < 2.8) only have
+        // the offset-based page request, which pages the wrong way; show no older history
+        // rather than scrambled history until the session is restarted
+        guard rtachProtocol.supportsHistory else {
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): master predates history paging, not loading older scrollback")
+            scrollbackFullyLoaded = true
+            return
+        }
+
         scrollbackPageRequestPending = true
+        rtachProtocol.requestHistory(before: historyBefore, limit: UInt32(scrollbackPageSize))
 
-        // Send via rtach protocol
-        rtachProtocol.requestScrollbackPage(offset: UInt32(scrollbackLoadedOffset), limit: UInt32(scrollbackPageSize))
-
-        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): requesting scrollback page offset=\(self.scrollbackLoadedOffset) limit=\(self.scrollbackPageSize)")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): requesting history before=\(self.historyBefore == ProtocolConstants.historyBeforeReplay ? "replay" : String(self.historyBefore)) limit=\(self.scrollbackPageSize)")
     }
 
     /// Load more scrollback if user is scrolling near the top and more is available
@@ -871,20 +883,33 @@ extension Session: RtachClient.RtachSessionDelegate {
     }
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveScrollbackPage meta: RtachClient.ScrollbackPageMeta, data: Data) {
+        // Offset-based pages aren't requested any more (see requestScrollbackPage)
         Task { @MainActor in
-            Logger.clauntty.debugOnly("Scrollback page complete: \(data.count) bytes, total=\(meta.totalLength), offset=\(meta.offset)")
-
-            self.scrollbackTotalSize = Int(meta.totalLength)
             self.scrollbackPageRequestPending = false
-            self.scrollbackLoadedOffset += data.count
+        }
+    }
 
-            // Check if fully loaded
-            if self.scrollbackLoadedOffset >= Int(meta.totalLength) {
+    nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveHistoryPage meta: RtachClient.HistoryPageMeta, data: Data) {
+        Task { @MainActor in
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): history page \(meta.start)..<\(meta.end), \(data.count) bytes, oldest=\(meta.oldest)")
+
+            self.scrollbackPageRequestPending = false
+            self.historyBefore = meta.start
+            if meta.reachedOldest {
                 self.scrollbackFullyLoaded = true
-                Logger.clauntty.debugOnly("Scrollback fully loaded: \(meta.totalLength) bytes total")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): history fully loaded")
             }
 
-            self.onScrollbackReceived?(data)
+            if !data.isEmpty {
+                self.emptyHistoryPages = 0
+                self.onScrollbackReceived?(data)
+            } else if !self.scrollbackFullyLoaded {
+                // Only alternate-screen output in this range; look further back
+                self.emptyHistoryPages += 1
+                if self.emptyHistoryPages < self.maxEmptyHistoryPages {
+                    self.requestScrollbackPage()
+                }
+            }
         }
     }
 
