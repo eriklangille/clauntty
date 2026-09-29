@@ -321,6 +321,14 @@ struct AppContentView: View {
                     sessionManager.loadPersistedTabs(connectionStore: connectionStore)
                     sessionManager.loadPersistedWebTabs(connectionStore: connectionStore)
                     sessionManager.loadTabOrder()  // Load or migrate global tab order
+
+                    // After Wi-Fi ↔ cellular the Tailscale node and open connections can
+                    // be stuck on the old network
+                    NetworkMonitor.shared.onChange = { [sessionManager] in
+                        TailscaleManager.shared.restart(reason: "network changed")
+                        sessionManager.checkConnections(reason: "network changed")
+                    }
+                    NetworkMonitor.shared.start()
                 }
             }
             .onChange(of: scenePhase) { _, newPhase in
@@ -377,6 +385,8 @@ struct AppContentView: View {
                     // Active session is connected - just resume output
                     Logger.clauntty.debugOnly("APP_LIFECYCLE: resuming connected active session")
                     activeSession.resumeOutput()
+                    // It may have died while the app was suspended without closing
+                    sessionManager.checkConnections(reason: "foreground")
                 }
             } else {
                 Logger.clauntty.debugOnly("APP_LIFECYCLE: no active session to resume")

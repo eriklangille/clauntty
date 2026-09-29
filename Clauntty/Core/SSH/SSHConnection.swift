@@ -206,6 +206,44 @@ class SSHConnection: ObservableObject {
         channel?.isActive ?? false
     }
 
+    /// Round trip to the server: open a channel and close it again. A connection whose
+    /// network went away (Wi-Fi off, phone asleep) still reports active until TCP gives
+    /// up minutes later; this finds out within `timeout`.
+    func isResponsive(timeout: TimeAmount = .seconds(8)) async -> Bool {
+        guard let channel, channel.isActive else { return false }
+
+        let eventLoop = channel.eventLoop
+        let answered = eventLoop.makePromise(of: Bool.self)
+        let timeoutTask = eventLoop.scheduleTask(in: timeout) {
+            answered.succeed(false)
+        }
+
+        channel.pipeline.handler(type: NIOSSHHandler.self).whenComplete { result in
+            guard case .success(let sshHandler) = result else {
+                timeoutTask.cancel()
+                answered.succeed(false)
+                return
+            }
+            let opened = eventLoop.makePromise(of: Channel.self)
+            sshHandler.createChannel(opened) { childChannel, _ in
+                childChannel.eventLoop.makeSucceededVoidFuture()
+            }
+            opened.futureResult.whenComplete { result in
+                timeoutTask.cancel()
+                switch result {
+                case .success(let probeChannel):
+                    probeChannel.close(promise: nil)
+                    answered.succeed(true)
+                case .failure:
+                    answered.succeed(false)
+                }
+            }
+        }
+
+        // The first answer wins; a late one after the timeout is ignored
+        return (try? await answered.futureResult.get()) ?? false
+    }
+
     /// Create additional channel on existing connection (for multi-tab support)
     /// Returns the channel and handler for the caller to manage
     /// - Parameters:

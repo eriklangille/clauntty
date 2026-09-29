@@ -88,6 +88,12 @@ class SessionManager: ObservableObject {
     /// Minimum time between reconnect attempts (prevents rapid crash loops)
     private let reconnectBackoff: TimeInterval = 2.0
 
+    // MARK: - Connection Health
+
+    private var connectionCheckTask: Task<Void, Never>?
+    /// Another check was asked for while one was running
+    private var connectionRecheckPending = false
+
     // MARK: - Session Management
 
     /// Create a new session for a connection config
@@ -254,8 +260,11 @@ class SessionManager: ObservableObject {
             },
             onChannelInactive: { [weak session] in
                 Task { @MainActor in
-                    Logger.clauntty.debugOnly("Session \(session?.id.uuidString.prefix(8) ?? "nil"): channel became inactive, marking disconnected")
-                    session?.handleChannelInactive()
+                    // Only if the session is still on a dead channel: it may have been
+                    // detached already, or reconnected on a new channel since
+                    guard let session, let current = session.sshChannel, !current.isActive else { return }
+                    Logger.clauntty.debugOnly("Session \(session.id.uuidString.prefix(8)): channel became inactive, marking disconnected")
+                    session.handleChannelInactive()
                 }
             }
         )
@@ -363,6 +372,69 @@ class SessionManager: ObservableObject {
 
         // Reconnect using existing rtach session ID
         try await connect(session: session, rtachSessionId: rtachSessionId)
+    }
+
+    /// Round-trip every open SSH connection, close the ones that don't answer, then
+    /// reconnect the active tab. After the network changes a connection can still look
+    /// open while nothing gets through: typing is buffered, no output arrives, and the
+    /// tab stays frozen until TCP gives up minutes later.
+    func checkConnections(reason: String) {
+        guard connectionCheckTask == nil else {
+            connectionRecheckPending = true
+            return
+        }
+        connectionCheckTask = Task {
+            await runConnectionCheck(reason: reason)
+            connectionCheckTask = nil
+            if connectionRecheckPending {
+                connectionRecheckPending = false
+                checkConnections(reason: reason)
+            }
+        }
+    }
+
+    private func runConnectionCheck(reason: String) async {
+        // Each tab has its own connection; the pool holds the ones for listing and deploys
+        var connections: [ObjectIdentifier: SSHConnection] = [:]
+        for connection in sessions.compactMap(\.sshConnection) + Array(connectionPool.values)
+        where connection.isConnected {
+            connections[ObjectIdentifier(connection)] = connection
+        }
+        Logger.clauntty.debugOnly("SessionManager: checking \(connections.count) connection(s) (\(reason))")
+
+        let dead = await withTaskGroup(of: SSHConnection?.self) { group in
+            for connection in connections.values {
+                group.addTask { await connection.isResponsive() ? nil : connection }
+            }
+            var dead: [SSHConnection] = []
+            for await connection in group {
+                if let connection { dead.append(connection) }
+            }
+            return dead
+        }
+
+        for connection in dead {
+            Logger.clauntty.warning("SessionManager: connection to \(connection.host) stopped responding, closing it")
+            let attached = sessions.filter { $0.sshConnection === connection }
+            connection.disconnect()
+            for session in attached {
+                session.handleChannelInactive()
+            }
+        }
+        // Drop anything built on a closed connection so the next use connects afresh
+        connectionPool = connectionPool.filter { $0.value.isConnected }
+        rtachDeployers = rtachDeployers.filter { $0.value.connection.isConnected }
+
+        guard case .terminal(let id) = activeTab,
+              let active = sessions.first(where: { $0.id == id }),
+              active.state == .disconnected else { return }
+        lastReconnectAttempt[active.id] = nil
+        do {
+            try await reconnect(session: active)
+            Logger.clauntty.debugOnly("SessionManager: reconnected active session \(active.id.uuidString.prefix(8)) after connection check")
+        } catch {
+            Logger.clauntty.error("SessionManager: reconnect after connection check failed: \(error.localizedDescription)")
+        }
     }
 
     /// Reconnect all disconnected sessions

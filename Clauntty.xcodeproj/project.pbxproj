@@ -27,6 +27,7 @@
 		876C56382EFB1A6E00B28BC1 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = C8000002 /* NIOSSH */; };
 		8D50D6A34930F5200F1440E2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7856CABCC7D9170DD7EF307F /* Foundation.framework */; };
 		8E8B63B583F4D2BF2E6F18FD /* PortScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */; };
+		C00000A2 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A2 /* NetworkMonitor.swift */; };
 		8EE9D92CA010B003B254D7CA /* PortForwardingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */; };
 		ADA5806394E7136002E7FE76 /* ServerPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CD476298B71607D9BDB445C /* ServerPickerView.swift */; };
 		B5D69205D0E4B34BFD5D6F2A /* SSHKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4F41052A28ACE836DF03B /* SSHKeyStore.swift */; };
@@ -112,6 +113,7 @@
 		297EA9CE961BFF920036934A /* SelectionHandleView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionHandleView.swift; sourceTree = "<group>"; };
 		2A3E2A64FA9B3B72703629BB /* ThemeManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeManager.swift; sourceTree = "<group>"; };
 		2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortScanner.swift; sourceTree = "<group>"; };
+		C10000A2 /* NetworkMonitor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		55E4F41052A28ACE836DF03B /* SSHKeyStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHKeyStore.swift; sourceTree = "<group>"; };
 		59A3663E616FC97D48E5888C /* SessionPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionPickerView.swift; sourceTree = "<group>"; };
 		620BF993225325AE2636ED6D /* ExpandedTabOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExpandedTabOverlay.swift; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 				C1000014 /* SSHAuthenticator.swift */,
 				C1000019 /* RtachDeployer.swift */,
 				2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */,
+				C10000A2 /* NetworkMonitor.swift */,
 				94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */,
 			);
 			path = SSH;
@@ -606,6 +609,7 @@
 				80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */,
 				C0000023 /* WordList.swift in Sources */,
 				8E8B63B583F4D2BF2E6F18FD /* PortScanner.swift in Sources */,
+				C00000A2 /* NetworkMonitor.swift in Sources */,
 				8EE9D92CA010B003B254D7CA /* PortForwardingManager.swift in Sources */,
 				733936A7CBE2B60407C98651 /* WebTab.swift in Sources */,
 				7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */,

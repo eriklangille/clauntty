@@ -36,6 +36,8 @@ final class TailscaleManager: ObservableObject {
     private var node: TailscaleNode?
     #endif
     private var pollTask: Task<Void, Never>?
+    /// Closing the old node during `restart`; nothing may start a node until it's done
+    private var restartTask: Task<Void, Never>?
 
     static let hostName = "clauntty"
 
@@ -60,7 +62,7 @@ final class TailscaleManager: ObservableObject {
     /// Start the node (idempotent). Watch `state` for login / running.
     func start() {
         #if canImport(TailscaleKit)
-        guard node == nil else { return }
+        guard node == nil, restartTask == nil else { return }
         state = .starting
 
         do {
@@ -91,8 +93,29 @@ final class TailscaleManager: ObservableObject {
         #endif
     }
 
+    /// Replace the node with a fresh one that keeps the login. Used after the device's
+    /// network changes (Wi-Fi ↔ cellular) and after a dial times out. There's no Network
+    /// Extension to tell tsnet about path changes, and it can keep using sockets bound
+    /// to an interface that's gone. Tailnet connections through the old node close.
+    func restart(reason: String) {
+        #if canImport(TailscaleKit)
+        guard let oldNode = node, restartTask == nil else { return }
+        Logger.clauntty.debugOnly("Tailscale: restarting node (\(reason))")
+        pollTask?.cancel()
+        pollTask = nil
+        node = nil
+        state = .starting
+        restartTask = Task { [weak self] in
+            try? await oldNode.close()
+            self?.restartTask = nil
+            self?.start()
+        }
+        #endif
+    }
+
     /// Stop the node and forget the login (removes the node's state).
     func logOut() async {
+        await restartTask?.value
         pollTask?.cancel()
         pollTask = nil
         #if canImport(TailscaleKit)
@@ -111,6 +134,7 @@ final class TailscaleManager: ObservableObject {
 
     /// Wait until the node is running, starting it if needed.
     func waitUntilRunning(timeout: Duration = .seconds(20)) async throws {
+        await restartTask?.value
         start()
         let deadline = ContinuousClock.now + timeout
         while true {
@@ -125,7 +149,7 @@ final class TailscaleManager: ObservableObject {
                 break
             }
             if ContinuousClock.now >= deadline {
-                throw TailscaleConnectError.timedOut
+                throw TailscaleConnectError.nodeTimedOut
             }
             try await Task.sleep(for: .milliseconds(200))
         }
@@ -133,8 +157,18 @@ final class TailscaleManager: ObservableObject {
 
     /// Open a TCP connection to `host:port` over the tailnet. Returns a
     /// connected socket fd owned by the caller. `host` may be a MagicDNS name
-    /// or a tailnet IP.
-    func dial(host: String, port: Int, timeout: Duration = .seconds(30)) async throws -> Int32 {
+    /// or a tailnet IP. If the node doesn't come up or the dial times out, the node
+    /// is restarted and the dial tried once more.
+    func dial(host: String, port: Int) async throws -> Int32 {
+        do {
+            return try await dialOnce(host: host, port: port, timeout: .seconds(15))
+        } catch TailscaleConnectError.timedOut, TailscaleConnectError.nodeTimedOut {
+            restart(reason: "dial to \(host) timed out")
+            return try await dialOnce(host: host, port: port, timeout: .seconds(20))
+        }
+    }
+
+    private func dialOnce(host: String, port: Int, timeout: Duration) async throws -> Int32 {
         try await waitUntilRunning()
 
         #if canImport(TailscaleKit)
@@ -293,6 +327,8 @@ private struct StatusJSON: Decodable {
 enum TailscaleConnectError: Error, LocalizedError {
     case needsLogin
     case timedOut
+    /// The node didn't reach Running
+    case nodeTimedOut
     case failed(String)
 
     var errorDescription: String? {
@@ -301,6 +337,8 @@ enum TailscaleConnectError: Error, LocalizedError {
             return "Tailscale needs you to log in. Open Settings → Tailscale."
         case .timedOut:
             return "Timed out connecting over Tailscale"
+        case .nodeTimedOut:
+            return "Tailscale didn't connect to the tailnet in time"
         case .failed(let message):
             return "Tailscale: \(message)"
         }
