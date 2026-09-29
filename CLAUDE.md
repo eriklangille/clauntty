@@ -172,6 +172,16 @@ uv run scripts/parse_crash.py /tmp/clauntty_crashes/Clauntty-YYYY-MM-DD-HHMMSS.i
 
 **Note:** `sim.sh` streams at debug level. Historical logs (`log show`) don't persist debug-level by default - use live streaming.
 
+### Tailscale Log (Phone)
+
+Debug builds (what `device.sh` installs) write the embedded Tailscale node's logs to `Library/Caches/tailscale.log`, timestamped in local time, next to the app's own network-change, dial and connection-check events (`clauntty:` lines). It starts over at launch once past 10 MB. Useful for roaming and connection problems after the fact, when live `idevicesyslog` wasn't running. Copy it off the phone (works over Wi-Fi, no cable):
+
+```bash
+xcrun devicectl device copy from --device <UDID> --domain-type appDataContainer \
+  --domain-identifier com.octerm.clauntty --source Library/Caches/tailscale.log --destination tailscale.log
+grep -a "clauntty:\|LinkChange\|Rebind" tailscale.log   # -a: the file can contain binary bytes
+```
+
 ### Enable Verbose Logging
 
 Verbose logs are disabled by default (too noisy). Enable with `CLAUNTTY_VERBOSE=1`:
