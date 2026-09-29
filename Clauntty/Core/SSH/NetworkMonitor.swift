@@ -45,6 +45,7 @@ final class NetworkMonitor {
         // The first update is the path at launch, not a change
         guard let previous else { return }
         Logger.clauntty.debugOnly("Network: path changed from \(previous) to \(current)")
+        TailscaleDebugLog.note("network path changed from \(previous) to \(current)")
 
         settleTask?.cancel()
         guard signature != nil else { return }

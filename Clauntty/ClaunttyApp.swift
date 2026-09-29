@@ -322,10 +322,10 @@ struct AppContentView: View {
                     sessionManager.loadPersistedWebTabs(connectionStore: connectionStore)
                     sessionManager.loadTabOrder()  // Load or migrate global tab order
 
-                    // After Wi-Fi ↔ cellular the Tailscale node and open connections can
-                    // be stuck on the old network
+                    // After Wi-Fi ↔ cellular open connections can be stuck on the old
+                    // network. Experiment: leave the Tailscale node to follow the change
+                    // itself (a dial timeout still restarts it)
                     NetworkMonitor.shared.onChange = { [sessionManager] in
-                        TailscaleManager.shared.restart(reason: "network changed")
                         sessionManager.checkConnections(reason: "network changed")
                     }
                     NetworkMonitor.shared.start()

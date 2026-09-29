@@ -401,6 +401,7 @@ class SessionManager: ObservableObject {
             connections[ObjectIdentifier(connection)] = connection
         }
         Logger.clauntty.debugOnly("SessionManager: checking \(connections.count) connection(s) (\(reason))")
+        TailscaleDebugLog.note("checking \(connections.count) connection(s) (\(reason))")
 
         let dead = await withTaskGroup(of: SSHConnection?.self) { group in
             for connection in connections.values {
@@ -415,6 +416,7 @@ class SessionManager: ObservableObject {
 
         for connection in dead {
             Logger.clauntty.warning("SessionManager: connection to \(connection.host) stopped responding, closing it")
+            TailscaleDebugLog.note("connection to \(connection.host) stopped responding, closing it")
             let attached = sessions.filter { $0.sshConnection === connection }
             connection.disconnect()
             for session in attached {
@@ -424,6 +426,7 @@ class SessionManager: ObservableObject {
         // Drop anything built on a closed connection so the next use connects afresh
         connectionPool = connectionPool.filter { $0.value.isConnected }
         rtachDeployers = rtachDeployers.filter { $0.value.connection.isConnected }
+        TailscaleDebugLog.note("check done: \(connections.count - dead.count) responsive, \(dead.count) closed")
 
         guard case .terminal(let id) = activeTab,
               let active = sessions.first(where: { $0.id == id }),

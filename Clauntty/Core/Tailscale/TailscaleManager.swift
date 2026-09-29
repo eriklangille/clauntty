@@ -101,6 +101,7 @@ final class TailscaleManager: ObservableObject {
         #if canImport(TailscaleKit)
         guard let oldNode = node, restartTask == nil else { return }
         Logger.clauntty.debugOnly("Tailscale: restarting node (\(reason))")
+        TailscaleDebugLog.note("restarting node (\(reason))")
         pollTask?.cancel()
         pollTask = nil
         node = nil
@@ -158,13 +159,30 @@ final class TailscaleManager: ObservableObject {
     /// Open a TCP connection to `host:port` over the tailnet. Returns a
     /// connected socket fd owned by the caller. `host` may be a MagicDNS name
     /// or a tailnet IP. If the node doesn't come up or the dial times out, the node
-    /// is restarted and the dial tried once more.
+    /// may be stuck: it's restarted and the dial tried once more. Not when the tailnet
+    /// says the host is offline, since then the timeout is expected and a restart
+    /// would only drop the other tailnet connections.
     func dial(host: String, port: Int) async throws -> Int32 {
         do {
             return try await dialOnce(host: host, port: port, timeout: .seconds(15))
-        } catch TailscaleConnectError.timedOut, TailscaleConnectError.nodeTimedOut {
+        } catch TailscaleConnectError.timedOut {
+            if let peer = peer(for: host), !peer.online {
+                TailscaleDebugLog.note("\(host) is offline, not restarting")
+                throw TailscaleConnectError.peerOffline(peer.name)
+            }
             restart(reason: "dial to \(host) timed out")
             return try await dialOnce(host: host, port: port, timeout: .seconds(20))
+        } catch TailscaleConnectError.nodeTimedOut {
+            restart(reason: "node didn't start")
+            return try await dialOnce(host: host, port: port, timeout: .seconds(20))
+        }
+    }
+
+    /// The peer `host` names: its MagicDNS name, short name, or tailnet IP
+    private func peer(for host: String) -> TailnetPeer? {
+        let host = (host.hasSuffix(".") ? String(host.dropLast()) : host).lowercased()
+        return peers.first { peer in
+            peer.dnsName.lowercased() == host || peer.name.lowercased() == host || peer.ip == host
         }
     }
 
@@ -177,6 +195,7 @@ final class TailscaleManager: ObservableObject {
         }
         let address = host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
         Logger.clauntty.debugOnly("Tailscale: dialing \(address)")
+        TailscaleDebugLog.note("dialing \(address)")
 
         // tailscale_dial blocks and can't be cancelled, so run it detached and
         // stop waiting on timeout; a late fd is closed when it arrives.
@@ -194,7 +213,14 @@ final class TailscaleManager: ObservableObject {
             try? await Task.sleep(for: timeout)
             dial.finish(.failure(TailscaleConnectError.timedOut))
         }
-        return try await dial.result()
+        do {
+            let fd = try await dial.result()
+            TailscaleDebugLog.note("dialed \(address)")
+            return fd
+        } catch {
+            TailscaleDebugLog.note("dial \(address) failed: \(error.localizedDescription)")
+            throw error
+        }
         #else
         throw TailscaleConnectError.failed("Tailscale is not available in this build")
         #endif
@@ -247,6 +273,7 @@ final class TailscaleManager: ObservableObject {
         }
         if newState != state {
             Logger.clauntty.debugOnly("Tailscale: state \(String(describing: newState))")
+            TailscaleDebugLog.note("state \(String(describing: newState))")
             state = newState
         }
     }
@@ -329,6 +356,8 @@ enum TailscaleConnectError: Error, LocalizedError {
     case timedOut
     /// The node didn't reach Running
     case nodeTimedOut
+    /// The dial timed out and the tailnet lists the host as offline
+    case peerOffline(String)
     case failed(String)
 
     var errorDescription: String? {
@@ -339,6 +368,8 @@ enum TailscaleConnectError: Error, LocalizedError {
             return "Timed out connecting over Tailscale"
         case .nodeTimedOut:
             return "Tailscale didn't connect to the tailnet in time"
+        case .peerOffline(let name):
+            return "Timed out connecting to \(name): Tailscale shows it as offline"
         case .failed(let message):
             return "Tailscale: \(message)"
         }
@@ -387,11 +418,90 @@ private final class DialAttempt: @unchecked Sendable {
 
 #if canImport(TailscaleKit)
 private struct TailscaleLogSink: LogSink {
-    // Go-side logs are very chatty; keep them out of the app log.
-    var logFileHandle: Int32? { nil }
+    // Go-side logs are very chatty; keep them out of the app log. Debug builds
+    // write them to a file instead (see TailscaleDebugLog).
+    var logFileHandle: Int32? { TailscaleDebugLog.newWriter() }
 
     func log(_ message: String) {
         Logger.clauntty.debugOnly("Tailscale: \(message)")
     }
 }
 #endif
+
+/// Debug builds: the Go side's logs, timestamped, in Library/Caches/tailscale.log.
+/// Read it from the Mac with
+/// `xcrun devicectl device copy from --device <id> --domain-type appDataContainer
+///  --domain-identifier com.octerm.clauntty --source Library/Caches/tailscale.log --destination .`
+enum TailscaleDebugLog {
+    #if DEBUG
+    private static let lock = NSLock()
+
+    /// Log file, started over once it passes 10 MB
+    private static let file: FileHandle? = {
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("tailscale.log")
+        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
+           size > 10_000_000 {
+            try? FileManager.default.removeItem(at: url)
+        }
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        let handle = try? FileHandle(forWritingTo: url)
+        _ = try? handle?.seekToEnd()
+        return handle
+    }()
+
+    /// Write end of a pipe whose lines are stamped and appended to the file. Go
+    /// doesn't timestamp them, and it closes the fd when the node goes away, so
+    /// each node gets its own copy.
+    private static let pipeWriteFd: Int32? = {
+        guard file != nil else { return nil }
+        var fds: [Int32] = [0, 0]
+        guard pipe(&fds) == 0 else { return nil }
+        let reader = FileHandle(fileDescriptor: fds[0], closeOnDealloc: true)
+        let thread = Thread {
+            var pending = Data()
+            while true {
+                let chunk = reader.availableData
+                if chunk.isEmpty { return }
+                pending.append(chunk)
+                while let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
+                    let line = String(decoding: pending[pending.startIndex..<newline], as: UTF8.self)
+                    pending.removeSubrange(pending.startIndex...newline)
+                    append(line)
+                }
+            }
+        }
+        thread.name = "tailscale-log"
+        thread.start()
+        return fds[1]
+    }()
+
+    static func newWriter() -> Int32? {
+        guard let fd = pipeWriteFd else { return nil }
+        let copy = dup(fd)
+        return copy >= 0 ? copy : nil
+    }
+
+    /// App events (network changes, restarts) next to the Go logs
+    static func note(_ message: String) {
+        append("clauntty: \(message)")
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return formatter
+    }()
+
+    private static func append(_ line: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        file?.write(Data("\(timeFormatter.string(from: Date())) \(line)\n".utf8))
+    }
+    #else
+    static func newWriter() -> Int32? { nil }
+    static func note(_ message: String) {}
+    #endif
+}
