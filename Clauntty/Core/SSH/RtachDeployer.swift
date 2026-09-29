@@ -96,7 +96,8 @@ class RtachDeployer {
     /// 2.7.5 - Fix: proxy forwards redraw and scrollback requests (were silently dropped)
     /// 2.7.6 - Fix: strip terminal queries from replayed output (stale replies typed into programs)
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
-    static let expectedVersion = "2.8.0"
+    /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
+    static let expectedVersion = "2.8.2"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
