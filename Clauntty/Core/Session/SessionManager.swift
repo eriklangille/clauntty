@@ -423,6 +423,11 @@ class SessionManager: ObservableObject {
                 session.handleChannelInactive()
             }
         }
+        // A live connection with nothing to send (an idle prompt) never ends the resuming
+        // overlay with data, so the answered probe does
+        for session in sessions where session.sshConnection?.isConnected == true {
+            session.endResuming()
+        }
         // Drop anything built on a closed connection so the next use connects afresh
         connectionPool = connectionPool.filter { $0.value.isConnected }
         rtachDeployers = rtachDeployers.filter { $0.value.connection.isConnected }

@@ -384,6 +384,7 @@ struct AppContentView: View {
                 } else {
                     // Active session is connected - just resume output
                     Logger.clauntty.debugOnly("APP_LIFECYCLE: resuming connected active session")
+                    activeSession.beginResuming()
                     activeSession.resumeOutput()
                     // It may have died while the app was suspended without closing
                     sessionManager.checkConnections(reason: "foreground")

@@ -408,6 +408,7 @@ class Session: ObservableObject, Identifiable {
     /// Delegates to RtachSession for protocol handling (raw vs framed mode)
     func handleDataReceived(_ data: Data) {
         self.totalBytesReceived += data.count
+        if isAwaitingResume { endResuming() }
         // Verbose: expensive hex dump of incoming data
         Logger.clauntty.verbose("[FRAME] received \(data.count) bytes (total=\(self.totalBytesReceived)), state=\(String(describing: self.rtachProtocol.state)), first32=\(data.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " "))")
 
@@ -419,6 +420,8 @@ class Session: ObservableObject, Identifiable {
     /// This is called when the underlying TCP connection dies (e.g., after background timeout)
     func handleChannelInactive() {
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): handling channel inactive")
+        // The reconnect shows its own overlay
+        endResuming()
 
         // Clear channel references
         parentConnection = nil
@@ -438,6 +441,46 @@ class Session: ObservableObject, Identifiable {
         // Update state to disconnected
         state = .disconnected
         onStateChanged?(state)
+    }
+
+    // MARK: - Resuming Indicator
+
+    /// Back in the foreground but nothing heard from the server yet. After the app has
+    /// been suspended, the connection can stay open while no data moves for several
+    /// seconds (the embedded Tailscale re-handshaking), so the screen would sit stale
+    /// without any sign that it's waiting.
+    @Published private(set) var isResuming: Bool = false
+    private var isAwaitingResume = false
+    private var resumingTask: Task<Void, Never>?
+
+    /// Wait before showing the overlay: a healthy connection answers within
+    /// milliseconds and shouldn't flash it
+    private let resumingShowDelay: Duration = .milliseconds(400)
+
+    /// The app came back to the foreground with this session connected
+    func beginResuming() {
+        guard state == .connected else { return }
+        isAwaitingResume = true
+        resumingTask?.cancel()
+        resumingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: self.resumingShowDelay)
+            guard !Task.isCancelled, self.isAwaitingResume else { return }
+            self.isResuming = true
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): nothing received since foreground, showing resuming overlay")
+        }
+    }
+
+    /// Data arrived, the connection check found the connection alive, or it closed
+    func endResuming() {
+        guard isAwaitingResume || isResuming else { return }
+        isAwaitingResume = false
+        resumingTask?.cancel()
+        resumingTask = nil
+        if isResuming {
+            isResuming = false
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): resumed, hiding resuming overlay")
+        }
     }
 
     // MARK: - Loading Indicator
@@ -747,6 +790,7 @@ class Session: ObservableObject, Identifiable {
     /// Pause terminal output streaming (for inactive tabs/backgrounded app)
     /// rtach will buffer output locally and send idle notifications
     func pauseOutput() {
+        endResuming()
         guard !isPaused else {
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pauseOutput skipped (already paused)")
             return

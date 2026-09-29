@@ -138,15 +138,16 @@ struct TerminalView: View {
                     }
                 }
 
-                // Show connecting overlay
-                if session.state == .connecting {
+                // Show connecting overlay, also while a connection that was suspended with
+                // the app hasn't delivered anything yet (the screen is stale until it does)
+                if session.state == .connecting || session.isResuming {
                     Color.black.opacity(0.7)
                         .ignoresSafeArea()
                     VStack {
                         ProgressView()
                             .tint(.white)
                             .scaleEffect(1.5)
-                        Text("Connecting...")
+                        Text(session.state == .connecting ? "Connecting..." : "Resuming...")
                             .foregroundColor(.white)
                             .padding(.top)
                     }
