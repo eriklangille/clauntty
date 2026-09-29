@@ -259,9 +259,9 @@ class SessionManager: ObservableObject {
             guard let self = self, let session = session else { return }
             self.handleOpenTabRequest(from: session, port: port)
         }
-        session.onOpenBrowserRequested = { [weak self] urlString in
-            guard let self = self else { return }
-            self.handleOpenBrowserRequest(urlString: urlString)
+        session.onOpenBrowserRequested = { [weak self, weak session] urlString in
+            guard let self = self, let session = session else { return }
+            self.handleOpenBrowserRequest(from: session, urlString: urlString)
         }
 
         // Wire up auto-reconnect callback for when send detects nil channel
@@ -933,13 +933,29 @@ class SessionManager: ObservableObject {
     }
 
     /// Handle a browser URL open request from a session (triggered by "browser;URL" command)
-    private func handleOpenBrowserRequest(urlString: String) {
+    ///
+    /// If the URL carries a localhost callback (CLI logins like Claude Code and
+    /// Codex), that port is forwarded before Safari opens so the redirect reaches
+    /// the CLI on the remote host. The forward stays open like a manual one and
+    /// shows in the tab switcher's badge.
+    private func handleOpenBrowserRequest(from session: Session, urlString: String) {
         guard let url = URL(string: urlString) else {
             Logger.clauntty.warning("Invalid browser URL from rtach: \(urlString)")
             return
         }
 
+        let config = session.connectionConfig
         Task { @MainActor in
+            for port in LoopbackCallback.ports(in: url) {
+                let remotePort = RemotePort(id: port, port: port, process: nil, address: "127.0.0.1")
+                do {
+                    try await startForwarding(port: remotePort, config: config)
+                    Logger.clauntty.debugOnly("SessionManager: forwarded callback port \(port) for browser URL")
+                } catch {
+                    // Open the page anyway; the user can still forward by hand
+                    Logger.clauntty.error("SessionManager: failed to forward callback port \(port): \(error)")
+                }
+            }
             await UIApplication.shared.open(url)
             Logger.clauntty.debugOnly("Opened browser URL: \(urlString)")
         }

@@ -130,6 +130,26 @@ class LiquidGlassTabBar: UIView {
         return imageView
     }()
 
+    /// Badge on the plus button counting forwarded ports, so an open forward
+    /// (e.g. one opened automatically for a login callback) is visible without
+    /// opening the tab switcher, where they're listed. Lives outside plusButton
+    /// since that clips to its circle.
+    private let portsBadge: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 10, weight: .bold)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.backgroundColor = .systemGreen
+        label.layer.cornerRadius = 8
+        label.clipsToBounds = true
+        label.isUserInteractionEnabled = false
+        label.isHidden = true
+        return label
+    }()
+
+    /// Forwarded port count shown on portsBadge
+    private var forwardedPortCount = 0
+
 
     // MARK: - Gesture State
 
@@ -184,10 +204,24 @@ class LiquidGlassTabBar: UIView {
         let tap = UITapGestureRecognizer(target: self, action: #selector(handlePlusTap))
         plusButton.addGestureRecognizer(tap)
 
+        portsBadge.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(portsBadge)
+
         NSLayoutConstraint.activate([
             plusIconView.centerXAnchor.constraint(equalTo: plusButton.contentView.centerXAnchor),
             plusIconView.centerYAnchor.constraint(equalTo: plusButton.contentView.centerYAnchor),
+
+            portsBadge.centerXAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: -4),
+            portsBadge.centerYAnchor.constraint(equalTo: plusButton.topAnchor, constant: 4),
+            portsBadge.heightAnchor.constraint(equalToConstant: 16),
+            portsBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 16),
         ])
+    }
+
+    /// Show or hide the plus button along with its badge
+    private func setPlusButtonAlpha(_ alpha: CGFloat) {
+        plusButton.alpha = alpha
+        portsBadge.alpha = alpha
     }
 
     private func setupConstraints() {
@@ -529,7 +563,7 @@ class LiquidGlassTabBar: UIView {
                         otherBubble.alpha = 0
                     }
                 }
-                plusButton.alpha = 0
+                setPlusButtonAlpha(0)
             }
             return
         }
@@ -555,7 +589,7 @@ class LiquidGlassTabBar: UIView {
                 otherBubble.alpha = 0
             }
         }
-        plusButton.alpha = 0
+        setPlusButtonAlpha(0)
 
         // Calculate scale factors
         let scaleX = fullWidth / startFrame.width
@@ -830,7 +864,7 @@ class LiquidGlassTabBar: UIView {
             Logger.clauntty.verbose("COLLAPSE ANIMATING: applying scale transform + moving center up")
             bubble.transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
             bubble.center.y = targetCenterY  // Move up while shrinking
-            self.plusButton.alpha = 1
+            self.setPlusButtonAlpha(1)
         } completion: { _ in
             Logger.clauntty.verbose("COLLAPSE COMPLETE: removing transform and repositioning")
 
@@ -885,9 +919,17 @@ class LiquidGlassTabBar: UIView {
     /// - Parameters:
     ///   - orderedTabs: All tabs in display order (supports intersplicing terminal and web tabs)
     ///   - activeTab: The currently active tab
-    func update(orderedTabs: [TabItem], activeTab: SessionManager.ActiveTab?) {
+    ///   - forwardedPortCount: Number of forwarded ports, shown as a badge on the plus button
+    func update(orderedTabs: [TabItem], activeTab: SessionManager.ActiveTab?, forwardedPortCount: Int = 0) {
         // Use the pre-ordered tabs directly
         allTabs = orderedTabs
+
+        if forwardedPortCount != self.forwardedPortCount {
+            self.forwardedPortCount = forwardedPortCount
+            // Padding via spaces keeps two-digit counts from touching the edges
+            portsBadge.text = forwardedPortCount > 9 ? " \(forwardedPortCount) " : "\(forwardedPortCount)"
+            portsBadge.isHidden = forwardedPortCount == 0
+        }
 
         // Update active tab ID
         switch activeTab {

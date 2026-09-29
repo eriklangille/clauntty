@@ -469,7 +469,7 @@ struct ForwardedPortRow: View {
                 Text(":\(String(port.remotePort.port))")
                     .font(.system(.body, design: .monospaced))
                     .fontWeight(.medium)
-                    .foregroundColor(.white)
+                    .foregroundColor(.primary)
 
                 Text("localhost:\(String(port.localPort)) → \(port.connectionConfig.host)")
                     .font(.caption)

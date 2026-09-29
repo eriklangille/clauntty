@@ -264,3 +264,36 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertTrue(sessionManager.hasSessions)
     }
 }
+
+// MARK: - Login Callback Ports
+
+final class LoopbackCallbackTests: XCTestCase {
+    private func ports(_ string: String) -> [Int] {
+        LoopbackCallback.ports(in: URL(string: string)!)
+    }
+
+    func testEncodedRedirectURI() {
+        XCTAssertEqual(ports("https://auth.openai.com/oauth/authorize?client_id=x&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=abc"), [1455])
+    }
+
+    func testLoopbackIPs() {
+        XCTAssertEqual(ports("https://claude.ai/oauth/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A54545%2Fcallback"), [54545])
+        XCTAssertEqual(ports("https://x.test/auth?redirect_uri=http%3A%2F%2F%5B%3A%3A1%5D%3A8123%2F"), [8123])
+    }
+
+    func testDirectLocalhostURL() {
+        XCTAssertEqual(ports("http://localhost:5173/"), [5173])
+    }
+
+    func testNestedRedirect() {
+        let inner = "https://auth.test/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A9000%2Fcb"
+        let outer = "https://auth.test/login?return_to=" + inner.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+        XCTAssertEqual(ports(outer), [9000])
+    }
+
+    func testIgnoresNonLoopbackAndPortlessURLs() {
+        XCTAssertEqual(ports("https://github.com/login/device"), [])
+        XCTAssertEqual(ports("https://x.test/a?redirect_uri=https%3A%2F%2Fexample.com%3A8443%2Fcb"), [])
+        XCTAssertEqual(ports("https://x.test/a?redirect_uri=http%3A%2F%2Flocalhost%2Fcb"), [])
+    }
+}

@@ -280,3 +280,41 @@ enum PortScannerError: Error, LocalizedError {
         }
     }
 }
+
+// MARK: - Login Callbacks
+
+/// Finds localhost callback ports in URLs opened from the remote host.
+///
+/// CLI logins (Claude Code, Codex, Grok) open an auth page whose redirect points
+/// back at a server the CLI runs on the remote host, e.g.
+/// `https://example.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fcallback`.
+/// Safari runs on the phone, so the redirect only reaches the CLI if that port
+/// is forwarded first.
+enum LoopbackCallback {
+    private static let loopbackHosts: Set<String> = ["localhost", "127.0.0.1", "::1", "[::1]"]
+
+    /// Ports of loopback URLs in `url` itself or in its query values (nested URLs
+    /// included), in the order found. URLs without an explicit port are skipped
+    /// since there's nothing to forward.
+    static func ports(in url: URL) -> [Int] {
+        var ports: [Int] = []
+        collect(url, depth: 0, into: &ports)
+        return ports
+    }
+
+    private static func collect(_ url: URL, depth: Int, into ports: inout [Int]) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        if let host = components.host?.lowercased(), loopbackHosts.contains(host),
+           let port = components.port, !ports.contains(port) {
+            ports.append(port)
+        }
+        // Redirects can be nested inside another redirect (e.g. a login page's
+        // return_to holding the OAuth URL); a few levels is plenty
+        guard depth < 3 else { return }
+        for item in components.queryItems ?? [] {
+            guard let value = item.value, value.contains("://"),
+                  let nested = URL(string: value) else { continue }
+            collect(nested, depth: depth + 1, into: &ports)
+        }
+    }
+}

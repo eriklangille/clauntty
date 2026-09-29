@@ -118,7 +118,8 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         // Update bar with current state (using global tab order)
         bar.update(
             orderedTabs: sessionManager.orderedTabs(),
-            activeTab: sessionManager.activeTab
+            activeTab: sessionManager.activeTab,
+            forwardedPortCount: sessionManager.forwardedPorts.count
         )
     }
 

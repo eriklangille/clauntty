@@ -1901,14 +1901,18 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     func setActive(_ active: Bool) {
+        let isFirstApply = !hasAppliedActiveState
         hasAppliedActiveState = true
         let surfaceExists = self.surface != nil
         Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: setActive(\(active)) starting, wasActive=\(self.isActiveTab), appBg=\(self.isAppBackgrounded), surface=\(surfaceExists)")
         let stateChanged = active != isActiveTab
         isActiveTab = active
 
-        // Notify about active state change (for power management) - only if state changed
-        if stateChanged {
+        // Notify about active state change (for power management) - only if state changed.
+        // Always notify the first time: isActiveTab starts true but the session starts
+        // inactive, so the tab restored as active on launch never told its session and
+        // never claimed active with rtach, which then dropped open-browser/forward commands.
+        if stateChanged || isFirstApply {
             onActiveStateChanged?(active)
         }
 
