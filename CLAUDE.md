@@ -29,7 +29,6 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 ├── clauntty/          # iOS app (this repo)
 ├── ghostty/           # Forked ghostty (git@github.com:eriklangille/ghostty.git), branch clauntty
 ├── rtach/             # Session persistence daemon (bundled into Clauntty/Resources/rtach/)
-├── libxev/            # Local libxev fork (iOS fixes), used by rtach
 └── libtailscale/      # Upstream libtailscale (github.com/tailscale/libtailscale); builds TailscaleKit.xcframework
 ```
 
@@ -301,11 +300,9 @@ for the new size land in the old one (half-drawn Claude Code after rotating).
 
 ### Build rtach
 
-rtach still needs Zig 0.15 (`brew install zig@0.15`); the default `zig` is 0.16 for ghostty.
-
 ```bash
 cd ../rtach
-$(brew --prefix zig@0.15)/bin/zig build cross   # all targets, gzipped into ../clauntty/Clauntty/Resources/rtach/
+zig build cross   # all targets, gzipped into ../clauntty/Clauntty/Resources/rtach/
 # Bump src/main.zig version and RtachDeployer.expectedVersion together, or phones won't redeploy it
 
 # Clean iOS build to pick up new binaries (Xcode caches resources)
@@ -331,7 +328,7 @@ bun run load-test.ts    # Performance: ~16K msg/sec
 
 - **Bundle ID**: `com.octerm.clauntty`
 - **iOS target**: 17.0+
-- **Zig version**: 0.16 for ghostty, 0.15 for rtach
+- **Zig version**: 0.16 (ghostty and rtach)
 - **Dependencies**: swift-nio-ssh 0.12.0, swift-nio 2.92.0
 - Metal tests require simulator (headless XCTest won't work)
 
