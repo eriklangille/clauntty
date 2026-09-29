@@ -693,18 +693,18 @@ class Session: ObservableObject, Identifiable {
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): window change \(columns)x\(rows)")
     }
 
-    /// Upload an image to the remote server and paste the file path
-    /// Used for pasting images from clipboard into terminal (e.g., for Claude Code)
-    func uploadImageAndPaste(_ image: UIImage) {
+    /// Upload an image to the remote server for pasting (e.g., into Claude Code)
+    /// - Returns: The image's path on the remote host, or nil if the upload failed
+    func uploadImage(_ image: UIImage) async -> String? {
         guard let connection = sshConnection else {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): cannot upload image, no SSH connection")
-            return
+            return nil
         }
 
         // Convert image to PNG data
         guard let imageData = image.pngData() else {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): failed to convert image to PNG")
-            return
+            return nil
         }
 
         // Generate unique filename
@@ -713,19 +713,13 @@ class Session: ObservableObject, Identifiable {
 
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): uploading image (\(imageData.count) bytes) to \(remotePath)")
 
-        // Upload async and paste path when done
-        Task {
-            do {
-                try await connection.executeWithStdin("cat > \(remotePath)", stdinData: imageData)
-                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): image uploaded, pasting path")
-
-                // Paste the file path to the terminal
-                if let pathData = remotePath.data(using: .utf8) {
-                    sendData(pathData)
-                }
-            } catch {
-                Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): failed to upload image: \(error)")
-            }
+        do {
+            try await connection.executeWithStdin("cat > \(remotePath)", stdinData: imageData)
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): image uploaded")
+            return remotePath
+        } catch {
+            Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): failed to upload image: \(error)")
+            return nil
         }
     }
 

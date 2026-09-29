@@ -87,8 +87,8 @@ struct TerminalView: View {
                         session.sendData(data)
                     },
                     onImagePaste: { image in
-                        // Upload image to remote and paste file path
-                        session.uploadImageAndPaste(image)
+                        // Upload image to remote; the surface pastes the returned path
+                        await session.uploadImage(image)
                     },
                     onTerminalSizeChanged: { rows, columns in
                         // Send window size change to SSH server

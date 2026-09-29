@@ -63,8 +63,9 @@ struct TerminalSurface: UIViewRepresentable {
     /// Callback for keyboard input - send this data to SSH
     var onTextInput: ((Data) -> Void)?
 
-    /// Callback for image paste - upload image and paste path
-    var onImagePaste: ((UIImage) -> Void)?
+    /// Callback for image paste: uploads the image to the remote host and returns its
+    /// path there, which is then pasted
+    var onImagePaste: ((UIImage) async -> String?)?
 
     /// Callback when terminal grid size changes (rows, columns)
     var onTerminalSizeChanged: ((UInt16, UInt16) -> Void)?
@@ -388,8 +389,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
     }
 
-    /// Callback for image paste - upload image and paste path
-    var onImagePaste: ((UIImage) -> Void)?
+    /// Callback for image paste: uploads the image to the remote host and returns its
+    /// path there, which is then pasted
+    var onImagePaste: ((UIImage) async -> String?)?
 
     /// Keyboard accessory bar with terminal keys
     private let accessoryBar: KeyboardAccessoryView = {
@@ -1455,43 +1457,33 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     @objc override func paste(_ sender: Any?) {
         Logger.clauntty.debugOnly("[PASTE] paste() called")
 
-        // Try text first
         if let string = UIPasteboard.general.string {
             Logger.clauntty.debugOnly("[PASTE] clipboard has string: \(string.count) chars, \(string.utf8.count) bytes")
-
-            // Convert newlines to carriage returns for terminal
-            let terminalText = string.replacingOccurrences(of: "\n", with: "\r")
-
-            // Check if paste contains multiple lines (needs bracketed paste)
-            let isMultiline = string.contains("\n") || string.contains("\r")
-
-            if isMultiline {
-                // Wrap with bracketed paste for multi-line content
-                // This ensures apps like Claude Code, vim, etc. handle it atomically
-                // ESC[200~ = start bracketed paste, ESC[201~ = end bracketed paste
-                let bracketStart = "\u{1B}[200~"
-                let bracketEnd = "\u{1B}[201~"
-                let wrappedText = bracketStart + terminalText + bracketEnd
-                Logger.clauntty.debugOnly("[PASTE] multi-line, sending with bracketed paste wrapper")
-                if let data = wrappedText.data(using: .utf8) {
-                    onTextInput?(data)
-                }
-            } else {
-                // Single line - send directly without bracketed paste
-                Logger.clauntty.debugOnly("[PASTE] single-line, sending directly")
-                if let data = terminalText.data(using: .utf8) {
-                    onTextInput?(data)
-                }
-            }
+            pasteText(string)
             return
-        } else {
-            Logger.clauntty.debugOnly("[PASTE] clipboard has no string")
         }
 
-        // Try images - upload to remote and paste file path
-        if let image = UIPasteboard.general.image {
-            Logger.clauntty.debugOnly("Pasting image from clipboard")
-            onImagePaste?(image)
+        // Images are uploaded to the remote host and their path is pasted. As a paste
+        // (not typed input) Claude Code turns the path into an image attachment.
+        if let image = UIPasteboard.general.image, let upload = onImagePaste {
+            Logger.clauntty.debugOnly("[PASTE] pasting image from clipboard")
+            Task { @MainActor [weak self] in
+                guard let path = await upload(image) else { return }
+                self?.pasteText(path)
+            }
+        } else {
+            Logger.clauntty.debugOnly("[PASTE] clipboard has no string or image")
+        }
+    }
+
+    /// Paste text through Ghostty, which wraps it in bracketed paste (ESC[200~ … ESC[201~)
+    /// when the program enabled that mode and converts newlines. Programs rely on the
+    /// markers to tell a paste from typing. The bytes come back through the pty input
+    /// callback and go to SSH.
+    private func pasteText(_ text: String) {
+        guard let surface else { return }
+        text.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(strlen(ptr)))
         }
     }
 
