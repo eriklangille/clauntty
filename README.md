@@ -42,14 +42,13 @@ Most mobile terminals lose your session when the app backgrounds or your connect
 
 ### 1. Clone the repos
 
-The project is a monorepo of sibling repos. **The directory layout matters**: ghostty references `../libxev` and the app references `../libtailscale` at build time.
+The project is a monorepo of sibling repos. **The directory layout matters**: the app references `../ghostty`, `../rtach` and `../libtailscale` at build time.
 
 ```bash
 mkdir clauntty && cd clauntty
 git clone https://github.com/eriklangille/clauntty.git clauntty
 git clone https://github.com/eriklangille/ghostty.git ghostty
 git clone https://github.com/eriklangille/rtach.git rtach
-git clone https://github.com/eriklangille/libxev.git libxev
 git clone https://github.com/tailscale/libtailscale.git libtailscale
 ```
 
@@ -59,7 +58,6 @@ clauntty/
 ├── clauntty/   # iOS app (this repo)
 ├── ghostty/    # Ghostty fork (terminal emulator)
 ├── rtach/      # Session persistence daemon
-├── libxev/     # Event loop (iOS fixes)
 └── libtailscale/  # Tailscale's embeddable tsnet library (upstream)
 ```
 
@@ -68,7 +66,7 @@ clauntty/
 Build in this order — each step depends on the previous:
 
 ```bash
-# 1. Build GhosttyKit framework (requires libxev at ../libxev)
+# 1. Build GhosttyKit framework (Zig 0.16)
 cd ghostty && zig build -Demit-xcframework -Doptimize=ReleaseFast && cd ..
 
 # 2. Build rtach Linux binaries (auto-copies to clauntty/Clauntty/Resources/rtach/)
@@ -236,5 +234,5 @@ xcodebuild test -project Clauntty.xcodeproj -scheme ClaunttyTests \
 |------------|---------|--------|
 | GhosttyKit | Terminal emulation + Metal rendering | [eriklangille/ghostty](https://github.com/eriklangille/ghostty) |
 | rtach | Session persistence daemon | [eriklangille/rtach](https://github.com/eriklangille/rtach) |
-| libxev | Cross-platform event loop (iOS fixes) | [eriklangille/libxev](https://github.com/eriklangille/libxev) |
+| libxev | Cross-platform event loop (used by ghostty and rtach) | [mitchellh/libxev](https://github.com/mitchellh/libxev) |
 | swift-nio-ssh | SSH protocol | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) |
