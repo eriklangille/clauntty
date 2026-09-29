@@ -273,6 +273,12 @@ class SSHConnection: ObservableObject {
 
     /// Execute a command and return output (for setup/deployment)
     func executeCommand(_ command: String) async throws -> String {
+        let output = try await executeCommandData(command)
+        return String(data: output, encoding: .utf8) ?? ""
+    }
+
+    /// Execute a command and return its raw stdout (e.g. a downloaded file)
+    func executeCommandData(_ command: String) async throws -> Data {
         Logger.clauntty.debugOnly("executeCommand: starting '\(command.prefix(50))...'")
         guard let channel = self.channel, channel.isActive else {
             Logger.clauntty.error("executeCommand: channel not connected")
@@ -314,7 +320,7 @@ class SSHConnection: ObservableObject {
         try await childChannel.closeFuture.get()
         Logger.clauntty.debugOnly("executeCommand: channel closed, output=\(output.count) bytes")
 
-        return String(data: output, encoding: .utf8) ?? ""
+        return outputLock.withLock { output }
     }
 
     /// Execute a command and write binary data to stdin

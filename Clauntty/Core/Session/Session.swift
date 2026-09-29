@@ -308,6 +308,9 @@ class Session: ObservableObject, Identifiable {
     /// Called when a URL should be opened in the device browser
     var onOpenBrowserRequested: ((String) -> Void)?
 
+    /// Called when `clauntty show` sends an image path on the remote host
+    var onShowImageRequested: ((String) -> Void)?
+
     // MARK: - rtach Protocol Session
 
     /// State machine for rtach protocol (raw/framed mode handling)
@@ -586,6 +589,12 @@ class Session: ObservableObject, Identifiable {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command browser \(urlString)")
                 onOpenBrowserRequested?(urlString)
             }
+        case "image":
+            if parts.count > 1 {
+                let path = String(parts[1])
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path)")
+                onShowImageRequested?(path)
+            }
         default:
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
         }
@@ -721,6 +730,16 @@ class Session: ObservableObject, Identifiable {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): failed to upload image: \(error)")
             return nil
         }
+    }
+
+    /// Download a file from the remote host over this session's SSH connection
+    func downloadFile(_ path: String, maxBytes: Int) async throws -> Data {
+        guard let connection = sshConnection else { throw SessionError.notConnected }
+        let quoted = "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        // One byte over the limit tells a too-large file from one that fits exactly
+        let data = try await connection.executeCommandData("head -c \(maxBytes + 1) \(quoted)")
+        guard data.count <= maxBytes else { throw SessionError.fileTooLarge }
+        return data
     }
 
     // MARK: - Power Management

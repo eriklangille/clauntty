@@ -168,6 +168,25 @@ class NotificationManager: NSObject, ObservableObject {
         }
     }
 
+    /// Notify that `clauntty show` sent images while the app was in the background.
+    /// Opening the app shows them.
+    func scheduleImagesReady(count: Int, host: String, sessionId: UUID) async {
+        guard isAuthorized, notificationMode != .none else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = count == 1 ? "New image" : "\(count) new images"
+        content.body = "From \(host)"
+        content.sound = .default
+        content.userInfo = ["sessionId": sessionId.uuidString]
+
+        let request = UNNotificationRequest(identifier: "images-\(UUID().uuidString)", content: content, trigger: nil)
+        do {
+            try await notificationCenter.add(request)
+        } catch {
+            Logger.clauntty.error("NotificationManager: failed to schedule image notification: \(error.localizedDescription)")
+        }
+    }
+
     /// Clear pending notification for a session (call when user returns to app)
     func clearPendingNotification(for sessionId: UUID) {
         pendingSessionIds.remove(sessionId)

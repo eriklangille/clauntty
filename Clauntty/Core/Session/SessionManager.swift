@@ -19,6 +19,13 @@ class SessionManager: ObservableObject {
     /// Ports being forwarded without a web tab (background forwarding)
     @Published var forwardedPorts: [ForwardedPort] = []
 
+    /// Images sent with `clauntty show`, presented full screen while non-nil
+    @Published var imageViewer: ImageViewerContent?
+
+    /// `clauntty show a.png b.png` sends one command per file; collect them into one viewer
+    private var pendingImagePaths: [(session: Session, path: String)] = []
+    private var pendingImageTask: Task<Void, Never>?
+
     /// Currently active tab type and ID
     enum ActiveTab: Equatable {
         case terminal(UUID)
@@ -268,6 +275,10 @@ class SessionManager: ObservableObject {
         session.onOpenBrowserRequested = { [weak self, weak session] urlString in
             guard let self = self, let session = session else { return }
             self.handleOpenBrowserRequest(from: session, urlString: urlString)
+        }
+        session.onShowImageRequested = { [weak self, weak session] path in
+            guard let self = self, let session = session else { return }
+            self.handleShowImageRequest(from: session, path: path)
         }
 
         // Wire up auto-reconnect callback for when send detects nil channel
@@ -990,6 +1001,55 @@ class SessionManager: ObservableObject {
         }
     }
 
+    /// Largest image `clauntty show` will download
+    private static let maxImageBytes = 20 * 1024 * 1024
+
+    /// Queue an image from `clauntty show`; paths arriving together open as one viewer
+    private func handleShowImageRequest(from session: Session, path: String) {
+        pendingImagePaths.append((session, path))
+        pendingImageTask?.cancel()
+        pendingImageTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            let batch = self.pendingImagePaths
+            self.pendingImagePaths = []
+            await self.showImages(batch)
+        }
+    }
+
+    private func showImages(_ batch: [(session: Session, path: String)]) async {
+        var images: [ImageViewerContent.Item] = []
+        for (session, path) in batch {
+            let name = (path as NSString).lastPathComponent
+            do {
+                let data = try await session.downloadFile(path, maxBytes: Self.maxImageBytes)
+                if let image = UIImage(data: data) {
+                    images.append(.init(name: name, image: image))
+                } else {
+                    images.append(.init(name: name, error: data.isEmpty ? "File not found or empty" : "Not an image"))
+                }
+            } catch {
+                images.append(.init(name: name, error: error.localizedDescription))
+            }
+        }
+        guard let source = batch.first?.session else { return }
+        let host = source.connectionConfig.name.isEmpty ? source.connectionConfig.host : source.connectionConfig.name
+        Logger.clauntty.debugOnly("SessionManager: showing \(images.count) image(s) from \(host)")
+
+        if var current = imageViewer {
+            // Already viewing: add the new images and jump to the first of them
+            current.selection = current.items.count
+            current.items += images
+            imageViewer = current
+        } else {
+            imageViewer = ImageViewerContent(host: host, items: images)
+        }
+
+        if UIApplication.shared.applicationState != .active {
+            await NotificationManager.shared.scheduleImagesReady(count: images.count, host: host, sessionId: source.id)
+        }
+    }
+
     /// Switch to an appropriate tab after closing one
     /// Prefers previousActiveTab if valid, otherwise falls back to first available
     private func switchToTabAfterClose(closedTab: ActiveTab) {
@@ -1528,11 +1588,14 @@ enum ForwardedPortError: Error, LocalizedError {
 
 enum SessionError: Error, LocalizedError {
     case notConnected
+    case fileTooLarge
 
     var errorDescription: String? {
         switch self {
         case .notConnected:
             return "SSH connection not established"
+        case .fileTooLarge:
+            return "File is too large"
         }
     }
 }

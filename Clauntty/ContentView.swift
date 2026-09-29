@@ -132,6 +132,10 @@ struct ContentView: View {
         ConnectionListView()
       }
     }
+    .fullScreenCover(item: $sessionManager.imageViewer) { _ in
+      // Images from `clauntty show` on a remote host
+      ImageViewerView(content: $sessionManager.imageViewer)
+    }
     .onAppear {
       checkAutoConnect()
     }

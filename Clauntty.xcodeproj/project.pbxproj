@@ -60,6 +60,7 @@
 		C0000026 /* PowerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000026 /* PowerManager.swift */; };
 		C0000027 /* SpeechManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000027 /* SpeechManager.swift */; };
 		C0000028 /* PortsSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000028 /* PortsSheetView.swift */; };
+		C00000A1 /* ImageViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A1 /* ImageViewerView.swift */; };
 		C0000029 /* PersistedWebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000029 /* PersistedWebTab.swift */; };
 		C80A313220D32B0F645D406F /* LiquidGlassTabBarRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA3DCC2DFC28098F2BC7C70 /* LiquidGlassTabBarRepresentable.swift */; };
 		CC4B62670E3311459A29FF4C /* SSHKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F66C88A0644682800154EE25 /* SSHKey.swift */; };
@@ -156,6 +157,7 @@
 		C1000026 /* PowerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerManager.swift; sourceTree = "<group>"; };
 		C1000027 /* SpeechManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechManager.swift; sourceTree = "<group>"; };
 		C1000028 /* PortsSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortsSheetView.swift; sourceTree = "<group>"; };
+		C10000A1 /* ImageViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewerView.swift; sourceTree = "<group>"; };
 		C1000029 /* PersistedWebTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedWebTab.swift; sourceTree = "<group>"; };
 		CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PersistedTab.swift; sourceTree = "<group>"; };
 		D2000001 /* GhosttyAppTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyAppTests.swift; path = ../Tests/ClaunttyTests/GhosttyAppTests.swift; sourceTree = "<group>"; };
@@ -324,6 +326,7 @@
 				28503FD938162D88F8B6A69F /* WebTabView.swift */,
 				C1000025 /* SettingsView.swift */,
 				C1000028 /* PortsSheetView.swift */,
+				C10000A1 /* ImageViewerView.swift */,
 				297EA9CE961BFF920036934A /* SelectionHandleView.swift */,
 				DFCD20EE71377F3F8FBB4C5E /* LiquidGlassTabBar */,
 				0CD476298B71607D9BDB445C /* ServerPickerView.swift */,
@@ -609,6 +612,7 @@
 				C0000024 /* NotificationManager.swift in Sources */,
 				C0000025 /* SettingsView.swift in Sources */,
 				C0000028 /* PortsSheetView.swift in Sources */,
+				C00000A1 /* ImageViewerView.swift in Sources */,
 				C0000026 /* PowerManager.swift in Sources */,
 				C0000027 /* SpeechManager.swift in Sources */,
 				70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */,

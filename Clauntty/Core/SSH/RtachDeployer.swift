@@ -97,7 +97,8 @@ class RtachDeployer {
     /// 2.7.6 - Fix: strip terminal queries from replayed output (stale replies typed into programs)
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
-    static let expectedVersion = "2.8.2"
+    /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
+    static let expectedVersion = "2.9.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -339,83 +340,26 @@ class RtachDeployer {
 
     // MARK: - Helper Scripts
 
-    /// Deploy helper scripts for port forwarding
+    /// Link the `clauntty` command and the older helper names to rtach, which runs as the
+    /// command when invoked by those names (rtach 2.9.0+). Also links `clauntty` into
+    /// ~/.local/bin when that directory exists, so shells rtach didn't start (Herdr,
+    /// tmux, plain ssh) find it; an existing file there that isn't our link is left alone.
     private func deployHelperScripts() async throws {
-        // Deploy forward-port script (handles both "8000" and "http://localhost:8000")
-        // Uses RTACH_CMD_PIPE (FIFO path) to send commands to Clauntty
-        _ = try await connection.executeCommand(
-            "cat > ~/.clauntty/bin/forward-port << 'EOF'\n" +
-            "#!/bin/bash\n" +
-            "arg=\"$1\"\n" +
-            "# Extract port from URL if needed (http://localhost:8000 -> 8000)\n" +
-            "if [[ \"$arg\" == *://* ]]; then\n" +
-            "  port=\"${arg##*:}\"\n" +
-            "  port=\"${port%%/*}\"\n" +
-            "else\n" +
-            "  port=\"$arg\"\n" +
-            "fi\n" +
-            "if [ -z \"$RTACH_CMD_PIPE\" ]; then\n" +
-            "  echo \"Error: RTACH_CMD_PIPE not set (not running in rtach session)\" >&2\n" +
-            "  exit 1\n" +
-            "fi\n" +
-            "if ! echo \"forward;$port\" > \"$RTACH_CMD_PIPE\" 2>/dev/null; then\n" +
-            "  echo \"Error: Failed to write to RTACH_CMD_PIPE\" >&2\n" +
-            "  exit 1\n" +
-            "fi\n" +
-            "echo \"Port $port forwarded\"\n" +
-            "EOF\n" +
-            "chmod +x ~/.clauntty/bin/forward-port"
-        )
-
-        // Deploy open-tab script (handles both "8000" and "http://localhost:8000")
-        // Uses RTACH_CMD_PIPE (FIFO path) to send commands to Clauntty
-        _ = try await connection.executeCommand(
-            "cat > ~/.clauntty/bin/open-tab << 'EOF'\n" +
-            "#!/bin/bash\n" +
-            "arg=\"$1\"\n" +
-            "# Extract port from URL if needed (http://localhost:8000 -> 8000)\n" +
-            "if [[ \"$arg\" == *://* ]]; then\n" +
-            "  port=\"${arg##*:}\"\n" +
-            "  port=\"${port%%/*}\"\n" +
-            "else\n" +
-            "  port=\"$arg\"\n" +
-            "fi\n" +
-            "if [ -z \"$RTACH_CMD_PIPE\" ]; then\n" +
-            "  echo \"Error: RTACH_CMD_PIPE not set (not running in rtach session)\" >&2\n" +
-            "  exit 1\n" +
-            "fi\n" +
-            "if ! echo \"open;$port\" > \"$RTACH_CMD_PIPE\" 2>/dev/null; then\n" +
-            "  echo \"Error: Failed to write to RTACH_CMD_PIPE\" >&2\n" +
-            "  exit 1\n" +
-            "fi\n" +
-            "echo \"Opened port $port\"\n" +
-            "EOF\n" +
-            "chmod +x ~/.clauntty/bin/open-tab"
-        )
-
-        // Deploy open-browser script (opens URL in iOS Safari)
-        // Uses RTACH_CMD_PIPE (FIFO path) to send commands to Clauntty
-        _ = try await connection.executeCommand(
-            "cat > ~/.clauntty/bin/open-browser << 'EOF'\n" +
-            "#!/bin/bash\n" +
-            "URL=\"$1\"\n" +
-            "if [ -z \"$URL\" ]; then\n" +
-            "  echo \"Usage: open-browser <url>\" >&2\n" +
-            "  exit 1\n" +
-            "fi\n" +
-            "if [ -z \"$RTACH_CMD_PIPE\" ]; then\n" +
-            "  echo \"Error: RTACH_CMD_PIPE not set (not running in rtach session)\" >&2\n" +
-            "  exit 1\n" +
-            "fi\n" +
-            "if ! echo \"browser;$URL\" > \"$RTACH_CMD_PIPE\" 2>/dev/null; then\n" +
-            "  echo \"Error: Failed to write to RTACH_CMD_PIPE\" >&2\n" +
-            "  exit 1\n" +
-            "fi\n" +
-            "EOF\n" +
-            "chmod +x ~/.clauntty/bin/open-browser"
-        )
-
-        Logger.clauntty.debugOnly("Helper scripts deployed (forward-port, open-tab, open-browser)")
+        let script = """
+            cd ~/.clauntty/bin || exit 1
+            for name in clauntty open-browser forward-port open-tab; do ln -sfn rtach "$name"; done
+            if [ -d ~/.local/bin ]; then
+              link=~/.local/bin/clauntty
+              if [ ! -e "$link" ] && [ ! -L "$link" ]; then
+                ln -s ~/.clauntty/bin/clauntty "$link"
+              elif [ -L "$link" ]; then
+                case "$(readlink "$link")" in */.clauntty/bin/*) ln -sfn ~/.clauntty/bin/clauntty "$link";; esac
+              fi
+            fi
+            """
+        // sh, not the login shell (which may be fish); the script has no single quotes
+        _ = try await connection.executeCommand("sh -c '\(script)'")
+        Logger.clauntty.debugOnly("Helper commands linked (clauntty, open-browser, forward-port, open-tab)")
     }
 
     // MARK: - Claude Code Settings
@@ -443,7 +387,9 @@ class RtachDeployer {
         let requiredPerms = [
             "Bash(~/.clauntty/bin/forward-port:*)",
             "Bash(~/.clauntty/bin/open-tab:*)",
-            "Bash(~/.clauntty/bin/open-browser:*)"
+            "Bash(~/.clauntty/bin/open-browser:*)",
+            "Bash(~/.clauntty/bin/clauntty:*)",
+            "Bash(clauntty:*)"
         ]
         for perm in requiredPerms {
             if !allow.contains(perm) {
@@ -475,7 +421,9 @@ class RtachDeployer {
                     "allow": [
                         "Bash(~/.clauntty/bin/forward-port:*)",
                         "Bash(~/.clauntty/bin/open-tab:*)",
-                        "Bash(~/.clauntty/bin/open-browser:*)"
+                        "Bash(~/.clauntty/bin/open-browser:*)",
+                        "Bash(~/.clauntty/bin/clauntty:*)",
+                        "Bash(clauntty:*)"
                     ]
                 ]
             ]
