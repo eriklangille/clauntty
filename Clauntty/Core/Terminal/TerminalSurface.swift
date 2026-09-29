@@ -1351,6 +1351,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
     }
 
+    /// Modifiers for the current long press, fixed when it begins
+    private var longPressMods = GHOSTTY_MODS_NONE
+
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard let surface = self.surface else { return }
 
@@ -1358,29 +1361,33 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         switch gesture.state {
         case .began:
+            // With mouse reporting on (Herdr, TUIs), a plain press goes to the program as a
+            // click. Holding Shift makes Ghostty select instead, like a desktop terminal.
+            longPressMods = isMouseCaptured ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
+
             // Start selection with mouse press at location
             isSelecting = true
-            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
-            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), longPressMods)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, longPressMods)
 
         case .changed:
             // Update selection as finger moves
-            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
+            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), longPressMods)
 
         case .ended:
             // End selection
-            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
-            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), longPressMods)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, longPressMods)
             isSelecting = false
 
-            // Show handles and edit menu if there's a selection
             if ghostty_surface_has_selection(surface) {
                 showSelectionHandles()
-                showEditMenu(at: location)
             }
+            // Show the menu even without a selection so Paste is always reachable
+            showEditMenu(at: location)
 
         case .cancelled:
-            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, longPressMods)
             isSelecting = false
             hideSelectionHandles()
 
