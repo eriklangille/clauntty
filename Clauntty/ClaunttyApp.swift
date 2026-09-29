@@ -299,6 +299,8 @@ struct ClaunttyApp: App {
 extension Notification.Name {
     /// Request to capture terminal text (handled by TerminalView)
     static let captureTerminalText = Notification.Name("captureTerminalText")
+    /// Request the active terminal to refresh its tab preview (handled by TerminalView)
+    static let captureTabThumbnail = Notification.Name("captureTabThumbnail")
 }
 
 /// Wrapper view that handles scenePhase changes and notification taps

@@ -202,6 +202,12 @@ struct TerminalView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .captureTabThumbnail)) { _ in
+            // The tab selector is about to open; without this the current tab only has a
+            // preview from the last time it was switched away from (none after a relaunch)
+            guard isActive, let surface = surfaceHolder.surface else { return }
+            session.cachedScreenshot = surface.captureScreenshot()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .captureTerminalText)) { note in
             // Only capture if this is the active terminal
             guard isActive, let surface = surfaceHolder.surface else { return }

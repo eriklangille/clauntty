@@ -62,8 +62,24 @@ class Session: ObservableObject, Identifiable {
     /// Reason why the session was remotely deleted (for UI display)
     var remoteClosureReason: String?
 
-    /// Cached screenshot for tab selector (captured when switching away)
-    var cachedScreenshot: UIImage?
+    /// Cached screenshot for the tab selector, captured when switching away or opening
+    /// the selector. Kept on disk so cards still have previews after a relaunch.
+    var cachedScreenshot: UIImage? {
+        get {
+            if !hasLoadedScreenshot {
+                hasLoadedScreenshot = true
+                storedScreenshot = TabThumbnailStore.load(id: id)
+            }
+            return storedScreenshot
+        }
+        set {
+            hasLoadedScreenshot = true
+            storedScreenshot = newValue
+            TabThumbnailStore.save(newValue, id: id)
+        }
+    }
+    private var storedScreenshot: UIImage?
+    private var hasLoadedScreenshot = false
 
     /// Font size for this session (nil = use global default)
     var fontSize: Float?
@@ -1024,6 +1040,39 @@ extension Session: RtachClient.RtachSessionDelegate {
             } else if self.isActive {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): claiming active on connect")
                 self.claimActive()
+            }
+        }
+    }
+}
+
+// MARK: - Tab Thumbnails
+
+/// JPEG previews of terminal tabs in Caches, keyed by session ID
+enum TabThumbnailStore {
+    private static let directory: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TabThumbnails", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+    private static let queue = DispatchQueue(label: "com.clauntty.tab-thumbnails", qos: .utility)
+
+    private static func url(for id: UUID) -> URL {
+        directory.appendingPathComponent("\(id.uuidString).jpg")
+    }
+
+    static func load(id: UUID) -> UIImage? {
+        UIImage(contentsOfFile: url(for: id).path)
+    }
+
+    /// Writes the preview in the background, or deletes it when `image` is nil
+    static func save(_ image: UIImage?, id: UUID) {
+        let url = url(for: id)
+        queue.async {
+            if let data = image?.jpegData(compressionQuality: 0.7) {
+                try? data.write(to: url, options: .atomic)
+            } else {
+                try? FileManager.default.removeItem(at: url)
             }
         }
     }

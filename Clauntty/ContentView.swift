@@ -59,6 +59,8 @@ struct ContentView: View {
                 onNewTab: { showingNewTabSheet = true },
                 onShowTabSelector: {
                   Logger.clauntty.info("[TAB_SELECTOR] onShowTabSelector callback FIRED")
+                  // Refresh the current tab's preview while it's still on screen
+                  NotificationCenter.default.post(name: .captureTabThumbnail, object: nil)
                   // Force dismiss keyboard at window level (most aggressive)
                   Logger.clauntty.info("[TAB_SELECTOR] Forcing keyboard dismiss via endEditing")
                   UIApplication.shared.connectedScenes
@@ -110,7 +112,7 @@ struct ContentView: View {
           )
         }
         .sheet(item: $portsSheetSession) { session in
-          PortsSheetView(session: session, onDismiss: { portsSheetSession = nil })
+          PortsSheetView(config: session.connectionConfig, onDismiss: { portsSheetSession = nil })
             .environmentObject(sessionManager)
         }
         .onChange(of: sessionManager.sessions.count) { oldCount, newCount in

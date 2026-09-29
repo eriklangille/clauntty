@@ -397,6 +397,7 @@ class SessionManager: ObservableObject {
         // reappeared on the next launch
         sessions.removeAll { $0.id == session.id }
         removePersistedTab(session.id)
+        TabThumbnailStore.save(nil, id: session.id)
 
         // Remove from global tab order
         tabOrder.removeAll { $0 == session.id }
@@ -609,6 +610,25 @@ class SessionManager: ObservableObject {
 
         Logger.clauntty.debugOnly("SessionManager: created web tab for port \(port.port)")
         return webTab
+    }
+
+    /// Open a remote port in a web tab: switches to an existing tab for it, or creates one.
+    /// A background forward of the port is handed over to the tab since both bind the
+    /// same local port.
+    @discardableResult
+    func openPortInTab(_ port: RemotePort, config: SavedConnection) async throws -> WebTab {
+        if let existing = webTabForPort(port.port, config: config) {
+            switchTo(existing)
+            return existing
+        }
+        let poolKey = connectionKey(for: config)
+        if let index = forwardedPorts.firstIndex(where: {
+            $0.remotePort.port == port.port && connectionKey(for: $0.connectionConfig) == poolKey
+        }) {
+            let forwarded = forwardedPorts.remove(at: index)
+            await forwarded.stopForwarding()
+        }
+        return try await createWebTab(for: port, config: config)
     }
 
     /// Close a web tab
@@ -1133,6 +1153,75 @@ class SessionManager: ObservableObject {
             $0.remotePort.port == port &&
             connectionKey(for: $0.connectionConfig) == poolKey
         }
+    }
+
+    // MARK: - Machines
+
+    /// A server with open tabs or forwarded ports, shown in the tab selector's machine strip
+    struct Machine: Identifiable {
+        /// Connection pool key (user@host:port)
+        let id: String
+        let config: SavedConnection
+        let isConnected: Bool
+        /// Background forwards (ports without a web tab)
+        let forwardedPorts: [ForwardedPort]
+
+        var displayName: String { config.name.isEmpty ? config.host : config.name }
+    }
+
+    /// Machines in the order their first tab appears, then any that only have forwards
+    func machines() -> [Machine] {
+        var keys: [String] = []
+        var configs: [String: SavedConnection] = [:]
+        func add(_ config: SavedConnection) {
+            let key = connectionKey(for: config)
+            if configs[key] == nil {
+                configs[key] = config
+                keys.append(key)
+            }
+        }
+        for tab in orderedTabs() {
+            switch tab {
+            case .terminal(let session): add(session.connectionConfig)
+            case .web(let webTab): add(webTab.connectionConfig)
+            }
+        }
+        forwardedPorts.forEach { add($0.connectionConfig) }
+
+        return keys.compactMap { key in
+            guard let config = configs[key] else { return nil }
+            let hasConnectedTab = sessions.contains {
+                guard connectionKey(for: $0.connectionConfig) == key else { return false }
+                if case .connected = $0.state { return true }
+                return false
+            }
+            return Machine(
+                id: key,
+                config: config,
+                isConnected: hasConnectedTab || connectionPool[key]?.isConnected == true,
+                forwardedPorts: forwardedPorts(on: config)
+            )
+        }
+    }
+
+    /// Background forwards on the machine
+    func forwardedPorts(on config: SavedConnection) -> [ForwardedPort] {
+        let key = connectionKey(for: config)
+        return forwardedPorts.filter { connectionKey(for: $0.connectionConfig) == key }
+    }
+
+    /// An open SSH connection to the machine, from a connected tab or the pool
+    func sshConnection(for config: SavedConnection) -> SSHConnection? {
+        let key = connectionKey(for: config)
+        if let connection = sessions.first(where: {
+            connectionKey(for: $0.connectionConfig) == key && $0.sshConnection?.isConnected == true
+        })?.sshConnection {
+            return connection
+        }
+        if let pooled = connectionPool[key], pooled.isConnected {
+            return pooled
+        }
+        return nil
     }
 
     // MARK: - Tab Persistence

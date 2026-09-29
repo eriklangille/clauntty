@@ -16,6 +16,8 @@ struct FullTabSelector: View {
     /// Currently dragging tab (for visual feedback)
     @State private var draggingTab: TabItem?
     @State private var showingSettings = false
+    /// Machine whose sheet (ports, new tab) is open
+    @State private var selectedMachine: SessionManager.Machine?
 
     var body: some View {
         ZStack {
@@ -54,6 +56,13 @@ struct FullTabSelector: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 12)
+
+                // Machines stay pinned above the tabs, so forwarded ports are visible
+                // without scrolling past every tab
+                MachineStrip(machines: sessionManager.machines()) { machine in
+                    selectedMachine = machine
+                }
+                .padding(.bottom, 16)
 
                 // Tab grid
                 ScrollView {
@@ -113,26 +122,6 @@ struct FullTabSelector: View {
                             } isTargeted: { _ in }
                         }
                         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: allTabs.map { $0.id })
-
-                        // Forwarded ports section
-                        if !sessionManager.forwardedPorts.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Forwarded Ports")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.gray)
-
-                                ForEach(sessionManager.forwardedPorts) { port in
-                                    ForwardedPortRow(port: port) {
-                                        sessionManager.stopForwarding(
-                                            port: port.remotePort,
-                                            config: port.connectionConfig
-                                        )
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 32)
@@ -142,6 +131,17 @@ struct FullTabSelector: View {
         .statusBarHidden(true)
         .sheet(isPresented: $showingSettings) {
             SettingsView()
+        }
+        .sheet(item: $selectedMachine) { machine in
+            PortsSheetView(
+                config: machine.config,
+                onDismiss: { selectedMachine = nil },
+                onOpenedTab: {
+                    selectedMachine = nil
+                    onDismiss()
+                }
+            )
+            .environmentObject(sessionManager)
         }
     }
 
@@ -456,38 +456,72 @@ struct NewTabCard: View {
     }
 }
 
-// MARK: - Forwarded Port Row
+// MARK: - Machine Strip
 
-/// Row showing a forwarded port in the ports section
-struct ForwardedPortRow: View {
-    @ObservedObject var port: ForwardedPort
-    let onStop: () -> Void
+/// Row of machines with open tabs or forwarded ports; tapping one opens its sheet
+struct MachineStrip: View {
+    let machines: [SessionManager.Machine]
+    let onSelect: (SessionManager.Machine) -> Void
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(":\(String(port.remotePort.port))")
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-
-                Text("localhost:\(String(port.localPort)) → \(port.connectionConfig.host)")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(machines) { machine in
+                    Button {
+                        onSelect(machine)
+                    } label: {
+                        MachinePill(machine: machine)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-
-            Spacer()
-
-            Button(action: onStop) {
-                Image(systemName: "stop.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(.red.opacity(0.8))
-            }
+            .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
+    }
+}
+
+/// A machine's connection state, name, and forwarded ports
+struct MachinePill: View {
+    let machine: SessionManager.Machine
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(machine.isConnected ? Color.green : Color.gray)
+                .frame(width: 8, height: 8)
+
+            Text(machine.displayName)
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(.white)
+                .lineLimit(1)
+
+            if !machine.forwardedPorts.isEmpty {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.caption2.weight(.semibold))
+                    Text(portsLabel)
+                        .font(.caption.monospaced().weight(.semibold))
+                }
+                .foregroundColor(.green)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.green.opacity(0.18), in: Capsule())
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundColor(.gray)
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 10)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.12), in: Capsule())
+    }
+
+    /// One port shows its number, several show a count
+    private var portsLabel: String {
+        let ports = machine.forwardedPorts
+        return ports.count == 1 ? String(ports[0].remotePort.port) : "\(ports.count)"
     }
 }
 

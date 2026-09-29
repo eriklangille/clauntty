@@ -1,68 +1,49 @@
 import SwiftUI
 import os.log
 
-/// Sheet for viewing and managing port forwarding for a session
+/// Sheet for one machine: its forwarded ports, the ports listening on it, and a new tab.
+/// Opened from a machine in the tab selector's strip or a tab's Ports button.
 struct PortsSheetView: View {
-    let session: Session
+    let config: SavedConnection
     let onDismiss: () -> Void
+    /// Called after a tab was opened or switched to from the sheet (defaults to onDismiss).
+    /// The tab selector uses it to close itself too.
+    var onOpenedTab: (() -> Void)?
 
     @EnvironmentObject var sessionManager: SessionManager
     @State private var ports: [RemotePort] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
 
+    private var machineName: String { config.name.isEmpty ? config.host : config.name }
+
+    /// Background forwards on this machine (ports without a web tab)
+    private var forwarded: [ForwardedPort] {
+        sessionManager.forwardedPorts(on: config)
+    }
+
     var body: some View {
-        let _ = Logger.clauntty.debugOnly("PortsSheetView: body evaluated, isLoading=\(isLoading), errorMessage=\(errorMessage ?? "nil"), ports.count=\(ports.count)")
         NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView("Scanning ports...")
-                } else if let error = errorMessage {
-                    VStack(spacing: 16) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.largeTitle)
-                            .foregroundColor(.orange)
-                        Text("Could not scan ports")
-                            .font(.headline)
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                        Button("Retry") {
-                            Task { await scanPorts() }
+            List {
+                if !forwarded.isEmpty {
+                    Section {
+                        ForEach(forwarded) { port in
+                            forwardedRow(port)
                         }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    .padding()
-                } else if ports.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("No Active Ports")
-                            .font(.headline)
-                        Text("No listening ports found on this server.\nStart a web server or service to forward it here.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding()
-                } else {
-                    List {
-                        Section {
-                            ForEach(ports) { port in
-                                portRow(port)
-                            }
-                        } header: {
-                            Text("Forward ports to access remote servers locally")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .textCase(.none)
-                        }
+                    } header: {
+                        Text("Forwarded")
+                    } footer: {
+                        Text("Reachable on this phone at localhost")
                     }
                 }
+
+                Section {
+                    listeningContent
+                } header: {
+                    Text("Listening on \(machineName)")
+                }
             }
-            .navigationTitle("Ports")
+            .navigationTitle(machineName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -70,13 +51,20 @@ struct PortsSheetView: View {
                         onDismiss()
                     }
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
                     Button {
                         Task { await scanPorts() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
                     .disabled(isLoading)
+
+                    Button {
+                        openNewTerminal()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("New Tab on \(machineName)")
                 }
             }
         }
@@ -85,10 +73,98 @@ struct PortsSheetView: View {
         }
     }
 
+    // MARK: - Forwarded
+
+    private func forwardedRow(_ port: ForwardedPort) -> some View {
+        let url = URL(string: "http://localhost:\(port.localPort)")!
+
+        return HStack {
+            Image(systemName: "arrow.left.arrow.right")
+                .foregroundColor(.green)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(":\(String(port.remotePort.port))")
+                    .font(.headline)
+                    .fontDesign(.monospaced)
+                Text("localhost:\(String(port.localPort))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Menu {
+                Button {
+                    openInTab(port.remotePort)
+                } label: {
+                    Label("Open in Tab", systemImage: "square.on.square")
+                }
+                Button {
+                    UIApplication.shared.open(url)
+                } label: {
+                    Label("Open in Safari", systemImage: "safari")
+                }
+                Button {
+                    UIPasteboard.general.string = url.absoluteString
+                } label: {
+                    Label("Copy URL", systemImage: "doc.on.doc")
+                }
+                Button(role: .destructive) {
+                    sessionManager.stopForwarding(port: port.remotePort, config: port.connectionConfig)
+                } label: {
+                    Label("Stop Forwarding", systemImage: "stop.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.title3)
+            }
+        }
+        .padding(.vertical, 4)
+        .swipeActions {
+            Button("Stop", role: .destructive) {
+                sessionManager.stopForwarding(port: port.remotePort, config: port.connectionConfig)
+            }
+        }
+    }
+
+    // MARK: - Listening
+
+    @ViewBuilder
+    private var listeningContent: some View {
+        if isLoading {
+            HStack {
+                ProgressView()
+                Text("Scanning ports...")
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 8)
+            }
+        } else if let error = errorMessage {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Could not scan ports", systemImage: "exclamationmark.triangle")
+                    .foregroundColor(.orange)
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Button("Retry") {
+                    Task { await scanPorts() }
+                }
+            }
+        } else if ports.isEmpty {
+            Text("No listening ports. Start a web server or service to forward it here.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        } else {
+            ForEach(ports) { port in
+                portRow(port)
+            }
+        }
+    }
+
     @ViewBuilder
     private func portRow(_ port: RemotePort) -> some View {
-        let isForwarded = sessionManager.isPortForwarded(port.port, config: session.connectionConfig)
-        let existingWebTab = sessionManager.webTabForPort(port.port, config: session.connectionConfig)
+        let isForwarded = sessionManager.isPortForwarded(port.port, config: config)
+        let existingWebTab = sessionManager.webTabForPort(port.port, config: config)
         let isOpenInTab = existingWebTab != nil
 
         HStack {
@@ -132,13 +208,9 @@ struct PortsSheetView: View {
                 get: { isForwarded || isOpenInTab },
                 set: { newValue in
                     if newValue {
-                        // Start forwarding and open web tab
-                        Task {
-                            await forwardAndOpen(port)
-                        }
+                        openInTab(port)
                     } else {
-                        // Stop forwarding
-                        stopForwarding(port)
+                        sessionManager.stopForwarding(port: port, config: config)
                     }
                 }
             ))
@@ -148,77 +220,49 @@ struct PortsSheetView: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onTapGesture {
-            // Tap opens browser (starts forwarding if needed)
-            if let webTab = existingWebTab {
-                // Already open - switch to that tab
-                sessionManager.switchTo(webTab)
-                onDismiss()
-            } else {
-                // Not open - create new web tab
-                Task {
-                    await forwardAndOpen(port)
-                    onDismiss()
-                }
+            // Tap opens the port in a tab (starting forwarding if needed)
+            openInTab(port)
+        }
+    }
+
+    // MARK: - Actions
+
+    private func openInTab(_ port: RemotePort) {
+        Task {
+            do {
+                try await sessionManager.openPortInTab(port, config: config)
+                (onOpenedTab ?? onDismiss)()
+            } catch {
+                Logger.clauntty.error("PortsSheetView: failed to open port \(port.port): \(error.localizedDescription)")
             }
         }
+    }
+
+    private func openNewTerminal() {
+        // Becomes the active tab; its TerminalView connects when the surface is ready
+        _ = sessionManager.createSession(for: config)
+        sessionManager.savePersistence()
+        (onOpenedTab ?? onDismiss)()
     }
 
     private func scanPorts() async {
-        Logger.clauntty.debugOnly("PortsSheetView: scanPorts called for session \(session.id.uuidString.prefix(8))")
-        Logger.clauntty.debugOnly("PortsSheetView: session.state=\(String(describing: session.state)), sshConnection=\(session.sshConnection != nil)")
-
         isLoading = true
         errorMessage = nil
 
-        // Get connection from session
-        guard let connection = session.sshConnection else {
-            Logger.clauntty.warning("PortsSheetView: No SSH connection on session")
-            await MainActor.run {
-                errorMessage = "No active connection to server"
-                isLoading = false
-            }
+        guard let connection = sessionManager.sshConnection(for: config) else {
+            Logger.clauntty.warning("PortsSheetView: no SSH connection to \(config.host)")
+            errorMessage = "Not connected to \(machineName)"
+            isLoading = false
             return
         }
 
-        Logger.clauntty.debugOnly("PortsSheetView: Got connection, isConnected=\(connection.isConnected)")
-
         do {
             let scanner = PortScanner(connection: connection)
-            Logger.clauntty.debugOnly("PortsSheetView: Calling listListeningPorts...")
-            let discoveredPorts = try await scanner.listListeningPorts()
-            Logger.clauntty.debugOnly("PortsSheetView: Found \(discoveredPorts.count) ports")
-            await MainActor.run {
-                ports = discoveredPorts
-                isLoading = false
-            }
+            ports = try await scanner.listListeningPorts()
         } catch {
-            Logger.clauntty.error("PortsSheetView: Error scanning ports: \(error.localizedDescription)")
-            await MainActor.run {
-                errorMessage = error.localizedDescription
-                isLoading = false
-            }
+            Logger.clauntty.error("PortsSheetView: error scanning ports: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-    }
-
-    private func forwardAndOpen(_ port: RemotePort) async {
-        do {
-            // Create web tab (handles port forwarding internally)
-            let webTab = try await sessionManager.createWebTab(
-                for: port,
-                config: session.connectionConfig
-            )
-            await MainActor.run {
-                sessionManager.switchTo(webTab)
-            }
-        } catch {
-            // Handle error silently for now
-        }
-    }
-
-    private func stopForwarding(_ port: RemotePort) {
-        // Close any open web tab for this port
-        if let webTab = sessionManager.webTabForPort(port.port, config: session.connectionConfig) {
-            sessionManager.closeWebTab(webTab)
-        }
+        isLoading = false
     }
 }
