@@ -1236,11 +1236,60 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             self.startHandle.alpha = 1
             self.endHandle.alpha = 1
         }
+        startSelectionHandleSync()
     }
 
     private func hideSelectionHandles() {
+        stopSelectionHandleSync()
         startHandle.isHidden = true
         endHandle.isHidden = true
+    }
+
+    /// Follows the selection while the handles are up. Ghostty drops a selection on its
+    /// own (typing, a paste, a program redrawing the screen, e.g. after switching tabs)
+    /// and moves it as output scrolls, and nothing tells the handles, which then stayed
+    /// on screen with nothing selected.
+    private var selectionHandleSyncTimer: Timer?
+
+    private func startSelectionHandleSync() {
+        guard selectionHandleSyncTimer == nil else { return }
+        selectionHandleSyncTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.syncSelectionHandles()
+            }
+        }
+    }
+
+    private func stopSelectionHandleSync() {
+        selectionHandleSyncTimer?.invalidate()
+        selectionHandleSyncTimer = nil
+    }
+
+    private func syncSelectionHandles() {
+        // A handle drag owns the positions until it ends
+        guard draggingHandle == .none, let surface = self.surface else { return }
+        guard ghostty_surface_has_selection(surface) else {
+            hideSelectionHandles()
+            return
+        }
+
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else {
+            hideSelectionHandles()
+            return
+        }
+        defer { ghostty_surface_free_text(surface, &text) }
+
+        // Scrolled out of view: hide the handles but keep following, it may come back
+        let visible = text.tl_px_x >= 0 && text.tl_px_y >= 0 && text.br_px_x >= 0 && text.br_px_y >= 0
+        startHandle.isHidden = !visible
+        endHandle.isHidden = !visible
+        guard visible else { return }
+
+        selectionStartPoint = CGPoint(x: text.tl_px_x, y: text.tl_px_y)
+        selectionEndPoint = CGPoint(x: text.br_px_x, y: text.br_px_y)
+        startHandle.positionAt(selectionStartPoint)
+        endHandle.positionAt(selectionEndPoint)
     }
 
     /// Work item for debounced handle updates
@@ -1261,25 +1310,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Update handle positions from current selection bounds (e.g., after font size change)
     private func updateSelectionHandlePositions() {
-        guard let surface = self.surface else { return }
-        guard !startHandle.isHidden else { return }  // Only update if handles are visible
-
-        var text = ghostty_text_s()
-        guard ghostty_surface_read_selection(surface, &text) else {
-            hideSelectionHandles()
-            return
-        }
-        defer { ghostty_surface_free_text(surface, &text) }
-
-        guard text.tl_px_x >= 0 && text.br_px_x >= 0 else {
-            hideSelectionHandles()
-            return
-        }
-
-        selectionStartPoint = CGPoint(x: text.tl_px_x, y: text.tl_px_y)
-        selectionEndPoint = CGPoint(x: text.br_px_x, y: text.br_px_y)
-        startHandle.positionAt(selectionStartPoint)
-        endHandle.positionAt(selectionEndPoint)
+        guard selectionHandleSyncTimer != nil else { return }  // Only while handles are up
+        syncSelectionHandles()
     }
 
     private func handleSelectionHandleDragBegan() {
@@ -1912,6 +1944,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: setActive(\(active)) starting, wasActive=\(self.isActiveTab), appBg=\(self.isAppBackgrounded), surface=\(surfaceExists)")
         let stateChanged = active != isActiveTab
         isActiveTab = active
+        if !active {
+            hideSelectionHandles()
+        }
 
         // Notify about active state change (for power management) - only if state changed.
         // Always notify the first time: isActiveTab starts true but the session starts
