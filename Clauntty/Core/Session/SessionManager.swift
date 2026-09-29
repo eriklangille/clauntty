@@ -513,6 +513,25 @@ class SessionManager: ObservableObject {
 
     // MARK: - Connection Pooling
 
+    /// The pooled SSH connection to the machine, connecting if there isn't a live one
+    func pooledConnection(for config: SavedConnection) async throws -> SSHConnection {
+        let poolKey = connectionKey(for: config)
+        if let existing = connectionPool[poolKey], existing.isConnected {
+            return existing
+        }
+        let connection = SSHConnection(
+            host: config.host,
+            port: config.port,
+            username: config.username,
+            authMethod: config.authMethod,
+            connectionId: config.id,
+            useTailscale: config.useTailscale
+        )
+        try await connection.connect()
+        connectionPool[poolKey] = connection
+        return connection
+    }
+
     /// Generate pool key for a connection config
     private func connectionKey(for config: SavedConnection) -> String {
         return "\(config.username)@\(config.host):\(config.port)"
@@ -571,24 +590,7 @@ class SessionManager: ObservableObject {
     ///   - config: Connection configuration
     ///   - makeActive: Whether to switch to this tab (default true)
     func createWebTab(for port: RemotePort, config: SavedConnection, makeActive: Bool = true) async throws -> WebTab {
-        let poolKey = connectionKey(for: config)
-
-        // Get or create connection
-        let connection: SSHConnection
-        if let existing = connectionPool[poolKey], existing.isConnected {
-            connection = existing
-        } else {
-            connection = SSHConnection(
-                host: config.host,
-                port: config.port,
-                username: config.username,
-                authMethod: config.authMethod,
-                connectionId: config.id,
-                useTailscale: config.useTailscale
-            )
-            try await connection.connect()
-            connectionPool[poolKey] = connection
-        }
+        let connection = try await pooledConnection(for: config)
 
         let webTab = WebTab(remotePort: port, connectionConfig: config, sshConnection: connection)
         webTabs.append(webTab)
@@ -617,7 +619,8 @@ class SessionManager: ObservableObject {
     /// same local port.
     @discardableResult
     func openPortInTab(_ port: RemotePort, config: SavedConnection) async throws -> WebTab {
-        if let existing = webTabForPort(port.port, config: config) {
+        // Any tab for the port, including restored ones that haven't reconnected yet
+        if let existing = webTabs(on: config).first(where: { $0.remotePort.port == port.port }) {
             switchTo(existing)
             return existing
         }
@@ -1067,30 +1070,13 @@ class SessionManager: ObservableObject {
 
     /// Start forwarding a port without opening a web tab
     func startForwarding(port: RemotePort, config: SavedConnection) async throws {
-        let poolKey = connectionKey(for: config)
-
         // Check if already forwarded
         if isPortForwarded(port.port, config: config) {
             Logger.clauntty.debugOnly("SessionManager: port \(port.port) already forwarded")
             return
         }
 
-        // Get or create connection
-        let connection: SSHConnection
-        if let existing = connectionPool[poolKey], existing.isConnected {
-            connection = existing
-        } else {
-            connection = SSHConnection(
-                host: config.host,
-                port: config.port,
-                username: config.username,
-                authMethod: config.authMethod,
-                connectionId: config.id,
-                useTailscale: config.useTailscale
-            )
-            try await connection.connect()
-            connectionPool[poolKey] = connection
-        }
+        let connection = try await pooledConnection(for: config)
 
         // Create forwarded port
         let forwardedPort = ForwardedPort(
@@ -1208,6 +1194,12 @@ class SessionManager: ObservableObject {
     func forwardedPorts(on config: SavedConnection) -> [ForwardedPort] {
         let key = connectionKey(for: config)
         return forwardedPorts.filter { connectionKey(for: $0.connectionConfig) == key }
+    }
+
+    /// Web tabs on the machine (each forwards its port)
+    func webTabs(on config: SavedConnection) -> [WebTab] {
+        let key = connectionKey(for: config)
+        return webTabs.filter { connectionKey(for: $0.connectionConfig) == key }
     }
 
     /// An open SSH connection to the machine, from a connected tab or the pool

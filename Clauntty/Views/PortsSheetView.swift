@@ -1,7 +1,7 @@
 import SwiftUI
 import os.log
 
-/// Sheet for one machine: its forwarded ports, the ports listening on it, and a new tab.
+/// Sheet for one machine: its ports (forwarded or listening) and a new tab.
 /// Opened from a machine in the tab selector's strip or a tab's Ports button.
 struct PortsSheetView: View {
     let config: SavedConnection
@@ -11,36 +11,74 @@ struct PortsSheetView: View {
     var onOpenedTab: (() -> Void)?
 
     @EnvironmentObject var sessionManager: SessionManager
-    @State private var ports: [RemotePort] = []
+    @State private var scannedPorts: [RemotePort] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    /// Row order, fixed while the sheet is open so toggling a port doesn't move it
+    @State private var order: [Int] = []
 
     private var machineName: String { config.name.isEmpty ? config.host : config.name }
 
-    /// Background forwards on this machine (ports without a web tab)
-    private var forwarded: [ForwardedPort] {
-        sessionManager.forwardedPorts(on: config)
+    /// A port that is listening on the machine, forwarded to the phone, or both
+    private struct PortRow: Identifiable {
+        let port: RemotePort
+        let isListening: Bool
+        let isForwarded: Bool
+        let isOpenInTab: Bool
+        /// Port on the phone when forwarded
+        let localPort: Int?
+
+        var id: Int { port.port }
+    }
+
+    /// Forwarded ports first (background forwards and web tabs), then the rest of the scan
+    private var rows: [PortRow] {
+        let listening = Dictionary(scannedPorts.map { ($0.port, $0) }, uniquingKeysWith: { first, _ in first })
+        var forwarded: [Int: Int] = [:]  // remote -> local
+        for port in sessionManager.forwardedPorts(on: config) {
+            forwarded[port.remotePort.port] = port.localPort
+        }
+        // A restored web tab only forwards once it has reconnected
+        let tabs = sessionManager.webTabs(on: config)
+        for webTab in tabs where webTab.state == .connected {
+            forwarded[webTab.remotePort.port] = webTab.localPort
+        }
+        let tabPorts = Set(tabs.map { $0.remotePort.port })
+
+        func row(_ port: RemotePort) -> PortRow {
+            PortRow(
+                port: port,
+                isListening: listening[port.port] != nil,
+                isForwarded: forwarded[port.port] != nil,
+                isOpenInTab: tabPorts.contains(port.port),
+                localPort: forwarded[port.port]
+            )
+        }
+
+        // Ports with a tab stay listed even when it isn't forwarding yet
+        let shownFirst = Set(forwarded.keys).union(tabPorts)
+        let forwardedRows = shownFirst.sorted().map { remote in
+            row(listening[remote] ?? RemotePort(id: remote, port: remote, process: nil, address: "127.0.0.1"))
+        }
+        let otherRows = scannedPorts.filter { !shownFirst.contains($0.port) }.map(row)
+        let sorted = forwardedRows + otherRows
+
+        // Keep the order from the last scan; ports it didn't know go first
+        let position = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        let known = sorted.filter { position[$0.id] != nil }.sorted { position[$0.id]! < position[$1.id]! }
+        return sorted.filter { position[$0.id] == nil } + known
     }
 
     var body: some View {
         NavigationStack {
             List {
-                if !forwarded.isEmpty {
-                    Section {
-                        ForEach(forwarded) { port in
-                            forwardedRow(port)
-                        }
-                    } header: {
-                        Text("Forwarded")
-                    } footer: {
-                        Text("Reachable on this phone at localhost")
-                    }
-                }
-
                 Section {
-                    listeningContent
-                } header: {
-                    Text("Listening on \(machineName)")
+                    ForEach(rows) { row in
+                        portRow(row)
+                    }
+                    scanStatus
+                } footer: {
+                    Text("Forwarded ports are reachable on this phone at localhost.")
                 }
             }
             .navigationTitle(machineName)
@@ -73,65 +111,97 @@ struct PortsSheetView: View {
         }
     }
 
-    // MARK: - Forwarded
+    // MARK: - Rows
 
-    private func forwardedRow(_ port: ForwardedPort) -> some View {
-        let url = URL(string: "http://localhost:\(port.localPort)")!
+    private func portRow(_ row: PortRow) -> some View {
+        HStack {
+            // Only the port itself opens a tab, so taps on the menu and toggle stay theirs
+            Button {
+                openInTab(row.port)
+            } label: {
+                HStack {
+                    Image(systemName: row.isForwarded ? "arrow.left.arrow.right" : "globe")
+                        .foregroundColor(row.isForwarded ? .green : .secondary)
+                        .font(.title3)
+                        .frame(width: 28)
 
-        return HStack {
-            Image(systemName: "arrow.left.arrow.right")
-                .foregroundColor(.green)
-                .font(.title3)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(":\(String(row.port.port))")
+                            .font(.headline)
+                            .fontDesign(.monospaced)
+                        Text(status(row))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(":\(String(port.remotePort.port))")
-                    .font(.headline)
-                    .fontDesign(.monospaced)
-                Text("localhost:\(String(port.localPort))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
-
-            Spacer()
+            .buttonStyle(.plain)
 
             Menu {
                 Button {
-                    openInTab(port.remotePort)
+                    openInTab(row.port)
                 } label: {
-                    Label("Open in Tab", systemImage: "square.on.square")
+                    Label(row.isOpenInTab ? "Show Tab" : "Open in Tab", systemImage: "square.on.square")
                 }
                 Button {
-                    UIApplication.shared.open(url)
+                    withForward(row) { url in UIApplication.shared.open(url) }
                 } label: {
                     Label("Open in Safari", systemImage: "safari")
                 }
                 Button {
-                    UIPasteboard.general.string = url.absoluteString
+                    withForward(row) { url in UIPasteboard.general.string = url.absoluteString }
                 } label: {
                     Label("Copy URL", systemImage: "doc.on.doc")
-                }
-                Button(role: .destructive) {
-                    sessionManager.stopForwarding(port: port.remotePort, config: port.connectionConfig)
-                } label: {
-                    Label("Stop Forwarding", systemImage: "stop.circle")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.title3)
             }
+            .buttonStyle(.borderless)
+
+            Toggle("", isOn: Binding(
+                get: { row.isForwarded },
+                set: { on in
+                    if on {
+                        withForward(row) { _ in }
+                    } else {
+                        sessionManager.stopForwarding(port: row.port, config: config)
+                    }
+                }
+            ))
+            .labelsHidden()
+            .tint(.green)
         }
         .padding(.vertical, 4)
-        .swipeActions {
-            Button("Stop", role: .destructive) {
-                sessionManager.stopForwarding(port: port.remotePort, config: port.connectionConfig)
-            }
-        }
     }
 
-    // MARK: - Listening
+    /// e.g. "node · forwarded to localhost:3000", "sshd", "open in tab · not listening"
+    private func status(_ row: PortRow) -> String {
+        var parts: [String] = []
+        if let process = row.port.process {
+            parts.append(process)
+        }
+        if row.isOpenInTab {
+            // A restored tab forwards again once it's opened
+            parts.append(row.isForwarded ? "open in tab" : "tab not connected")
+        } else if row.isForwarded, let local = row.localPort {
+            parts.append("forwarded to localhost:\(String(local))")
+        }
+        // Only claim nothing is listening once a scan has succeeded
+        if row.isForwarded && !row.isListening && !isLoading && errorMessage == nil {
+            parts.append("not listening")
+        }
+        if parts.isEmpty {
+            parts.append(row.port.address)
+        }
+        return parts.joined(separator: " · ")
+    }
 
     @ViewBuilder
-    private var listeningContent: some View {
+    private var scanStatus: some View {
         if isLoading {
             HStack {
                 ProgressView()
@@ -150,82 +220,32 @@ struct PortsSheetView: View {
                     Task { await scanPorts() }
                 }
             }
-        } else if ports.isEmpty {
+        } else if rows.isEmpty {
             Text("No listening ports. Start a web server or service to forward it here.")
                 .font(.caption)
                 .foregroundColor(.secondary)
-        } else {
-            ForEach(ports) { port in
-                portRow(port)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func portRow(_ port: RemotePort) -> some View {
-        let isForwarded = sessionManager.isPortForwarded(port.port, config: config)
-        let existingWebTab = sessionManager.webTabForPort(port.port, config: config)
-        let isOpenInTab = existingWebTab != nil
-
-        HStack {
-            Image(systemName: "globe")
-                .foregroundColor(isOpenInTab ? .green : .blue)
-                .font(.title2)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(":\(String(port.port))")
-                        .font(.headline)
-                        .fontDesign(.monospaced)
-
-                    if let process = port.process {
-                        Text(process)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    if isOpenInTab {
-                        Text("Open")
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.2))
-                            .foregroundColor(.green)
-                            .clipShape(Capsule())
-                    }
-                }
-
-                Text(port.address)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            // Forwarding toggle
-            Toggle("", isOn: Binding(
-                get: { isForwarded || isOpenInTab },
-                set: { newValue in
-                    if newValue {
-                        openInTab(port)
-                    } else {
-                        sessionManager.stopForwarding(port: port, config: config)
-                    }
-                }
-            ))
-            .labelsHidden()
-            .tint(.green)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            // Tap opens the port in a tab (starting forwarding if needed)
-            openInTab(port)
         }
     }
 
     // MARK: - Actions
+
+    /// Run `action` with the port's local URL, forwarding it first if needed
+    private func withForward(_ row: PortRow, _ action: @escaping (URL) -> Void) {
+        Task {
+            do {
+                if !row.isForwarded {
+                    try await sessionManager.startForwarding(port: row.port, config: config)
+                }
+                let local = sessionManager.forwardedPort(row.port.port, config: config)?.localPort
+                    ?? row.localPort ?? row.port.port
+                if let url = URL(string: "http://localhost:\(local)") {
+                    action(url)
+                }
+            } catch {
+                Logger.clauntty.error("PortsSheetView: failed to forward port \(row.port.port): \(error.localizedDescription)")
+            }
+        }
+    }
 
     private func openInTab(_ port: RemotePort) {
         Task {
@@ -249,16 +269,18 @@ struct PortsSheetView: View {
         isLoading = true
         errorMessage = nil
 
-        guard let connection = sessionManager.sshConnection(for: config) else {
-            Logger.clauntty.warning("PortsSheetView: no SSH connection to \(config.host)")
-            errorMessage = "Not connected to \(machineName)"
-            isLoading = false
-            return
-        }
-
         do {
+            // Connects if no tab has (e.g. only a restored web tab so far)
+            let connection: SSHConnection
+            if let open = sessionManager.sshConnection(for: config) {
+                connection = open
+            } else {
+                connection = try await sessionManager.pooledConnection(for: config)
+            }
             let scanner = PortScanner(connection: connection)
-            ports = try await scanner.listListeningPorts()
+            scannedPorts = try await scanner.listListeningPorts()
+            order = []
+            order = rows.map(\.id)
         } catch {
             Logger.clauntty.error("PortsSheetView: error scanning ports: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
