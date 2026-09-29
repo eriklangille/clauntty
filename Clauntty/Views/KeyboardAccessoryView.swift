@@ -10,6 +10,10 @@ class KeyboardAccessoryView: UIView {
     /// Callback for sending key data to the terminal
     var onKeyInput: ((Data) -> Void)?
 
+    /// Called for Enter while the Ctrl or Option toggle is on. The terminal encodes it,
+    /// since Enter's raw byte can't carry a modifier.
+    var onModifiedEnter: ((_ ctrl: Bool, _ option: Bool) -> Void)?
+
     /// Callback to dismiss keyboard (resign first responder)
     var onDismissKeyboard: (() -> Void)?
 
@@ -1084,6 +1088,12 @@ class KeyboardAccessoryView: UIView {
     }
 
     private func sendEnter() {
+        let ctrl = consumeCtrlModifier()
+        let option = consumeOptionModifier()
+        if ctrl || option, let onModifiedEnter {
+            onModifiedEnter(ctrl, option)
+            return
+        }
         onKeyInput?(Data([0x0D]))  // CR (Return/Enter)
     }
 

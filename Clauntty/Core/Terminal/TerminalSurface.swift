@@ -399,6 +399,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Set up accessory bar keyboard callbacks
     private func setupAccessoryBarCallbacks() {
+        accessoryBar.onModifiedEnter = { [weak self] ctrl, option in
+            var mods = GHOSTTY_MODS_NONE.rawValue
+            if ctrl { mods |= GHOSTTY_MODS_CTRL.rawValue }
+            if option { mods |= GHOSTTY_MODS_ALT.rawValue }
+            self?.sendEnterKey(mods: ghostty_input_mods_e(rawValue: mods))
+        }
         accessoryBar.onDismissKeyboard = { [weak self] in
             self?.hideSoftwareKeyboard()
         }
@@ -2212,6 +2218,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     func insertText(_ text: String) {
         Logger.clauntty.verbose("insertText called: '\(text)' (\(text.count) chars)")
 
+        // Return with the Ctrl or Option toggle on
+        if text == "\n" {
+            let ctrl = accessoryBar.consumeCtrlModifier()
+            let option = accessoryBar.consumeOptionModifier()
+            if ctrl || option {
+                var mods = GHOSTTY_MODS_NONE.rawValue
+                if ctrl { mods |= GHOSTTY_MODS_CTRL.rawValue }
+                if option { mods |= GHOSTTY_MODS_ALT.rawValue }
+                sendEnterKey(mods: ghostty_input_mods_e(rawValue: mods))
+                return
+            }
+        }
+
         // Check if Ctrl modifier is active from accessory bar
         if accessoryBar.consumeCtrlModifier() {
             // Convert character to control character (Ctrl+A = 0x01, Ctrl+C = 0x03, etc.)
@@ -2263,6 +2282,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         for press in presses {
             guard let key = press.key else { continue }
 
+            if key.keyCode == .keyboardReturnOrEnter {
+                let mods = ghosttyMods(key.modifierFlags)
+                if mods != GHOSTTY_MODS_NONE {
+                    sendEnterKey(mods: mods)
+                    handled = true
+                    continue
+                }
+            }
+
             if let data = dataForKey(key) {
                 onTextInput?(data)
                 handled = true
@@ -2272,6 +2300,36 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         if !handled {
             super.pressesBegan(presses, with: event)
         }
+    }
+
+    /// Send Enter with modifiers through Ghostty's key encoder. Keys are otherwise sent
+    /// as raw bytes, and Enter's (CR) can't carry a modifier, so Ctrl+Enter arrived as
+    /// plain Enter. Ghostty encodes it for the keyboard protocol the program enabled
+    /// (kitty: ESC[13;5u, modifyOtherKeys: ESC[27;5;13~; legacy programs still get CR).
+    /// The bytes come back through the pty input callback and go to SSH.
+    func sendEnterKey(mods: ghostty_input_mods_e) {
+        guard let surface else { return }
+        for action in [GHOSTTY_ACTION_PRESS, GHOSTTY_ACTION_RELEASE] {
+            var key = ghostty_input_key_s()
+            key.action = action
+            key.mods = mods
+            key.consumed_mods = GHOSTTY_MODS_NONE
+            key.keycode = 0x24  // Return; Ghostty uses Mac keycodes on iOS
+            key.text = nil
+            key.unshifted_codepoint = 0x0D
+            key.composing = false
+            _ = ghostty_surface_key(surface, key)
+        }
+        Logger.clauntty.debugOnly("Enter sent through Ghostty with mods \(mods.rawValue)")
+    }
+
+    private func ghosttyMods(_ flags: UIKeyModifierFlags) -> ghostty_input_mods_e {
+        var mods = GHOSTTY_MODS_NONE.rawValue
+        if flags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
+        if flags.contains(.control) { mods |= GHOSTTY_MODS_CTRL.rawValue }
+        if flags.contains(.alternate) { mods |= GHOSTTY_MODS_ALT.rawValue }
+        if flags.contains(.command) { mods |= GHOSTTY_MODS_SUPER.rawValue }
+        return ghostty_input_mods_e(rawValue: mods)
     }
 
     /// Convert UIKey to terminal escape sequence data
@@ -2295,7 +2353,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         case .keyboardTab:
             return Data([0x09])  // TAB
 
-        // Enter/Return
+        // Enter/Return (with modifiers it goes through sendEnterKey, see pressesBegan)
         case .keyboardReturnOrEnter:
             return Data([0x0D])  // CR
 
