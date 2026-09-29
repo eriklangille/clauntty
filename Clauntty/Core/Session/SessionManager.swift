@@ -215,9 +215,15 @@ class SessionManager: ObservableObject {
 
             if let deployer = deployer {
                 // Use session's rtach ID, or generate new UUID for new session
+                let isNewSession = session.rtachSessionId == nil
                 let sessionId = session.rtachSessionId ?? UUID().uuidString
                 // Store back so we can track which rtach session this tab is using
                 session.rtachSessionId = sessionId
+                // Tabs are only saved once they have an rtach ID, and otherwise not until
+                // the app backgrounds, so a crash or force quit before then lost new tabs
+                if isNewSession {
+                    savePersistence()
+                }
                 shellCommand = deployer.shellCommand(sessionId: sessionId)
                 usingRtach = true
                 Logger.clauntty.debugOnly("SessionManager: using rtach session: \(sessionId.prefix(8))...")
