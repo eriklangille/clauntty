@@ -308,8 +308,9 @@ class Session: ObservableObject, Identifiable {
     /// Called when a URL should be opened in the device browser
     var onOpenBrowserRequested: ((String) -> Void)?
 
-    /// Called when `clauntty show` sends an image path on the remote host
-    var onShowImageRequested: ((String) -> Void)?
+    /// Called when `clauntty show` sends an image path on the remote host, with its
+    /// inbox ID (nil from rtach before 2.10)
+    var onShowImageRequested: ((String, String?) -> Void)?
 
     // MARK: - rtach Protocol Session
 
@@ -634,9 +635,9 @@ class Session: ObservableObject, Identifiable {
             }
         case "image":
             if parts.count > 1 {
-                let path = String(parts[1])
-                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path)")
-                onShowImageRequested?(path)
+                let (path, inboxId) = ImageInbox.parseImageArgument(String(parts[1]))
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path) (inbox \(inboxId ?? "none"))")
+                onShowImageRequested?(path, inboxId)
             }
         default:
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
@@ -783,6 +784,21 @@ class Session: ObservableObject, Identifiable {
         let data = try await connection.executeCommandData("head -c \(maxBytes + 1) \(quoted)")
         guard data.count <= maxBytes else { throw SessionError.fileTooLarge }
         return data
+    }
+
+    /// Entries waiting in the remote host's image inbox
+    func listImageInbox() async throws -> [ImageInbox.Entry] {
+        guard let connection = sshConnection else { throw SessionError.notConnected }
+        return ImageInbox.parseList(try await connection.executeCommand(ImageInbox.listCommand))
+    }
+
+    func removeFromImageInbox(_ ids: [String]) async {
+        guard let connection = sshConnection, let command = ImageInbox.removeCommand(ids) else { return }
+        do {
+            _ = try await connection.executeCommand(command)
+        } catch {
+            Logger.clauntty.warning("Session \(self.id.uuidString.prefix(8)): failed to clear image inbox: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Power Management

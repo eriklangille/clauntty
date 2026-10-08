@@ -436,4 +436,39 @@ final class SessionTests: XCTestCase {
         // The header bytes should be forwarded as terminal data since length is invalid
         XCTAssertFalse(terminalData.isEmpty)
     }
+
+    // MARK: - Image Inbox
+
+    func testImageArgumentWithInboxId() {
+        let (path, id) = ImageInbox.parseImageArgument("1791500593207-97841-0;/tmp/a;b.png")
+        XCTAssertEqual(path, "/tmp/a;b.png")
+        XCTAssertEqual(id, "1791500593207-97841-0")
+    }
+
+    func testImageArgumentWithoutInboxId() {
+        let (path, id) = ImageInbox.parseImageArgument("/tmp/shot.png")
+        XCTAssertEqual(path, "/tmp/shot.png")
+        XCTAssertNil(id)
+    }
+
+    func testInboxIdValidation() {
+        XCTAssertTrue(ImageInbox.isValidId("1791500593207-97841-0"))
+        XCTAssertFalse(ImageInbox.isValidId("1791500593207-97841"))
+        XCTAssertFalse(ImageInbox.isValidId("1-2-3;rm"))
+        XCTAssertFalse(ImageInbox.isValidId("1--3"))
+        XCTAssertEqual(ImageInbox.createdAt("1791500593207-1-0"), Date(timeIntervalSince1970: 1791500593.207))
+    }
+
+    func testInboxListParsing() {
+        let output = "1791500593207-97841-0\t/tmp/a.png\n.junk\tx\n1791500593549-97848-1\t/tmp/b c.png\n"
+        XCTAssertEqual(ImageInbox.parseList(output), [
+            .init(id: "1791500593207-97841-0", path: "/tmp/a.png"),
+            .init(id: "1791500593549-97848-1", path: "/tmp/b c.png"),
+        ])
+    }
+
+    func testInboxRemoveCommandSkipsInvalidIds() {
+        XCTAssertEqual(ImageInbox.removeCommand(["1-2-3", "x; rm -rf ~"]), "rm -f ~/.clauntty/inbox/1-2-3")
+        XCTAssertNil(ImageInbox.removeCommand(["bad"]))
+    }
 }

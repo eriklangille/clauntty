@@ -388,6 +388,9 @@ struct AppContentView: View {
                     activeSession.resumeOutput()
                     // It may have died while the app was suspended without closing
                     sessionManager.checkConnections(reason: "foreground")
+                    // Images may have gone to a tab whose connection died meanwhile
+                    // (a reconnect checks the inbox itself)
+                    sessionManager.checkImageInbox(for: activeSession)
                 }
             } else {
                 Logger.clauntty.debugOnly("APP_LIFECYCLE: no active session to resume")

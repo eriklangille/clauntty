@@ -23,8 +23,12 @@ class SessionManager: ObservableObject {
     @Published var imageViewer: ImageViewerContent?
 
     /// `clauntty show a.png b.png` sends one command per file; collect them into one viewer
-    private var pendingImagePaths: [(session: Session, path: String)] = []
+    private var pendingImagePaths: [(session: Session, path: String, inboxId: String?)] = []
     private var pendingImageTask: Task<Void, Never>?
+
+    /// Inbox entries shown or being shown this run. The live command and the inbox check
+    /// on connect can both bring the same entry.
+    private var inboxIdsSeen: Set<String> = []
 
     /// Currently active tab type and ID
     enum ActiveTab: Equatable {
@@ -285,9 +289,9 @@ class SessionManager: ObservableObject {
             guard let self = self, let session = session else { return }
             self.handleOpenBrowserRequest(from: session, urlString: urlString)
         }
-        session.onShowImageRequested = { [weak self, weak session] path in
+        session.onShowImageRequested = { [weak self, weak session] path, inboxId in
             guard let self = self, let session = session else { return }
-            self.handleShowImageRequest(from: session, path: path)
+            self.handleShowImageRequest(from: session, path: path, inboxId: inboxId)
         }
 
         // Wire up auto-reconnect callback for when send detects nil channel
@@ -310,6 +314,10 @@ class SessionManager: ObservableObject {
         }
 
         Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) connected and attached")
+
+        if usingRtach {
+            checkImageInbox(for: session)
+        }
 
         // Request notification permission on first session connect
         await NotificationManager.shared.requestAuthorizationIfNeeded()
@@ -1085,8 +1093,11 @@ class SessionManager: ObservableObject {
     private static let maxImageBytes = 20 * 1024 * 1024
 
     /// Queue an image from `clauntty show`; paths arriving together open as one viewer
-    private func handleShowImageRequest(from session: Session, path: String) {
-        pendingImagePaths.append((session, path))
+    private func handleShowImageRequest(from session: Session, path: String, inboxId: String?) {
+        if let inboxId {
+            guard inboxIdsSeen.insert(inboxId).inserted else { return }
+        }
+        pendingImagePaths.append((session, path, inboxId))
         pendingImageTask?.cancel()
         pendingImageTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
@@ -1097,10 +1108,41 @@ class SessionManager: ObservableObject {
         }
     }
 
-    private func showImages(_ batch: [(session: Session, path: String)]) async {
+    /// Show images left in the inbox on the session's host: sent while the app was in
+    /// the background, or to a session whose connection had died
+    func checkImageInbox(for session: Session) {
+        Task { @MainActor [weak self, weak session] in
+            guard let session else { return }
+            let entries: [ImageInbox.Entry]
+            do {
+                entries = try await session.listImageInbox()
+            } catch {
+                Logger.clauntty.warning("SessionManager: image inbox check failed: \(error.localizedDescription)")
+                return
+            }
+            guard let self, !entries.isEmpty else { return }
+            Logger.clauntty.debugOnly("SessionManager: \(entries.count) image(s) in inbox for \(session.id.uuidString.prefix(8))")
+
+            var expired: [String] = []
+            for entry in entries {
+                if let created = ImageInbox.createdAt(entry.id), Date().timeIntervalSince(created) > ImageInbox.maxAge {
+                    expired.append(entry.id)
+                } else {
+                    self.handleShowImageRequest(from: session, path: entry.path, inboxId: entry.id)
+                }
+            }
+            await session.removeFromImageInbox(expired)
+        }
+    }
+
+    private func showImages(_ batch: [(session: Session, path: String, inboxId: String?)]) async {
         var images: [ImageViewerContent.Item] = []
-        for (session, path) in batch {
+        // Inbox entries to delete: shown, or never going to work (missing, not an image,
+        // too large). A failed download stays for the next connect to retry.
+        var finished: [(session: Session, id: String)] = []
+        for (session, path, inboxId) in batch {
             let name = (path as NSString).lastPathComponent
+            var retry = false
             do {
                 let data = try await session.downloadFile(path, maxBytes: Self.maxImageBytes)
                 if let image = UIImage(data: data) {
@@ -1110,6 +1152,14 @@ class SessionManager: ObservableObject {
                 }
             } catch {
                 images.append(.init(name: name, error: error.localizedDescription))
+                retry = (error as? SessionError) != .fileTooLarge
+            }
+            if let inboxId {
+                if retry {
+                    inboxIdsSeen.remove(inboxId)
+                } else {
+                    finished.append((session, inboxId))
+                }
             }
         }
         guard let source = batch.first?.session else { return }
@@ -1127,6 +1177,11 @@ class SessionManager: ObservableObject {
 
         if UIApplication.shared.applicationState != .active {
             await NotificationManager.shared.scheduleImagesReady(count: images.count, host: host, sessionId: source.id)
+        }
+
+        for group in Dictionary(grouping: finished, by: { ObjectIdentifier($0.session) }).values {
+            guard let session = group.first?.session else { continue }
+            await session.removeFromImageInbox(group.map(\.id))
         }
     }
 
@@ -1660,6 +1715,59 @@ enum ForwardedPortError: Error, LocalizedError {
         switch self {
         case .noConnection:
             return "SSH connection not available"
+        }
+    }
+}
+
+// MARK: - Image Inbox
+
+/// `clauntty show` leaves each image in ~/.clauntty/inbox/<id> on the remote host (rtach's
+/// inbox.zig). The app deletes an entry once it has shown the image and checks the inbox
+/// when it connects, so images sent while it was in the background still arrive.
+enum ImageInbox {
+    struct Entry: Equatable {
+        let id: String
+        let path: String
+    }
+
+    /// Entries older than this are skipped (rtach's inbox.max_age_ms)
+    static let maxAge: TimeInterval = 6 * 60 * 60
+
+    /// Prints `<id>\t<path>` per entry. sh, not the login shell (which may be fish); the
+    /// script has no single quotes
+    static let listCommand = #"sh -c 'cd ~/.clauntty/inbox 2>/dev/null || exit 0; for f in [0-9]*; do [ -f "$f" ] && printf "%s\t%s\n" "$f" "$(cat "$f")"; done; exit 0'"#
+
+    static func removeCommand(_ ids: [String]) -> String? {
+        let valid = ids.filter(isValidId)
+        guard !valid.isEmpty else { return nil }
+        return "rm -f " + valid.map { "~/.clauntty/inbox/\($0)" }.joined(separator: " ")
+    }
+
+    /// `<unix ms>-<pid>-<index>`, all digits, so safe to put in a shell command
+    static func isValidId(_ id: String) -> Bool {
+        let parts = id.split(separator: "-", omittingEmptySubsequences: false)
+        return parts.count == 3 && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }
+    }
+
+    static func createdAt(_ id: String) -> Date? {
+        guard isValidId(id), let ms = Int64(id.prefix { $0 != "-" }) else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+    }
+
+    /// Argument of an `image` command: `<id>;<path>` from rtach 2.10+, or just `<path>`
+    static func parseImageArgument(_ arg: String) -> (path: String, id: String?) {
+        let parts = arg.split(separator: ";", maxSplits: 1)
+        if parts.count == 2, isValidId(String(parts[0])) {
+            return (String(parts[1]), String(parts[0]))
+        }
+        return (arg, nil)
+    }
+
+    static func parseList(_ output: String) -> [Entry] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: "\t", maxSplits: 1)
+            guard fields.count == 2, isValidId(String(fields[0])) else { return nil }
+            return Entry(id: String(fields[0]), path: String(fields[1]))
         }
     }
 }
