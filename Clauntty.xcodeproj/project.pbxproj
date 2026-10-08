@@ -45,6 +45,7 @@
 		C0000012 /* TerminalSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000012 /* TerminalSurface.swift */; };
 		C0000013 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000013 /* SSHConnection.swift */; };
 		C0000014 /* SSHAuthenticator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000014 /* SSHAuthenticator.swift */; };
+		C00000A3 /* SSHAuthPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A3 /* SSHAuthPrompts.swift */; };
 		C0000015 /* KeyboardAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000015 /* KeyboardAccessoryView.swift */; };
 		C0000016 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000016 /* Session.swift */; };
 		C0000017 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000017 /* SessionManager.swift */; };
@@ -144,6 +145,7 @@
 		C1000012 /* TerminalSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurface.swift; sourceTree = "<group>"; };
 		C1000013 /* SSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnection.swift; sourceTree = "<group>"; };
 		C1000014 /* SSHAuthenticator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthenticator.swift; sourceTree = "<group>"; };
+		C10000A3 /* SSHAuthPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthPrompts.swift; sourceTree = "<group>"; };
 		C1000015 /* KeyboardAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessoryView.swift; sourceTree = "<group>"; };
 		C1000016 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		C1000017 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 			children = (
 				C1000013 /* SSHConnection.swift */,
 				C1000014 /* SSHAuthenticator.swift */,
+				C10000A3 /* SSHAuthPrompts.swift */,
 				C1000019 /* RtachDeployer.swift */,
 				2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */,
 				C10000A2 /* NetworkMonitor.swift */,
@@ -601,6 +604,7 @@
 				C0000012 /* TerminalSurface.swift in Sources */,
 				C0000013 /* SSHConnection.swift in Sources */,
 				C0000014 /* SSHAuthenticator.swift in Sources */,
+				C00000A3 /* SSHAuthPrompts.swift in Sources */,
 				C0000019 /* RtachDeployer.swift in Sources */,
 				C0000015 /* KeyboardAccessoryView.swift in Sources */,
 				C0000016 /* Session.swift in Sources */,

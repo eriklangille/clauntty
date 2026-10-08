@@ -44,6 +44,9 @@ class SSHConnection: ObservableObject {
     /// Cached remote platform (detected once per connection)
     private var cachedPlatform: RemotePlatform?
 
+    /// Server accepted our auth; a banner arriving after this is stale
+    private var authSucceeded = false
+
     /// Expose event loop group for port forwarding
     /// Uses the global singleton - never creates/destroys threads on reconnect
     var nioEventLoopGroup: EventLoopGroup { MultiThreadedEventLoopGroup.singleton }
@@ -82,6 +85,7 @@ class SSHConnection: ObservableObject {
 
     func connect() async throws {
         state = .connecting
+        authSucceeded = false
         Logger.clauntty.debugOnly("SSH connecting to \(self.host):\(self.port)\(self.useTailscale ? " via Tailscale" : "")")
 
         do {
@@ -94,24 +98,36 @@ class SSHConnection: ObservableObject {
             let authMethod = self.authMethod
             let connectionId = self.connectionId
 
+            // Banner events arrive on the event loop; handle them on the main actor
+            let onBanner: (String) -> Void = { [weak self] message in
+                Task { @MainActor in self?.authBannerReceived(message) }
+            }
+            let onAuthSucceeded: () -> Void = { [weak self] in
+                Task { @MainActor in self?.authSucceededReceived() }
+            }
+
             // Create client bootstrap
             let bootstrap = ClientBootstrap(group: group)
                 .channelInitializer { channel in
-                    // Add SSH handler
-                    channel.pipeline.addHandlers([
-                        NIOSSHHandler(
-                            role: .client(.init(
-                                userAuthDelegate: SSHAuthenticator(
-                                    username: username,
-                                    authMethod: authMethod,
-                                    connectionId: connectionId
-                                ),
-                                serverAuthDelegate: AcceptAllHostKeysDelegate()
-                            )),
-                            allocator: channel.allocator,
-                            inboundChildChannelInitializer: nil
+                    // Add SSH handler, then the banner handler after it
+                    // (runs on the channel's event loop, so sync operations are fine)
+                    channel.eventLoop.makeCompletedFuture {
+                        try channel.pipeline.syncOperations.addHandlers(
+                            NIOSSHHandler(
+                                role: .client(.init(
+                                    userAuthDelegate: SSHAuthenticator(
+                                        username: username,
+                                        authMethod: authMethod,
+                                        connectionId: connectionId
+                                    ),
+                                    serverAuthDelegate: AcceptAllHostKeysDelegate()
+                                )),
+                                allocator: channel.allocator,
+                                inboundChildChannelInitializer: nil
+                            ),
+                            SSHAuthBannerHandler(onBanner: onBanner, onAuthSucceeded: onAuthSucceeded)
                         )
-                    ])
+                    }
                 }
                 .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
                 .connectTimeout(.seconds(30))
@@ -138,9 +154,27 @@ class SSHConnection: ObservableObject {
 
         } catch {
             Logger.clauntty.error("SSH connection failed: \(error.localizedDescription)")
+            SSHAuthPrompts.shared.resolve(self)
             state = .error(error)
             throw error
         }
+    }
+
+    /// A banner with a link means the server wants the user to sign in somewhere
+    /// (Tailscale SSH check mode) and is holding authentication until they do
+    private func authBannerReceived(_ message: String) {
+        Logger.clauntty.debugOnly("SSH banner from \(self.host): \(message)")
+        TailscaleDebugLog.note("ssh banner from \(host): \(message.replacingOccurrences(of: "\n", with: " "))")
+        guard !authSucceeded, let url = SSHAuthPrompts.link(in: message) else { return }
+        SSHAuthPrompts.shared.show(for: self, host: host, message: message, url: url) { [weak self] in
+            self?.disconnect()
+        }
+    }
+
+    private func authSucceededReceived() {
+        authSucceeded = true
+        TailscaleDebugLog.note("ssh auth succeeded for \(host)")
+        SSHAuthPrompts.shared.resolve(self)
     }
 
     private func createPTYChannel() async throws {
@@ -492,6 +526,7 @@ class SSHConnection: ObservableObject {
         channel = nil
         sshChildChannel = nil
         channelHandler = nil
+        SSHAuthPrompts.shared.resolve(self)
 
         // Note: We don't shut down the event loop group since we use the global singleton
         // The singleton is designed to run for the entire app lifetime
