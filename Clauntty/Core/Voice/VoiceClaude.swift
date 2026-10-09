@@ -31,6 +31,8 @@ struct ClaudeAgent: Equatable {
     let directory: String
     /// "busy" or "idle" as Claude reports it
     let status: String
+    /// When `status` last changed (Claude's statusUpdatedAt, ms since 1970)
+    var statusChangedAt: Int?
     /// Claude's conversation title (its `ai-title`), if it has made one yet
     var title: String?
     /// This tab shows its pane (Herdr only, for now; see ClaudeScan.markShowing)
@@ -280,7 +282,8 @@ enum ClaudeScripts {
                     pid: pid,
                     sessionId: sessionId,
                     directory: json["cwd"] as? String ?? "",
-                    status: json["status"] as? String ?? "unknown"
+                    status: json["status"] as? String ?? "unknown",
+                    statusChangedAt: (json["statusUpdatedAt"] as? NSNumber)?.intValue
                 ))
             case "title"?:
                 guard parts.count == 3, let title = ClaudeTranscript.field(parts[2])?.value else { continue }
@@ -326,18 +329,19 @@ enum ClaudeScripts {
 // MARK: - Watching
 
 /// Notices when a Claude conversation finishes its turn or stops at a menu, from
-/// status checks a few seconds apart. A new state counts once two checks in a row
-/// agree, so a flicker mid-turn says nothing. The first check of a conversation only
-/// records where it stands.
+/// status checks a few seconds apart. Finished comes from Claude's own status, which
+/// doesn't flicker: working then idle, or idle both times with a status change in
+/// between (a turn shorter than the gap between checks). Waiting at a menu comes from
+/// Herdr. The first check of a conversation only records where it stands.
 struct ClaudeWatch {
     enum State: Equatable {
         case working, idle, blocked
     }
 
     enum Change: Equatable {
-        /// working → idle
+        /// a turn ended
         case finished
-        /// anything → waiting at a menu or question
+        /// started waiting at a menu or question
         case blocked
     }
 
@@ -346,45 +350,45 @@ struct ClaudeWatch {
         let change: Change
     }
 
-    private var confirmed: [String: State] = [:]
-    private var candidate: [String: State] = [:]
+    struct Observation: Equatable {
+        var state: State
+        /// When Claude's status last changed, if known
+        var changedAt: Int?
 
-    /// Herdr's view when there is one (it knows about menus), else Claude's own
-    static func state(of agent: ClaudeAgent) -> State {
-        switch agent.herdrStatus {
-        case "blocked"?: return .blocked
-        case "working"?: return .working
-        case "idle"?, "done"?: return .idle
-        default: return agent.status == "busy" ? .working : .idle
+        init(_ state: State, changedAt: Int? = nil) {
+            self.state = state
+            self.changedAt = changedAt
         }
     }
 
+    private var last: [String: Observation] = [:]
+
+    /// Herdr knows about menus; otherwise Claude's own status
+    static func observe(_ agent: ClaudeAgent) -> Observation {
+        if agent.herdrStatus == "blocked" {
+            return Observation(.blocked, changedAt: agent.statusChangedAt)
+        }
+        return Observation(agent.status == "busy" ? .working : .idle, changedAt: agent.statusChangedAt)
+    }
+
     /// Feed one round of checks: every conversation seen, by a stable key
-    mutating func update(_ states: [String: State]) -> [Event] {
+    mutating func update(_ observations: [String: Observation]) -> [Event] {
         var events: [Event] = []
-        for (key, state) in states {
-            guard let current = confirmed[key] else {
-                confirmed[key] = state
-                continue
-            }
-            if state == current {
-                candidate[key] = nil
-            } else if candidate[key] == state {
-                candidate[key] = nil
-                confirmed[key] = state
-                switch (current, state) {
-                case (.working, .idle): events.append(Event(key: key, change: .finished))
-                case (_, .blocked): events.append(Event(key: key, change: .blocked))
-                default: break
+        for (key, now) in observations {
+            defer { last[key] = now }
+            guard let before = last[key] else { continue }
+            if now.state == .blocked {
+                if before.state != .blocked { events.append(Event(key: key, change: .blocked)) }
+            } else if now.state == .idle {
+                let changed = now.changedAt != nil && now.changedAt != before.changedAt
+                if before.state == .working || (before.state == .idle && changed) {
+                    events.append(Event(key: key, change: .finished))
                 }
-            } else {
-                candidate[key] = state
             }
         }
         // Conversations that ended
-        for key in confirmed.keys where states[key] == nil {
-            confirmed[key] = nil
-            candidate[key] = nil
+        for key in last.keys where observations[key] == nil {
+            last[key] = nil
         }
         return events.sorted { $0.key < $1.key }
     }

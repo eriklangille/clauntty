@@ -213,34 +213,40 @@ final class VoiceAgentTests: XCTestCase {
         XCTAssertEqual(scan.agents.map(\.focused), [false, false])
     }
 
-    func testWatchReportsSettledChangesOnly() {
+    func testWatchReportsFinishedTurnsAndMenus() {
+        typealias O = ClaudeWatch.Observation
         var watch = ClaudeWatch()
         // The first check only records where each one stands
-        XCTAssertEqual(watch.update(["a": .working, "b": .idle]), [])
-        // A change counts once two checks agree
-        XCTAssertEqual(watch.update(["a": .idle, "b": .idle]), [])
-        XCTAssertEqual(watch.update(["a": .idle, "b": .blocked]), [.init(key: "a", change: .finished)])
-        XCTAssertEqual(watch.update(["a": .working, "b": .blocked]), [.init(key: "b", change: .blocked)])
-        // A one-check flicker says nothing; starting work isn't news
-        XCTAssertEqual(watch.update(["a": .idle, "b": .blocked]), [])
-        XCTAssertEqual(watch.update(["a": .working, "b": .working]), [])
-        XCTAssertEqual(watch.update(["a": .working, "b": .working]), [])
-        // A conversation that ends is forgotten; if it comes back it starts over
-        XCTAssertEqual(watch.update(["b": .idle]), [])
-        XCTAssertEqual(watch.update(["a": .idle, "b": .idle]), [.init(key: "b", change: .finished)])
-        XCTAssertEqual(watch.update(["a": .idle, "b": .idle]), [])
+        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 1), "b": O(.idle, changedAt: 1)]), [])
+        // A turn ends
+        XCTAssertEqual(watch.update(["a": O(.idle, changedAt: 2), "b": O(.idle, changedAt: 1)]), [.init(key: "a", change: .finished)])
+        // A turn shorter than the gap between checks: idle both times, but the status changed
+        XCTAssertEqual(watch.update(["a": O(.idle, changedAt: 4), "b": O(.idle, changedAt: 1)]), [.init(key: "a", change: .finished)])
+        // Nothing happened
+        XCTAssertEqual(watch.update(["a": O(.idle, changedAt: 4), "b": O(.idle, changedAt: 1)]), [])
+        // Starting work isn't news; stopping at a menu is, once
+        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 5), "b": O(.blocked, changedAt: 1)]), [.init(key: "b", change: .blocked)])
+        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 5), "b": O(.blocked, changedAt: 1)]), [])
+        // Answered: back to work, then done
+        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 5), "b": O(.working, changedAt: 6)]), [])
+        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 5), "b": O(.idle, changedAt: 7)]), [.init(key: "b", change: .finished)])
+        // A conversation that ends is forgotten; when it comes back it starts over
+        XCTAssertEqual(watch.update(["b": O(.idle, changedAt: 7)]), [])
+        XCTAssertEqual(watch.update(["a": O(.idle, changedAt: 9), "b": O(.idle, changedAt: 7)]), [])
     }
 
-    func testWatchStatePrefersHerdr() {
-        var agent = ClaudeAgent(pid: 1, sessionId: "s", directory: "/w", status: "idle")
-        XCTAssertEqual(ClaudeWatch.state(of: agent), .idle)
+    func testWatchObservation() {
+        var agent = ClaudeAgent(pid: 1, sessionId: "s", directory: "/w", status: "idle", statusChangedAt: 42)
+        XCTAssertEqual(ClaudeWatch.observe(agent), .init(.idle, changedAt: 42))
         agent = ClaudeAgent(pid: 1, sessionId: "s", directory: "/w", status: "busy")
-        XCTAssertEqual(ClaudeWatch.state(of: agent), .working)
-        // Herdr knows about menus; Claude's own status doesn't
+        XCTAssertEqual(ClaudeWatch.observe(agent).state, .working)
+        // Herdr knows about menus; Claude's own status decides working or idle
         agent.herdrStatus = "blocked"
-        XCTAssertEqual(ClaudeWatch.state(of: agent), .blocked)
-        agent.herdrStatus = "done"
-        XCTAssertEqual(ClaudeWatch.state(of: agent), .idle)
+        XCTAssertEqual(ClaudeWatch.observe(agent).state, .blocked)
+        agent.herdrStatus = "idle"
+        XCTAssertEqual(ClaudeWatch.observe(agent).state, .working)
+        let parsed = ClaudeScripts.parse("claude\t{\"pid\":5,\"sessionId\":\"c-3\",\"cwd\":\"/w\",\"status\":\"idle\",\"statusUpdatedAt\":1791524607368}")
+        XCTAssertEqual(parsed.agents.first?.statusChangedAt, 1791524607368)
         XCTAssertFalse(ClaudeScripts.find(rtachSessionId: "abc", screens: false)!.contains("--source visible"))
         XCTAssertTrue(ClaudeScripts.find(rtachSessionId: "abc")!.contains("--source visible"))
     }

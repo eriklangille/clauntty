@@ -410,7 +410,7 @@ final class VoiceAgent: ObservableObject {
         guard !checking else { return }
         checking = true
         Task {
-            var states: [String: ClaudeWatch.State] = [:]
+            var states: [String: ClaudeWatch.Observation] = [:]
             var labels: [String: String] = [:]
             for (tab, session) in voiceTabs() where session.state == .connected && session.sshConnection != nil {
                 guard let id = session.rtachSessionId,
@@ -420,7 +420,7 @@ final class VoiceAgent: ObservableObject {
                     // Tabs attached to the same multiplexer list the same Claudes
                     let key = "\(tab.host) \(agent.pid)"
                     guard states[key] == nil else { continue }
-                    states[key] = ClaudeWatch.state(of: agent)
+                    states[key] = ClaudeWatch.observe(agent)
                     labels[key] = Self.label(agent, tab: tab)
                 }
             }

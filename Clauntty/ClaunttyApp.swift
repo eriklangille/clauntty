@@ -347,8 +347,12 @@ struct AppContentView: View {
             Logger.clauntty.debugOnly("APP_LIFECYCLE: BACKGROUNDING - activeSession='\(activeTitle)' [\(activeId)], totalSessions=\(self.sessionManager.sessions.count)")
 
             NotificationManager.shared.appIsBackgrounded = true
-            // Voice sessions are foreground-only for now (no background audio or CallKit yet)
-            VoiceAgent.shared.end(reason: "Clauntty went to the background")
+            // A voice session keeps going: the `audio` background mode keeps the app
+            // running while it records and plays, like a call. Pausing the tabs below
+            // doesn't affect it; it reads conversations over its own SSH commands.
+            if VoiceAgent.shared.isActive {
+                voiceTrace("app went to the background; the session keeps going")
+            }
             // Request background time to continue processing SSH data
             // This gives us ~30 seconds to detect when Claude finishes
             NotificationManager.shared.startBackgroundTask()
@@ -366,6 +370,9 @@ struct AppContentView: View {
             Logger.clauntty.debugOnly("APP_LIFECYCLE: FOREGROUNDING - activeSession='\(activeTitle)' [\(activeId)]")
 
             NotificationManager.shared.appIsBackgrounded = false
+            if VoiceAgent.shared.isActive {
+                voiceTrace("app is back in the foreground")
+            }
             NotificationManager.shared.clearAllPendingNotifications()
             NotificationManager.shared.endBackgroundTask()
             // Process any pending session switch from notification tap
