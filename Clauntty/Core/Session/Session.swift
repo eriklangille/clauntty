@@ -296,6 +296,11 @@ class Session: ObservableObject, Identifiable {
     /// Called when old scrollback is received (to prepend to terminal)
     var onScrollbackReceived: ((Data) -> Void)?
 
+    /// Reads the terminal's text with its styling as VT (SGR) sequences: the screen,
+    /// or with `true` the scrollback too. Set by the tab's terminal view; nil until
+    /// it has a surface.
+    var readTerminalText: ((Bool) -> String?)?
+
     /// Called when a port forward is requested via OSC 777
     var onPortForwardRequested: ((Int) -> Void)?
 
@@ -319,7 +324,7 @@ class Session: ObservableObject, Identifiable {
 
     /// Debug counters for tracking data flow
     private var totalBytesReceived = 0
-    private var totalBytesToTerminal = 0
+    private(set) var totalBytesToTerminal = 0
 
     // MARK: - Paginated Scrollback State
 
@@ -790,6 +795,15 @@ class Session: ObservableObject, Identifiable {
     func listImageInbox() async throws -> [ImageInbox.Entry] {
         guard let connection = sshConnection else { throw SessionError.notConnected }
         return ImageInbox.parseList(try await connection.executeCommand(ImageInbox.listCommand))
+    }
+
+    /// Run a POSIX sh script on the remote host and return its output. The script
+    /// travels as base64, so it needs no quoting for whatever the login shell is
+    /// (fish included).
+    func runRemoteScript(_ script: String) async throws -> String {
+        guard let connection = sshConnection else { throw SessionError.notConnected }
+        let encoded = Data(script.utf8).base64EncodedString()
+        return try await connection.executeCommand("echo \(encoded) | base64 -d | sh")
     }
 
     func removeFromImageInbox(_ ids: [String]) async {

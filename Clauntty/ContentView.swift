@@ -11,6 +11,8 @@ struct ContentView: View {
   @State private var portsSheetSession: Session?
   @State private var hasCheckedAutoConnect = false
   @State private var showingSpeechModelDownload = false
+  @State private var showingVoicePanel = false
+  @State private var showingVoiceSettings = false
 
   var body: some View {
     NavigationStack {
@@ -79,10 +81,23 @@ struct ContentView: View {
                   )
                   portsSheetSession = session
                 },
-                sessionStatesHash: sessionManager.sessionStateVersion
+                sessionStatesHash: sessionManager.sessionStateVersion,
+                onVoiceTapped: handleVoiceTapped
               )
               .frame(height: 48)
               Spacer()
+            }
+
+            // Voice session panel, dropping down from the pill; tap outside to close
+            if showingVoicePanel {
+              Color.black.opacity(0.001)
+                .ignoresSafeArea()
+                .onTapGesture { showingVoicePanel = false }
+              VStack {
+                VoicePanelView()
+                  .padding(.top, 52)
+                Spacer()
+              }
             }
           }
         }
@@ -110,6 +125,15 @@ struct ContentView: View {
               }
             }
           )
+        }
+        .sheet(isPresented: $showingVoiceSettings) {
+          VoiceSettingsSheet()
+        }
+        .onReceive(VoiceAgent.shared.$lastSession.dropFirst()) { summary in
+          // Show how a session ended and what it cost
+          if summary != nil {
+            showingVoicePanel = true
+          }
         }
         .sheet(item: $portsSheetSession) { session in
           PortsSheetView(config: session.connectionConfig, onDismiss: { portsSheetSession = nil })
@@ -151,6 +175,18 @@ struct ContentView: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("This will download approximately 800 MB of data for on-device speech recognition. The model runs entirely on your device for privacy.")
+    }
+  }
+
+  /// Voice button: set up a key first, start a session, or open the session panel
+  private func handleVoiceTapped() {
+    let agent = VoiceAgent.shared
+    if agent.isActive {
+      showingVoicePanel.toggle()
+    } else if !VoiceSettings.hasAPIKey {
+      showingVoiceSettings = true
+    } else {
+      agent.start(sessionManager: sessionManager)
     }
   }
 

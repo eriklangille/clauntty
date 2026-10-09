@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F0A00001 /* VoiceText.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00001 /* VoiceText.swift */; };
+		F0A00002 /* VoiceAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00002 /* VoiceAudio.swift */; };
+		F0A00003 /* XAIRealtimeSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00003 /* XAIRealtimeSocket.swift */; };
+		F0A00004 /* VoiceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00004 /* VoiceSettings.swift */; };
+		F0A00005 /* VoiceAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00005 /* VoiceAgent.swift */; };
+		F0A00006 /* VoiceAgentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00006 /* VoiceAgentViews.swift */; };
+		F0A00007 /* VoiceAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00007 /* VoiceAgentTests.swift */; };
+		F0A00008 /* VoiceClaude.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00008 /* VoiceClaude.swift */; };
 		06E63D06C52859FA31DA95C7 /* SSHKeyImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */; };
 		1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */; };
 		3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */; };
@@ -108,6 +116,14 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F1A00001 /* VoiceText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceText.swift; sourceTree = "<group>"; };
+		F1A00002 /* VoiceAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudio.swift; sourceTree = "<group>"; };
+		F1A00003 /* XAIRealtimeSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XAIRealtimeSocket.swift; sourceTree = "<group>"; };
+		F1A00004 /* VoiceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSettings.swift; sourceTree = "<group>"; };
+		F1A00005 /* VoiceAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgent.swift; sourceTree = "<group>"; };
+		F1A00006 /* VoiceAgentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentViews.swift; sourceTree = "<group>"; };
+		F1A00008 /* VoiceClaude.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceClaude.swift; sourceTree = "<group>"; };
+		F1A00007 /* VoiceAgentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VoiceAgentTests.swift; path = ../Tests/ClaunttyTests/VoiceAgentTests.swift; sourceTree = "<group>"; };
 		023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SSHConnectionTests.swift; path = ../Tests/ClaunttyTests/SSHConnectionTests.swift; sourceTree = "<group>"; };
 		0CD476298B71607D9BDB445C /* ServerPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ServerPickerView.swift; sourceTree = "<group>"; };
 		28503FD938162D88F8B6A69F /* WebTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTabView.swift; sourceTree = "<group>"; };
@@ -208,6 +224,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		F3A00001 /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				F1A00001 /* VoiceText.swift */,
+				F1A00002 /* VoiceAudio.swift */,
+				F1A00003 /* XAIRealtimeSocket.swift */,
+				F1A00004 /* VoiceSettings.swift */,
+				F1A00005 /* VoiceAgent.swift */,
+				F1A00008 /* VoiceClaude.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
 		9288A4E4FA9722C67B531048 /* iOS */ = {
 			isa = PBXGroup;
 			children = (
@@ -225,6 +254,7 @@
 				D2000002 /* TerminalSurfaceTests.swift */,
 				D2000003 /* KeyboardAccessoryViewTests.swift */,
 				D2000004 /* SessionTests.swift */,
+				F1A00007 /* VoiceAgentTests.swift */,
 				D2000005 /* SessionManagerTests.swift */,
 			);
 			path = ClaunttyTests;
@@ -280,6 +310,7 @@
 				C3000030 /* Notifications */,
 				C3000031 /* Power */,
 				C3000032 /* Speech */,
+				F3A00001 /* Voice */,
 				B2C48404F3C2AD63C8301557 /* Theme */,
 				7A200001 /* Tailscale */,
 			);
@@ -331,6 +362,7 @@
 				59A3663E616FC97D48E5888C /* SessionPickerView.swift */,
 				28503FD938162D88F8B6A69F /* WebTabView.swift */,
 				C1000025 /* SettingsView.swift */,
+				F1A00006 /* VoiceAgentViews.swift */,
 				C1000028 /* PortsSheetView.swift */,
 				C10000A1 /* ImageViewerView.swift */,
 				297EA9CE961BFF920036934A /* SelectionHandleView.swift */,
@@ -582,6 +614,7 @@
 				D1000002 /* TerminalSurfaceTests.swift in Sources */,
 				D1000003 /* KeyboardAccessoryViewTests.swift in Sources */,
 				D1000004 /* SessionTests.swift in Sources */,
+				F0A00007 /* VoiceAgentTests.swift in Sources */,
 				D1000005 /* SessionManagerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -619,6 +652,13 @@
 				7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */,
 				C0000024 /* NotificationManager.swift in Sources */,
 				C0000025 /* SettingsView.swift in Sources */,
+				F0A00001 /* VoiceText.swift in Sources */,
+				F0A00002 /* VoiceAudio.swift in Sources */,
+				F0A00003 /* XAIRealtimeSocket.swift in Sources */,
+				F0A00004 /* VoiceSettings.swift in Sources */,
+				F0A00005 /* VoiceAgent.swift in Sources */,
+				F0A00008 /* VoiceClaude.swift in Sources */,
+				F0A00006 /* VoiceAgentViews.swift in Sources */,
 				C0000028 /* PortsSheetView.swift in Sources */,
 				C00000A1 /* ImageViewerView.swift in Sources */,
 				C0000026 /* PowerManager.swift in Sources */,

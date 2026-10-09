@@ -232,6 +232,8 @@ final class SpeechManager: ObservableObject {
         }
 
         guard !isRecording else { return }
+        // A voice agent session owns the audio session
+        guard !VoiceAgent.shared.isActive else { return }
 
         do {
             let audioSession = AVAudioSession.sharedInstance()

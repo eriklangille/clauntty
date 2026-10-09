@@ -71,6 +71,8 @@ struct SettingsView: View {
                     Text("Speak commands instead of typing. Uses on-device speech recognition for privacy.")
                 }
 
+                VoiceSettingsSection()
+
                 Section {
                     Toggle("Battery Saver", isOn: $powerManager.batterySaverEnabled)
                 } header: {

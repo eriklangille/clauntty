@@ -347,6 +347,8 @@ struct AppContentView: View {
             Logger.clauntty.debugOnly("APP_LIFECYCLE: BACKGROUNDING - activeSession='\(activeTitle)' [\(activeId)], totalSessions=\(self.sessionManager.sessions.count)")
 
             NotificationManager.shared.appIsBackgrounded = true
+            // Voice sessions are foreground-only for now (no background audio or CallKit yet)
+            VoiceAgent.shared.end(reason: "Clauntty went to the background")
             // Request background time to continue processing SSH data
             // This gives us ~30 seconds to detect when Claude finishes
             NotificationManager.shared.startBackgroundTask()

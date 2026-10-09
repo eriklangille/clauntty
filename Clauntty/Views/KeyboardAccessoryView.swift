@@ -64,6 +64,13 @@ class KeyboardAccessoryView: UIView {
         }
     }
 
+    /// A voice agent session owns the audio session; dictation waits until it ends
+    private var isVoiceSessionActive = false {
+        didSet {
+            updateMicButtonAppearance()
+        }
+    }
+
     /// Track if speech model is ready
     private(set) var isSpeechModelReady = false {
         didSet {
@@ -258,6 +265,13 @@ class KeyboardAccessoryView: UIView {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] level in
                 self?.updateGlowForAudioLevel(level)
+            }
+            .store(in: &cancellables)
+
+        VoiceAgent.shared.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] phase in
+                self?.isVoiceSessionActive = phase != .idle
             }
             .store(in: &cancellables)
     }
@@ -602,6 +616,9 @@ class KeyboardAccessoryView: UIView {
         } else if isSpeechModelDownloading {
             iconName = "mic.fill"
             tintColor = .systemBlue  // Blue while downloading
+        } else if isVoiceSessionActive {
+            iconName = "mic.fill"
+            tintColor = .tertiaryLabel
         } else {
             iconName = "mic.fill"
             tintColor = isSpeechModelReady ? .label : .secondaryLabel
@@ -808,6 +825,8 @@ class KeyboardAccessoryView: UIView {
         micTouchStartTime = Date()
         isPushToTalkMode = false
 
+        guard !isVoiceSessionActive else { return }
+
         // If model not ready or downloading, we'll handle on touch up
         guard isSpeechModelReady, !isSpeechModelDownloading else { return }
 
@@ -830,6 +849,12 @@ class KeyboardAccessoryView: UIView {
         // Cancel the hold timer if it hasn't fired yet
         micHoldTimer?.invalidate()
         micHoldTimer = nil
+
+        if isVoiceSessionActive {
+            showTooltip(above: micButton, text: "Voice session active")
+            hideTooltipAfterDelay(delay: 1.5)
+            return
+        }
 
         // If model is downloading, show status tooltip instead of re-prompting
         if isSpeechModelDownloading {

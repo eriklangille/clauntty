@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import os.log
 
@@ -18,11 +19,25 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
     /// This forces SwiftUI to call updateUIView when any session state changes
     var sessionStatesHash: Int
 
+    /// Called when the voice button (or session pill) is tapped
+    var onVoiceTapped: () -> Void = {}
+
     func makeUIView(context: Context) -> LiquidGlassTabBar {
         let bar = LiquidGlassTabBar()
 
         bar.onNewTab = onNewTab
         bar.onShowTabSelector = onShowTabSelector
+        bar.onVoiceTapped = onVoiceTapped
+
+        // The voice pill updates every second during a session; drive it directly
+        // rather than through updateUIView, which reconfigures every tab
+        let agent = VoiceAgent.shared
+        bar.setVoice(VoiceBarState(agent: agent))
+        context.coordinator.voiceCancellable = agent.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak bar] _ in
+                bar?.setVoice(VoiceBarState(agent: agent))
+            }
 
         bar.onTabSelected = { [weak bar] tab in
             switch tab {
@@ -130,9 +145,24 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
     class Coordinator {
         weak var sessionManager: SessionManager?
         var onShowPorts: ((Session) -> Void)?
+        var voiceCancellable: AnyCancellable?
 
         init(onShowPorts: ((Session) -> Void)? = nil) {
             self.onShowPorts = onShowPorts
+        }
+    }
+}
+
+extension VoiceBarState {
+    @MainActor
+    init(agent: VoiceAgent) {
+        switch agent.phase {
+        case .idle:
+            self = .idle
+        case .connecting:
+            self.init(phase: .connecting, text: "Connecting")
+        default:
+            self.init(phase: agent.phase, text: "\(agent.cost.dollarsText) · \(voiceClockText(agent.remaining))")
         }
     }
 }

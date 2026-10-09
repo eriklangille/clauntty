@@ -336,6 +336,12 @@ struct TerminalView: View {
             surface.prependScrollback(data)
         }
 
+        // Let the voice agent read this tab's text, styling included (to tell
+        // dim suggestions from typed text)
+        session.readTerminalText = { [weak surface] wholeScreen in
+            surface?.captureVisibleText(wholeScreen: wholeScreen, styled: true)
+        }
+
         // Set up callback for terminal title changes → session title
         surface.onTitleChanged = { [weak session] title in
             session?.dynamicTitle = title

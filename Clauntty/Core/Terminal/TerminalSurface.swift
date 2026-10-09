@@ -2174,7 +2174,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Used for automated testing to verify rendering is correct.
     /// - Returns: The visible terminal text as a string, or nil if capture failed
     /// - Parameter wholeScreen: include the scrollback, not just the viewport
-    func captureVisibleText(wholeScreen: Bool = false) -> String? {
+    /// - Parameter styled: keep the styling as VT (SGR) sequences, lines unwrapped
+    func captureVisibleText(wholeScreen: Bool = false, styled: Bool = false) -> String? {
         guard let surface = self.surface else {
             Logger.clauntty.warning("captureVisibleText: no surface")
             return nil
@@ -2208,7 +2209,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         sel.rectangle = false
 
         var text = ghostty_text_s()
-        guard ghostty_surface_read_text(surface, sel, &text) else {
+        let read = styled ? ghostty_surface_read_text_vt(surface, sel, &text) : ghostty_surface_read_text(surface, sel, &text)
+        guard read else {
             Logger.clauntty.warning("captureVisibleText: ghostty_surface_read_text failed")
             return nil
         }

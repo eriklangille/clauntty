@@ -49,6 +49,9 @@ class LiquidGlassTabBar: UIView {
     /// Called when tabs button is tapped (show full selector)
     var onShowTabSelector: (() -> Void)?
 
+    /// Called when the voice button (or the session pill it turns into) is tapped
+    var onVoiceTapped: (() -> Void)?
+
     // Web-specific callbacks
     var onWebBack: ((TabItem) -> Void)?
     var onWebForward: ((TabItem) -> Void)?
@@ -150,6 +153,52 @@ class LiquidGlassTabBar: UIView {
     /// Forwarded port count shown on portsBadge
     private var forwardedPortCount = 0
 
+    /// Voice agent button, mirroring the plus button on the left. During a session it
+    /// widens into a pill showing the cost so far and the time left.
+    private let voiceButton: UIVisualEffectView = {
+        let effect: UIVisualEffect
+        if #available(iOS 26.0, *) {
+            let glassEffect = UIGlassEffect()
+            glassEffect.isInteractive = true
+            effect = glassEffect
+        } else {
+            effect = UIBlurEffect(style: .systemMaterial)
+        }
+        let view = UIVisualEffectView(effect: effect)
+        view.clipsToBounds = true
+        return view
+    }()
+
+    /// Tint over the voice button while a session runs
+    private let voiceTintView: UIView = {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.alpha = 0
+        return view
+    }()
+
+    private let voiceIconView: UIImageView = {
+        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        let imageView = UIImageView(image: UIImage(systemName: "waveform", withConfiguration: config))
+        imageView.tintColor = .label
+        imageView.contentMode = .scaleAspectFit
+        return imageView
+    }()
+
+    private let voiceLabel: UILabel = {
+        let label = UILabel()
+        label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        label.textColor = .label
+        label.isHidden = true
+        return label
+    }()
+
+    private var voiceWidthConstraint: NSLayoutConstraint?
+    private var voiceState = VoiceBarState.idle
+
+    /// Widest the session pill gets (landscape has room to spare)
+    private let maxVoicePillWidth: CGFloat = 140
+
 
     // MARK: - Gesture State
 
@@ -179,6 +228,7 @@ class LiquidGlassTabBar: UIView {
 
         // Setup plus button
         setupPlusButton()
+        setupVoiceButton()
 
         setupConstraints()
         setupGestures()
@@ -218,10 +268,102 @@ class LiquidGlassTabBar: UIView {
         ])
     }
 
-    /// Show or hide the plus button along with its badge
+    /// Show or hide the plus button along with its badge (and the voice button,
+    /// which hides with it while a tab is expanded)
     private func setPlusButtonAlpha(_ alpha: CGFloat) {
         plusButton.alpha = alpha
         portsBadge.alpha = alpha
+        voiceButton.alpha = alpha
+    }
+
+    private func setupVoiceButton() {
+        voiceButton.translatesAutoresizingMaskIntoConstraints = false
+        voiceButton.layer.cornerRadius = plusButtonSize / 2
+        voiceButton.accessibilityIdentifier = "Voice"
+        voiceButton.accessibilityLabel = "Voice agent"
+        voiceButton.isAccessibilityElement = true
+        addSubview(voiceButton)
+
+        voiceTintView.translatesAutoresizingMaskIntoConstraints = false
+        voiceButton.contentView.addSubview(voiceTintView)
+
+        let stack = UIStackView(arrangedSubviews: [voiceIconView, voiceLabel])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 5
+        stack.isUserInteractionEnabled = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        voiceButton.contentView.addSubview(stack)
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleVoiceTap))
+        voiceButton.addGestureRecognizer(tap)
+
+        let width = voiceButton.widthAnchor.constraint(equalToConstant: plusButtonSize)
+        voiceWidthConstraint = width
+        NSLayoutConstraint.activate([
+            voiceButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+            voiceButton.centerYAnchor.constraint(equalTo: bubblesContainer.centerYAnchor),
+            voiceButton.heightAnchor.constraint(equalToConstant: plusButtonSize),
+            width,
+
+            voiceTintView.leadingAnchor.constraint(equalTo: voiceButton.contentView.leadingAnchor),
+            voiceTintView.trailingAnchor.constraint(equalTo: voiceButton.contentView.trailingAnchor),
+            voiceTintView.topAnchor.constraint(equalTo: voiceButton.contentView.topAnchor),
+            voiceTintView.bottomAnchor.constraint(equalTo: voiceButton.contentView.bottomAnchor),
+
+            stack.centerXAnchor.constraint(equalTo: voiceButton.contentView.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: voiceButton.contentView.centerYAnchor),
+        ])
+    }
+
+    @objc private func handleVoiceTap() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        onVoiceTapped?()
+    }
+
+    /// Show the voice agent's state: the plain button, or the session pill
+    func setVoice(_ state: VoiceBarState) {
+        guard state != voiceState else { return }
+        let wasActive = voiceState.isActive
+        let oldPhase = voiceState.phase
+        voiceState = state
+
+        voiceLabel.text = state.text
+        voiceLabel.isHidden = !state.isActive
+        voiceTintView.backgroundColor = state.phase == .connecting ? .systemOrange : .systemGreen
+        voiceButton.accessibilityValue = state.isActive ? state.text : nil
+
+        if state.phase != oldPhase {
+            voiceIconView.removeAllSymbolEffects()
+            switch state.phase {
+            case .speaking:
+                voiceIconView.addSymbolEffect(.variableColor.iterative, options: .repeating)
+            case .connecting, .thinking:
+                voiceIconView.addSymbolEffect(.pulse, options: .repeating)
+            case .idle, .listening:
+                break
+            }
+        }
+
+        if state.isActive != wasActive {
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
+                self.voiceTintView.alpha = state.isActive ? 0.3 : 0
+                self.updateVoiceWidth()
+                self.layoutBubbles()
+                self.layoutIfNeeded()
+            }
+        }
+    }
+
+    /// Room for the session pill: from the left edge up to the active tab (the bubble
+    /// to its left, if any, is hidden during a session)
+    private var voicePillWidth: CGFloat {
+        let activeLeftEdge = bounds.width / 2 - activeBubbleWidth / 2
+        return max(plusButtonSize, min(maxVoicePillWidth, activeLeftEdge - spacing - horizontalPadding))
+    }
+
+    private func updateVoiceWidth() {
+        voiceWidthConstraint?.constant = voiceState.isActive ? voicePillWidth : plusButtonSize
     }
 
     private func setupConstraints() {
@@ -426,6 +568,7 @@ class LiquidGlassTabBar: UIView {
     }
 
     override func layoutSubviews() {
+        updateVoiceWidth()
         super.layoutSubviews()
         layoutBubbles()
     }
@@ -509,17 +652,23 @@ class LiquidGlassTabBar: UIView {
             let frame = CGRect(x: currentX, y: y, width: bubbleWidth, height: bubbleHeight)
             currentX += bubbleWidth + spacing
 
+            // Tabs that would sit under the voice button stay hidden. During a session
+            // that's the tab left of the active one, which the pill takes over.
+            let voiceEdge = horizontalPadding + (voiceState.isActive ? voicePillWidth : plusButtonSize)
+            let underVoice = !isActive && containerOriginX + frame.minX < voiceEdge
+            let alpha: CGFloat = underVoice ? 0 : 1
+
             // Check if this is a newly created bubble - set frame instantly, no animation
             if newlyCreatedBubbleIds.contains(tab.id) {
                 newlyCreatedBubbleIds.remove(tab.id)
                 bubble.frame = frame
-                bubble.alpha = 1
+                bubble.alpha = alpha
                 bubble.transform = .identity
             } else {
                 // Existing bubble - animate position change
                 UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
                     bubble.frame = frame
-                    bubble.alpha = 1
+                    bubble.alpha = alpha
                     bubble.transform = .identity
                 }
             }
@@ -1037,4 +1186,15 @@ class LiquidGlassTabBar: UIView {
         }
         return bounds.contains(point)
     }
+}
+
+/// What the tab bar's voice button shows
+struct VoiceBarState: Equatable {
+    var phase: VoiceAgent.Phase
+    /// "$0.19 · 12:41" during a session
+    var text: String
+
+    var isActive: Bool { phase != .idle }
+
+    static let idle = VoiceBarState(phase: .idle, text: "")
 }
