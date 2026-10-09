@@ -9,10 +9,22 @@ import Foundation
 //
 // A tab's Claudes are the ones running under its rtach session, found from the process
 // tree, so this works whether Claude runs in the tab directly or inside a multiplexer.
-// Everything here is Foundation only; VoiceAgent runs the scripts over SSH.
+// Input reaches a Claude in Herdr through Herdr (any pane, shown or not), and one in
+// the tab itself through the tab. Everything here is Foundation only; VoiceAgent runs
+// the scripts over SSH.
 
 /// A Claude Code process running in a tab
 struct ClaudeAgent: Equatable {
+    /// How input reaches it
+    enum Route: Equatable {
+        /// Claude runs in the tab itself: write to the tab, like the keyboard
+        case tab
+        /// Through Herdr, to this pane, whichever pane Herdr is showing
+        case herdr(pane: String)
+        /// Inside a multiplexer there's no way to type into yet
+        case unsupported(multiplexer: String)
+    }
+
     let pid: Int
     let sessionId: String
     /// Claude's working directory
@@ -21,11 +33,17 @@ struct ClaudeAgent: Equatable {
     let status: String
     /// Claude's conversation title (its `ai-title`), if it has made one yet
     var title: String?
-    /// The pane the multiplexer is showing (Herdr only, for now)
+    /// This tab shows its pane (Herdr only, for now; see ClaudeScan.markShowing)
     var focused = false
+    /// Herdr's view of it: "working", "idle", "blocked" (at a menu or question), ...
+    var herdrStatus: String?
+    var route: Route = .tab
 
     /// The status in words for the model
     var statusText: String {
+        if herdrStatus == "blocked" {
+            return "waiting for the user at a menu or question"
+        }
         switch status {
         case "busy": return "working"
         case "idle": return "idle: finished its turn, waiting for the user"
@@ -37,6 +55,49 @@ struct ClaudeAgent: Equatable {
     var shortDirectory: String {
         let parts = directory.split(separator: "/")
         return parts.suffix(2).joined(separator: "/")
+    }
+}
+
+/// What runs in a tab: its Claudes, and the multiplexers it's attached to
+struct ClaudeScan: Equatable {
+    var agents: [ClaudeAgent] = []
+    var multiplexers: [String] = []
+    /// What each Claude's Herdr pane shows, as plain text, by pane id
+    var paneScreens: [String: String] = [:]
+
+    /// Mark the conversation whose pane this tab is showing. Herdr's own focus is one
+    /// per server, but each attached client (each Clauntty tab) can show a different
+    /// pane, so match the tab's screen instead: the pane whose lines appear on it, using
+    /// only lines no other pane has (Claude's status bar is the same everywhere).
+    mutating func markShowing(screen: String) {
+        for i in agents.indices { agents[i].focused = false }
+        guard paneScreens.count > 0 else { return }
+        let shown = Set(Self.normalizedLines(screen))
+        let shownText = shown.joined(separator: "\n")
+        var owners: [String: Set<String>] = [:]
+        for (pane, text) in paneScreens {
+            for line in Self.normalizedLines(text) where line.count >= 6 {
+                owners[line, default: []].insert(pane)
+            }
+        }
+        var scores: [String: Int] = [:]
+        for (line, panes) in owners where panes.count == 1 && (shown.contains(line) || shownText.contains(line)) {
+            scores[panes.first!, default: 0] += 1
+        }
+        let ranked = scores.sorted { $0.value > $1.value }
+        guard let best = ranked.first, ranked.count == 1 || ranked[1].value * 2 < best.value else { return }
+        for i in agents.indices where agents[i].route == .herdr(pane: best.key) {
+            agents[i].focused = true
+        }
+    }
+
+    /// Trimmed lines with single spaces, no box drawing, no empty ones
+    private static func normalizedLines(_ text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline).compactMap { raw in
+            let kept = raw.unicodeScalars.filter { !(0x2500...0x259F).contains($0.value) }
+            let line = String(String.UnicodeScalarView(kept)).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            return line.isEmpty ? nil : line
+        }
     }
 }
 
@@ -52,17 +113,26 @@ enum ClaudeScripts {
     }
     """#
 
-    /// Lists the tab's Claudes. Prints, per Claude:
-    ///   claude<TAB><its ~/.claude/sessions/<pid>.json on one line>
+    /// Finds herdr even when ~/.local/bin isn't on a non-interactive PATH
+    private static let findHerdr = #"H=$(command -v herdr 2>/dev/null || echo "$HOME/.local/bin/herdr")"#
+
+    /// Lists what runs in the tab. Prints:
+    ///   claude<TAB><a Claude's ~/.claude/sessions/<pid>.json on one line>
     ///   title<TAB><sessionId><TAB>{"aiTitle":"..."}
-    /// and, when the tab runs Herdr, the process in its focused pane:
-    ///   focus<TAB><pid>
+    ///   mux<TAB><multiplexer the tab is attached to>
+    /// and when that's Herdr, its agents, and the process in each agent's pane and what
+    /// the pane shows (base64 plain text):
+    ///   herdr<TAB><`herdr agent list` output>
+    ///   pane<TAB><pid><TAB><pane id>
+    ///   visible<TAB><pane id><TAB><base64>
     ///
     /// The tab's processes are the ones under its rtach session. A multiplexer's client
     /// (Herdr, tmux, zellij, screen) only draws; its panes, and the Claudes in them, run
     /// under its server, which isn't under the tab. So when the tab runs one, every
     /// process under that multiplexer counts too.
-    static func find(rtachSessionId: String) -> String? {
+    /// `screens: false` leaves out what each pane shows, for the frequent status
+    /// checks that don't need it.
+    static func find(rtachSessionId: String, screens: Bool = true) -> String? {
         guard isSafe(rtachSessionId) else { return nil }
         return #"""
         { ps -Ao pid=,ppid=,comm= | sed 's/^/P /'; ps -Ao pid=,args= | grep -F -e "\#(rtachSessionId)" | sed 's/^/R /'; } | awk '
@@ -80,13 +150,16 @@ enum ClaudeScripts {
           for (p in keep) print "pid", p
         }' | while read -r kind pid; do
           if [ "$kind" = mux ]; then
+            printf 'mux\t%s\n' "$pid"
             [ "$pid" = herdr ] || continue
-            # Which pane Herdr shows, and the process in it
-            H=$(command -v herdr 2>/dev/null || echo "$HOME/.local/bin/herdr")
-            fp=$("$H" api snapshot 2>/dev/null | tr ',' '\n' | sed -n 's/.*"focused_pane_id":"\([^"]*\)".*/\1/p' | head -n 1)
-            [ -n "$fp" ] || continue
-            pg=$("$H" pane process-info --pane "$fp" 2>/dev/null | sed -n 's/.*"foreground_process_group_id":\([0-9]*\).*/\1/p')
-            [ -n "$pg" ] && printf 'focus\t%s\n' "$pg"
+            \#(findHerdr)
+            agents=$("$H" agent list 2>/dev/null | tr -d '\n')
+            printf 'herdr\t%s\n' "$agents"
+            for pane in $(printf '%s' "$agents" | tr ',' '\n' | sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p'); do
+              pg=$("$H" pane process-info --pane "$pane" 2>/dev/null | sed -n 's/.*"foreground_process_group_id":\([0-9]*\).*/\1/p')
+              [ -n "$pg" ] && printf 'pane\t%s\t%s\n' "$pg" "$pane"
+              \#(screens ? #"printf 'visible\t%s\t' "$pane"; "$H" agent read "$pane" --source visible --format text 2>/dev/null | base64 | tr -d '\n'; echo"# : ":")
+            done
             continue
           fi
           f="$HOME/.claude/sessions/$pid.json"
@@ -139,16 +212,63 @@ enum ClaudeScripts {
         """#
     }
 
+    // MARK: Herdr actions
+
+    /// Submit a prompt and wait (up to 6s) until Claude starts on it or stops at a menu,
+    /// not for the whole turn. Herdr pastes it with bracketed paste and refuses with
+    /// agent_blocked when a menu is already up.
+    /// A slash command (`/rename …`) doesn't start a turn, so there's nothing to wait for.
+    static func herdrPrompt(pane: String, text: String) -> String? {
+        guard isSafe(pane, extra: ":") else { return nil }
+        let encoded = Data(text.utf8).base64EncodedString()
+        let wait = isSlashCommand(text) ? "" : " --wait --until working --until blocked --timeout 6000"
+        return """
+        \(findHerdr)
+        T=$(printf '%s' '\(encoded)' | base64 -d)
+        "$H" agent prompt '\(pane)' "$T"\(wait) 2>&1
+        """
+    }
+
+    static func isSlashCommand(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespaces).hasPrefix("/")
+    }
+
+    /// Press keys in a pane. `keys` are VoiceKeys names, which Herdr accepts as is.
+    static func herdrKeys(pane: String, keys: [String]) -> String? {
+        guard isSafe(pane, extra: ":"), !keys.isEmpty, keys.allSatisfy({ VoiceKeys.bytes[$0] != nil }) else { return nil }
+        return findHerdr + "\n\"$H\" agent send-keys '\(pane)' " + keys.map { "'\($0)'" }.joined(separator: " ") + " 2>&1"
+    }
+
+    /// What a pane shows, styled (ANSI), so the dim suggestion can be marked
+    static func herdrScreen(pane: String) -> String? {
+        guard isSafe(pane, extra: ":") else { return nil }
+        return findHerdr + "\n\"$H\" agent read '\(pane)' --source visible --format ansi 2>/dev/null"
+    }
+
+    static func herdrFocus(pane: String) -> String? {
+        guard isSafe(pane, extra: ":") else { return nil }
+        return findHerdr + "\n\"$H\" agent focus '\(pane)' 2>&1"
+    }
+
+    /// Herdr's error code in a command's output ("agent_blocked"), if it failed
+    static func herdrError(_ output: String) -> String? {
+        guard let start = output.firstIndex(of: "{"),
+              let json = try? JSONSerialization.jsonObject(with: Data(output[start...].utf8)) as? [String: Any],
+              let error = json["error"] as? [String: Any] else { return nil }
+        return error["code"] as? String ?? error["message"] as? String ?? "error"
+    }
+
     /// Ids go into shell scripts, so allow only plain characters
-    private static func isSafe(_ id: String) -> Bool {
-        !id.isEmpty && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) }
+    private static func isSafe(_ id: String, extra: String = "") -> Bool {
+        !id.isEmpty && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0) || extra.contains($0)) }
     }
 
     /// The output of `find`
-    static func parseAgents(_ output: String) -> [ClaudeAgent] {
-        var agents: [ClaudeAgent] = []
+    static func parse(_ output: String) -> ClaudeScan {
+        var scan = ClaudeScan()
         var titles: [String: String] = [:]
-        var focused: Set<Int> = []
+        var panes: [Int: String] = [:]
+        var herdrStatus: [String: String] = [:]
         for line in output.split(separator: "\n") {
             let parts = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
             switch parts.first {
@@ -156,7 +276,7 @@ enum ClaudeScripts {
                 guard parts.count >= 2,
                       let json = try? JSONSerialization.jsonObject(with: Data(parts[1].utf8)) as? [String: Any],
                       let pid = json["pid"] as? Int, let sessionId = json["sessionId"] as? String else { continue }
-                agents.append(ClaudeAgent(
+                scan.agents.append(ClaudeAgent(
                     pid: pid,
                     sessionId: sessionId,
                     directory: json["cwd"] as? String ?? "",
@@ -165,18 +285,150 @@ enum ClaudeScripts {
             case "title"?:
                 guard parts.count == 3, let title = ClaudeTranscript.field(parts[2])?.value else { continue }
                 titles[String(parts[1])] = title
-            case "focus"?:
-                if parts.count >= 2, let pid = Int(parts[1]) { focused.insert(pid) }
+            case "mux"?:
+                if parts.count >= 2 { scan.multiplexers.append(String(parts[1])) }
+            case "herdr"?:
+                guard parts.count >= 2,
+                      let json = try? JSONSerialization.jsonObject(with: Data(parts[1].utf8)) as? [String: Any],
+                      let agents = (json["result"] as? [String: Any])?["agents"] as? [[String: Any]] else { continue }
+                for agent in agents {
+                    if let pane = agent["pane_id"] as? String, let status = agent["agent_status"] as? String {
+                        herdrStatus[pane] = status
+                    }
+                }
+            case "pane"?:
+                if parts.count == 3, let pid = Int(parts[1]) { panes[pid] = String(parts[2]) }
+            case "visible"?:
+                if parts.count == 3, let data = Data(base64Encoded: String(parts[2])) {
+                    scan.paneScreens[String(parts[1])] = String(decoding: data, as: UTF8.self)
+                }
             default:
                 continue
             }
         }
-        for i in agents.indices {
-            agents[i].title = titles[agents[i].sessionId]
-            agents[i].focused = focused.contains(agents[i].pid)
+        scan.multiplexers.sort()
+        for i in scan.agents.indices {
+            let pid = scan.agents[i].pid
+            scan.agents[i].title = titles[scan.agents[i].sessionId]
+            if let pane = panes[pid] {
+                scan.agents[i].route = .herdr(pane: pane)
+                scan.agents[i].herdrStatus = herdrStatus[pane]
+            } else if let multiplexer = scan.multiplexers.first {
+                scan.agents[i].route = .unsupported(multiplexer: multiplexer)
+            }
         }
         // Oldest first, so numbers stay put while Claudes come and go
-        return agents.sorted { $0.pid < $1.pid }
+        scan.agents.sort { $0.pid < $1.pid }
+        return scan
+    }
+}
+
+// MARK: - Watching
+
+/// Notices when a Claude conversation finishes its turn or stops at a menu, from
+/// status checks a few seconds apart. A new state counts once two checks in a row
+/// agree, so a flicker mid-turn says nothing. The first check of a conversation only
+/// records where it stands.
+struct ClaudeWatch {
+    enum State: Equatable {
+        case working, idle, blocked
+    }
+
+    enum Change: Equatable {
+        /// working → idle
+        case finished
+        /// anything → waiting at a menu or question
+        case blocked
+    }
+
+    struct Event: Equatable {
+        let key: String
+        let change: Change
+    }
+
+    private var confirmed: [String: State] = [:]
+    private var candidate: [String: State] = [:]
+
+    /// Herdr's view when there is one (it knows about menus), else Claude's own
+    static func state(of agent: ClaudeAgent) -> State {
+        switch agent.herdrStatus {
+        case "blocked"?: return .blocked
+        case "working"?: return .working
+        case "idle"?, "done"?: return .idle
+        default: return agent.status == "busy" ? .working : .idle
+        }
+    }
+
+    /// Feed one round of checks: every conversation seen, by a stable key
+    mutating func update(_ states: [String: State]) -> [Event] {
+        var events: [Event] = []
+        for (key, state) in states {
+            guard let current = confirmed[key] else {
+                confirmed[key] = state
+                continue
+            }
+            if state == current {
+                candidate[key] = nil
+            } else if candidate[key] == state {
+                candidate[key] = nil
+                confirmed[key] = state
+                switch (current, state) {
+                case (.working, .idle): events.append(Event(key: key, change: .finished))
+                case (_, .blocked): events.append(Event(key: key, change: .blocked))
+                default: break
+                }
+            } else {
+                candidate[key] = state
+            }
+        }
+        // Conversations that ended
+        for key in confirmed.keys where states[key] == nil {
+            confirmed[key] = nil
+            candidate[key] = nil
+        }
+        return events.sorted { $0.key < $1.key }
+    }
+}
+
+// MARK: - Keys
+
+/// Keys the voice agent can press. The names are Herdr's, so they pass straight to
+/// `herdr agent send-keys`; the bytes are what a terminal sends for them.
+enum VoiceKeys {
+    static let bytes: [String: String] = {
+        var keys: [String: String] = [
+            "enter": "\r", "esc": "\u{1B}", "tab": "\t", "shift+tab": "\u{1B}[Z",
+            "up": "\u{1B}[A", "down": "\u{1B}[B", "right": "\u{1B}[C", "left": "\u{1B}[D",
+            "space": " ", "backspace": "\u{7F}", "ctrl+c": "\u{03}", "y": "y", "n": "n",
+        ]
+        for digit in 0...9 { keys["\(digit)"] = "\(digit)" }
+        return keys
+    }()
+
+    private static let aliases: [String: String] = [
+        "escape": "esc", "return": "enter", "ctrl-c": "ctrl+c", "control+c": "ctrl+c", "^c": "ctrl+c",
+        "shift-tab": "shift+tab", "backtab": "shift+tab", "arrow-up": "up", "arrow-down": "down",
+    ]
+
+    /// "1", "1 enter", "Escape, ctrl-c" → key names. Fails with the first unknown key.
+    static func parse(_ input: String) -> Result<[String], UnknownKey> {
+        var keys: [String] = []
+        for word in input.lowercased().split(whereSeparator: { $0 == " " || $0 == "," }) {
+            let name = aliases[String(word)] ?? String(word)
+            guard bytes[name] != nil else { return .failure(UnknownKey(name: String(word))) }
+            keys.append(name)
+        }
+        return .success(keys)
+    }
+
+    struct UnknownKey: Error, Equatable {
+        let name: String
+    }
+
+    /// A prompt as a bracketed paste, so a leading `?`, `!` or `#` is text rather than
+    /// a Claude Code shortcut. Escapes are dropped so the text can't end the paste early.
+    static func paste(_ text: String) -> String {
+        "\u{1B}[200~" + text.replacingOccurrences(of: "\u{1B}", with: "") + "\u{1B}[201~"
     }
 }
 

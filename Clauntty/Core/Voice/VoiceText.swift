@@ -276,8 +276,10 @@ enum VoiceTabResolver {
 // MARK: - Cost
 
 /// Estimated cost of a session. xAI reports no usage over the socket, so this uses
-/// the published prices (checked 2026-10-08). The pricing page doesn't define a
-/// "text input", so every text item we send counts as one: the estimate leans high.
+/// the published prices (checked 2026-10-08). A "text input" is a text message the
+/// app adds to the conversation (the greeting cue, the one-minute warning); results
+/// of the model's tool calls aren't billed. Checked against the xAI console: 12
+/// sessions with 12 messages and 33 tool results were billed 10 text inputs.
 struct VoiceCost: Equatable {
     static let dollarsPerMinute = 0.08
     static let dollarsPerTextInput = 0.004
