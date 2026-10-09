@@ -12,8 +12,8 @@ final class VoiceAgent: ObservableObject {
 
     static let model = "grok-voice-think-fast-2.0"
     /// xAI bills connection time, silence included; cap every session
-    static let maxDuration: TimeInterval = 15 * 60
-    static let warningAt: TimeInterval = 14 * 60
+    static let maxDuration: TimeInterval = 30 * 60
+    static let warningAt: TimeInterval = 29 * 60
     /// Optional hang-up after this long without anyone talking
     static let idleLimit: TimeInterval = 3 * 60
 
@@ -52,6 +52,9 @@ final class VoiceAgent: ObservableObject {
     private var timer: Timer?
     private var openedAt: Date?
     private var lastActivity = Date()
+    /// When the user last spoke. Only this counts for the idle hang-up: the model
+    /// announcing finished turns into an empty room shouldn't keep a session alive.
+    private var lastUserSpeech = Date()
     private var sentConfig = false
     private var configured = false
     private var warned = false
@@ -118,6 +121,7 @@ final class VoiceAgent: ObservableObject {
         endRequested = false
         agentEntryId = nil
         lastActivity = Date()
+        lastUserSpeech = Date()
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
         Task {
@@ -278,11 +282,13 @@ final class VoiceAgent: ObservableObject {
             audio?.flush()
             agentEntryId = nil
             lastActivity = Date()
+            lastUserSpeech = Date()
             userSpeaking = true
             phase = .listening
 
         case "input_audio_buffer.speech_stopped":
             lastActivity = Date()
+            lastUserSpeech = Date()
             userSpeaking = false
             phase = .thinking
 
@@ -382,7 +388,7 @@ final class VoiceAgent: ObservableObject {
 
         let elapsed = cost.seconds
         if elapsed >= Self.maxDuration {
-            end(reason: "Reached the 15-minute limit")
+            end(reason: "Reached the 30-minute limit")
             return
         }
         if elapsed >= Self.warningAt && !warned {
@@ -390,8 +396,8 @@ final class VoiceAgent: ObservableObject {
             say("[Clauntty: one minute left in this voice session. Tell the user in a few words.]")
         }
         if VoiceSettings.idleHangUp, configured, !responseActive, toolsRunning == 0, !(audio?.isPlaying ?? false),
-           Date().timeIntervalSince(lastActivity) >= Self.idleLimit {
-            end(reason: "No one talked for 3 minutes")
+           Date().timeIntervalSince(lastUserSpeech) >= Self.idleLimit {
+            end(reason: "Nothing said for 3 minutes")
             return
         }
 
@@ -1248,7 +1254,7 @@ final class VoiceAgent: ObservableObject {
     read it unless they ask. If the user is busy with something else, keep it to one \
     short sentence.
     - When the user says goodbye or asks you to hang up, say a brief goodbye and call end_session.
-    - Sessions end after 15 minutes.
+    - Sessions end after 30 minutes.
     """
 
     private static let tabParameter: [String: Any] = [

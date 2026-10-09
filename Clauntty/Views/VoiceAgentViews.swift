@@ -178,7 +178,7 @@ struct VoiceSettingsSection: View {
         } header: {
             Text("Voice Agent")
         } footer: {
-            Text("Talk to Grok about your tabs with the waveform button at the top left. Clauntty connects to xAI directly with your key. Sessions end after 15 minutes; xAI charges about $0.08 a minute.")
+            Text("Talk to Grok about your tabs with the waveform button at the top left. Clauntty connects to xAI directly with your key. Sessions end after 30 minutes; xAI charges about $0.08 a minute.")
         }
     }
 
