@@ -246,6 +246,13 @@ class Session: ObservableObject, Identifiable {
     /// Whether we're pre-fetching after idle (need to re-pause after receiving data)
     private var isPrefetchingOnIdle: Bool = false
 
+    /// When the last idle pre-fetch started. rtach sends SIGWINCH on every resume, so a
+    /// pre-fetch makes full-screen programs repaint, and the repaint ends in another idle
+    /// 2 s later. Pre-fetching on that one too looped every ~2.5 s for as long as the tab
+    /// stayed in the background (a Herdr attach redraws ~4 KB each time).
+    private var lastPrefetchAt: Date?
+    private let prefetchCooldown: TimeInterval = 10
+
     /// Whether we want to pause but are waiting for framed mode to be established
     private var pendingPause: Bool = false
 
@@ -1089,8 +1096,12 @@ extension Session: RtachClient.RtachSessionDelegate {
 
             // Pre-fetch buffered data if we're paused
             // This ensures instant tab switch by getting data before user activates tab
-            if self.isPaused {
+            // Not on the idle that our own pre-fetch's repaint caused: anything skipped
+            // is still flushed when the tab is shown
+            if self.isPaused,
+               self.lastPrefetchAt.map({ Date().timeIntervalSince($0) > self.prefetchCooldown }) ?? true {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pre-fetching buffered data on idle")
+                self.lastPrefetchAt = Date()
                 self.isPrefetchingOnIdle = true
                 self.rtachProtocol.sendResume()
                 // After receiving buffered data, we'll re-pause in processTerminalData
