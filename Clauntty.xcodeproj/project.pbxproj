@@ -20,6 +20,7 @@
 		3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */; };
 		431B348146F6153B8D328E91 /* PersistedTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */; };
 		570C2F179E1D3237D5566647 /* TabBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DDF3950FD48E767BF27175 /* TabBubble.swift */; };
+		A3DD5A3D2EFE126521BD8AF4 /* TabPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAE48ED4FB13F83D75BD4F8 /* TabPanes.swift */; };
 		5AE31ABCC791B62288ED04F5 /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A3E2A64FA9B3B72703629BB /* ThemeManager.swift */; };
 		70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297EA9CE961BFF920036934A /* SelectionHandleView.swift */; };
 		733936A7CBE2B60407C98651 /* WebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */; };
@@ -57,6 +58,8 @@
 		C0000015 /* KeyboardAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000015 /* KeyboardAccessoryView.swift */; };
 		C0000016 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000016 /* Session.swift */; };
 		C0000017 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000017 /* SessionManager.swift */; };
+		F770B64917105CC24DE54F64 /* HerdrSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D45A16CD35DCF9ECDE2129 /* HerdrSnapshot.swift */; };
+		58EC7CDEAC04D43407F0D433 /* SessionManager+Herdr.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64B1BF3C75529CDC4A628C8 /* SessionManager+Herdr.swift */; };
 		C0000018 /* SessionTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000018 /* SessionTabBar.swift */; };
 		C0000019 /* RtachDeployer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000019 /* RtachDeployer.swift */; };
 		C0000020 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; };
@@ -144,6 +147,7 @@
 		A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyBridgeTests.swift; path = ../Tests/ClaunttyTests/GhosttyBridgeTests.swift; sourceTree = "<group>"; };
 		ABF7282BEC77B8743E5A14F7 /* Themes */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
 		B6DDF3950FD48E767BF27175 /* TabBubble.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TabBubble.swift; sourceTree = "<group>"; };
+		CCAE48ED4FB13F83D75BD4F8 /* TabPanes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TabPanes.swift; sourceTree = "<group>"; };
 		BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTab.swift; sourceTree = "<group>"; };
 		BCA3DCC2DFC28098F2BC7C70 /* LiquidGlassTabBarRepresentable.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquidGlassTabBarRepresentable.swift; sourceTree = "<group>"; };
 		C1000000 /* Clauntty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -165,6 +169,8 @@
 		C1000015 /* KeyboardAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessoryView.swift; sourceTree = "<group>"; };
 		C1000016 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		C1000017 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
+		C9D45A16CD35DCF9ECDE2129 /* HerdrSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HerdrSnapshot.swift"; sourceTree = "<group>"; };
+		C64B1BF3C75529CDC4A628C8 /* SessionManager+Herdr.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Herdr.swift"; sourceTree = "<group>"; };
 		C1000018 /* SessionTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTabBar.swift; sourceTree = "<group>"; };
 		C1000019 /* RtachDeployer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RtachDeployer.swift; sourceTree = "<group>"; };
 		C1000020 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
@@ -398,6 +404,8 @@
 			children = (
 				C1000016 /* Session.swift */,
 				C1000017 /* SessionManager.swift */,
+				C9D45A16CD35DCF9ECDE2129 /* HerdrSnapshot.swift */,
+				C64B1BF3C75529CDC4A628C8 /* SessionManager+Herdr.swift */,
 				C1000023 /* WordList.swift */,
 				BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */,
 				CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */,
@@ -454,6 +462,7 @@
 			isa = PBXGroup;
 			children = (
 				B6DDF3950FD48E767BF27175 /* TabBubble.swift */,
+				CCAE48ED4FB13F83D75BD4F8 /* TabPanes.swift */,
 				90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */,
 				620BF993225325AE2636ED6D /* ExpandedTabOverlay.swift */,
 				66B1CA5D0C2290DD8C5A6A5B /* FullTabSelector.swift */,
@@ -642,6 +651,8 @@
 				C0000015 /* KeyboardAccessoryView.swift in Sources */,
 				C0000016 /* Session.swift in Sources */,
 				C0000017 /* SessionManager.swift in Sources */,
+				F770B64917105CC24DE54F64 /* HerdrSnapshot.swift in Sources */,
+				58EC7CDEAC04D43407F0D433 /* SessionManager+Herdr.swift in Sources */,
 				C0000018 /* SessionTabBar.swift in Sources */,
 				80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */,
 				C0000023 /* WordList.swift in Sources */,
@@ -665,6 +676,7 @@
 				C0000027 /* SpeechManager.swift in Sources */,
 				70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */,
 				570C2F179E1D3237D5566647 /* TabBubble.swift in Sources */,
+				A3DD5A3D2EFE126521BD8AF4 /* TabPanes.swift in Sources */,
 				3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */,
 				F9C5C4A2CF04EB4C6A929250 /* ExpandedTabOverlay.swift in Sources */,
 				EE2DD46DA05C44309BB94180 /* FullTabSelector.swift in Sources */,

@@ -286,6 +286,12 @@ struct TerminalView: View {
         session.initialTerminalSize = (rows: Int(size.rows), columns: Int(size.columns))
         Logger.clauntty.debugOnly("Setting initial terminal size: \(size.columns)x\(size.rows)")
 
+        // A Herdr pane connects only when shown: its attach holds the pane at the phone's
+        // size on the laptop. Switching to it connects it.
+        if session.herdrTabId != nil, sessionManager.activeTab != .terminal(session.id) {
+            return
+        }
+
         // Start connection via SessionManager
         Task {
             do {

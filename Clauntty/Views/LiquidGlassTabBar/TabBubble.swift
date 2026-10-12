@@ -41,10 +41,34 @@ class TabBubble: UIView {
         // In expanded state for web tabs, show the URL
         if isExpanded && !expandedTitle.isEmpty {
             titleLabel.text = expandedTitle
+        } else if !isExpanded, let rollingTitle {
+            titleLabel.text = rollingTitle
         } else {
             titleLabel.text = title
         }
     }
+
+    /// Herdr panes in this session (empty for plain terminals and web tabs)
+    private(set) var panes: [TabPane] = []
+    private(set) var activePaneIndex = 0
+
+    private var hasPanes: Bool { !panes.isEmpty }
+    private var hasMultiplePanes: Bool { panes.count > 1 }
+
+    /// Session tabs with panes show the current pane's agent state instead of the
+    /// connection dot. It comes from Herdr, so it holds before a pane is attached too;
+    /// only a failed session shows its state.
+    private var showsPaneStatus: Bool {
+        guard hasPanes, case .terminal(let state) = tabType else { return false }
+        switch state {
+        case .error, .remotelyDeleted: return false
+        default: return true
+        }
+    }
+
+    /// Pane title shown briefly in the collapsed tab after switching panes
+    private var rollingTitle: String?
+    private var rollBackWork: DispatchWorkItem?
     private func syncURLTextFieldIfNeeded() {
         guard !isEditingURL else { return }
         urlTextField.text = webPath
@@ -99,6 +123,11 @@ class TabBubble: UIView {
     var onReload: (() -> Void)?
     var onShare: (() -> Void)?
     var onNavigate: ((String) -> Void)?  // Called when user enters a new path
+
+    // Pane callbacks
+    var onPaneStep: ((Int) -> Void)?  // +1 next pane (swipe down), -1 previous (swipe up)
+    var onPaneSelected: ((Int) -> Void)?  // Chip tapped in the expanded tab
+    var onPaneToggle: (() -> Void)?  // Double tap: back to the previous pane
 
     // MARK: - Constants
 
@@ -212,6 +241,38 @@ class TabBubble: UIView {
         label.alpha = 0
         return label
     }()
+
+    // MARK: - Pane Views
+
+    /// Agent state of the current pane, in place of the status dot
+    private let paneStatusIndicator: PaneStatusIndicator = {
+        let view = PaneStatusIndicator()
+        view.isHidden = true
+        return view
+    }()
+
+    /// One dot per pane on the collapsed tab's right edge
+    private let paneDotsView: PaneDotsView = {
+        let view = PaneDotsView()
+        view.isHidden = true
+        return view
+    }()
+
+    /// Holds the session menu; terminal tabs open it instead of expanding
+    private let menuButton: PassthroughMenuButton = {
+        let button = PassthroughMenuButton(type: .custom)
+        button.showsMenuAsPrimaryAction = true
+        button.isHidden = true
+        return button
+    }()
+
+    private var isTerminal: Bool {
+        if case .terminal = tabType { return true }
+        return false
+    }
+
+    /// Terminal tabs open the session menu; web tabs expand (they need the URL field)
+    var usesMenu: Bool { isTerminal }
 
     // MARK: - Top Row Buttons (expanded)
 
@@ -338,6 +399,12 @@ class TabBubble: UIView {
         connectionLabel.translatesAutoresizingMaskIntoConstraints = true
         containerEffectView.contentView.addSubview(connectionLabel)
 
+        // Pane views
+        containerEffectView.contentView.addSubview(paneStatusIndicator)
+        containerEffectView.contentView.addSubview(paneDotsView)
+        addSubview(menuButton)
+        titleLabel.clipsToBounds = true  // Keeps the title roll inside the label
+
         // Setup buttons
         setupButtons()
         setupConstraints()
@@ -372,16 +439,37 @@ class TabBubble: UIView {
         ])
     }
 
+    private lazy var tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    private lazy var doubleTapGesture: UITapGestureRecognizer = {
+        let gesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
+        gesture.numberOfTapsRequired = 2
+        return gesture
+    }()
+    private lazy var panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+    private lazy var longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
+
     private func setupGestures() {
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        addGestureRecognizer(tap)
+        tapGesture.delegate = self
+        addGestureRecognizer(tapGesture)
 
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
-        longPress.minimumPressDuration = 0.3  // Quick long press
-        addGestureRecognizer(longPress)
+        // Only active when the session has several panes (see gestureRecognizerShouldBegin),
+        // so single taps elsewhere don't wait for it
+        doubleTapGesture.delegate = self
+        addGestureRecognizer(doubleTapGesture)
 
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
-        addGestureRecognizer(pan)
+        longPressGesture.minimumPressDuration = 0.3  // Quick long press
+        longPressGesture.delegate = self
+        addGestureRecognizer(longPressGesture)
+
+        // Terminal tabs: press and hold opens the session menu; slide to a pane and let go
+        addInteraction(UIContextMenuInteraction(delegate: self))
+
+        panGesture.delegate = self
+        addGestureRecognizer(panGesture)
+    }
+
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        onPaneToggle?()
     }
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -407,6 +495,16 @@ class TabBubble: UIView {
                 onSwipeLeft?()
             }
         } else {
+            // Vertical swipe on the active tab steps through its panes
+            if isActiveTab && hasMultiplePanes && abs(translation.y) > abs(translation.x) {
+                if translation.y > 20 || velocity.y > 400 {
+                    onPaneStep?(1)
+                } else if translation.y < -20 || velocity.y < -400 {
+                    onPaneStep?(-1)
+                }
+                return
+            }
+
             // Collapsed state - use collapsed callbacks
             if translation.x > threshold || velocity.x > 500 {
                 onSwipeRightCollapsed?()
@@ -514,6 +612,14 @@ class TabBubble: UIView {
 
         let iconSize: CGFloat = isWeb ? 14 : statusSize  // Globe is 14, status dot is 8
 
+        // Pane dots sit under the title; the title moves up to make room
+        let dotsLift: CGFloat = hasMultiplePanes ? 4 : 0
+        if hasMultiplePanes {
+            paneDotsView.frame = CGRect(x: horizontalPadding, y: height - 10, width: width - horizontalPadding * 2, height: PaneDotsView.height)
+        } else {
+            paneDotsView.frame = .zero
+        }
+
         // Calculate actual text width for proper centering
         let maxTitleWidth = width - iconSize - 6 - horizontalPadding * 2
         let actualTitleSize = titleLabel.sizeThatFits(CGSize(width: maxTitleWidth, height: height))
@@ -523,7 +629,8 @@ class TabBubble: UIView {
         let contentWidth = iconSize + gap + titleWidth
         let startX = (width - contentWidth) / 2
 
-        statusView.frame = CGRect(x: startX, y: centerY - statusSize / 2, width: statusSize, height: statusSize)
+        statusView.frame = CGRect(x: startX, y: centerY - dotsLift - statusSize / 2, width: statusSize, height: statusSize)
+        paneStatusIndicator.frame = statusView.frame.insetBy(dx: -1, dy: -1)
         // Center waiting ring on status (12x12 ring around 8x8 status)
         let ringSize: CGFloat = 12
         waitingRingView.frame = CGRect(
@@ -532,10 +639,10 @@ class TabBubble: UIView {
             width: ringSize,
             height: ringSize
         )
-        globeImageView.frame = CGRect(x: startX, y: centerY - 7, width: 14, height: 14)
+        globeImageView.frame = CGRect(x: startX, y: centerY - dotsLift - 7, width: 14, height: 14)
 
         let titleX = startX + iconSize + gap
-        titleLabel.frame = CGRect(x: titleX, y: 0, width: titleWidth, height: height)
+        titleLabel.frame = CGRect(x: titleX, y: -dotsLift, width: titleWidth, height: height)
         titleLabel.textAlignment = .left
 
         // Hide expanded elements
@@ -584,6 +691,8 @@ class TabBubble: UIView {
         // Status/globe next to left button
         let statusX = leftActionButton.frame.maxX + 8
         statusView.frame = CGRect(x: statusX, y: topRowCenterY - statusSize / 2, width: statusSize, height: statusSize)
+        paneStatusIndicator.frame = statusView.frame.insetBy(dx: -1, dy: -1)
+        paneDotsView.frame = .zero
         // Center waiting ring on status in expanded state
         let expandedRingSize: CGFloat = 12
         waitingRingView.frame = CGRect(
@@ -693,6 +802,8 @@ class TabBubble: UIView {
     /// Hide content before glass expansion animation
     func hideContentForExpansion() {
         statusView.alpha = 0
+        paneStatusIndicator.alpha = 0
+        paneDotsView.alpha = 0
         globeImageView.alpha = 0
         titleLabel.alpha = 0
     }
@@ -729,6 +840,8 @@ class TabBubble: UIView {
         shareButton.alpha = 0
         portPrefixLabel.alpha = 0
         urlTextField.alpha = 0
+        paneStatusIndicator.alpha = 0
+        paneDotsView.alpha = 0
     }
 
     /// Show expanded content with pop animation (called after scale animation completes)
@@ -778,7 +891,7 @@ class TabBubble: UIView {
 
         // Get views to animate (rightActionButton is ports for terminal, reload for web)
         let expandedViews: [UIView] = isTerminal
-            ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, titleLabel]
+            ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, paneStatusIndicator, titleLabel]
             : [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, backButton, forwardButton, shareButton, portPrefixLabel, urlTextField, globeImageView]
 
         // Set initial state
@@ -840,7 +953,7 @@ class TabBubble: UIView {
 
             // Show all expanded views immediately
             let expandedViews: [UIView] = isTerminal
-                ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, titleLabel]
+                ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, paneStatusIndicator, titleLabel]
                 : [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, backButton, forwardButton, shareButton, portPrefixLabel, urlTextField, globeImageView]
 
             for view in expandedViews {
@@ -868,7 +981,7 @@ class TabBubble: UIView {
 
         // Get views to animate
         let collapsedViews: [UIView] = isTerminal
-            ? [statusView, titleLabel]
+            ? [statusView, paneStatusIndicator, paneDotsView, titleLabel]
             : [globeImageView, titleLabel]
 
         // Set initial state
@@ -926,7 +1039,7 @@ class TabBubble: UIView {
             // For terminal: show title in top row, connection label below, ports button
             // For web: show globe + URL components
             let expandedViews: [UIView] = isTerminal
-                ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, titleLabel]
+                ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, paneStatusIndicator, titleLabel]
                 : [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, backButton, forwardButton, shareButton, portPrefixLabel, urlTextField, globeImageView]
 
             // Set initial state: scaled down and invisible
@@ -959,7 +1072,7 @@ class TabBubble: UIView {
 
             // Collapsed content - start scaled down
             let collapsedViews: [UIView] = isTerminal
-                ? [statusView, titleLabel]
+                ? [statusView, paneStatusIndicator, paneDotsView, titleLabel]
                 : [globeImageView, titleLabel]
 
             for view in collapsedViews {
@@ -1015,6 +1128,98 @@ class TabBubble: UIView {
         updateGlobeColor()
     }
 
+    /// Set the session's panes. Call after configure(session:), which resets the status dot.
+    func setPanes(_ panes: [TabPane], activeIndex: Int) {
+        self.panes = panes
+        activePaneIndex = panes.isEmpty ? 0 : min(max(activeIndex, 0), panes.count - 1)
+
+        paneDotsView.configure(panes: panes, activeIndex: activePaneIndex)
+        paneDotsView.isHidden = !hasMultiplePanes
+
+        let showPane = showsPaneStatus
+        paneStatusIndicator.isHidden = !showPane
+        if case .terminal = tabType {
+            statusView.isHidden = showPane
+        }
+        if showPane {
+            paneStatusIndicator.status = panes[activePaneIndex].status
+        }
+        updateWaitingRing()
+        updateMenu()
+        setNeedsLayout()
+    }
+
+    /// Rebuild the session menu with the current host and panes
+    private func updateMenu() {
+        guard usesMenu else {
+            menuButton.menu = nil
+            return
+        }
+        menuButton.menu = SessionTabMenu.make(
+            title: connectionInfo,
+            panes: panes,
+            activeIndex: activePaneIndex,
+            onSelectPane: { [weak self] index in self?.onPaneSelected?(index) },
+            onTabs: { [weak self] in self?.onTabs?() },
+            onNewTab: { [weak self] in self?.onNewTab?() },
+            onPorts: { [weak self] in self?.onPorts?() },
+            onClose: { [weak self] in self?.onDisconnect?() }
+        )
+    }
+
+    /// Open the session menu from the tab
+    func presentMenu() {
+        menuButton.frame = bounds
+        menuButton.isHidden = false
+        if #available(iOS 17.4, *) {
+            menuButton.performPrimaryAction()
+        }
+    }
+
+    /// Roll the collapsed title to the new pane's name, hold it, then settle back
+    /// to the session name
+    func showPaneChange(direction: Int) {
+        guard !isExpanded, panes.indices.contains(activePaneIndex) else { return }
+        rollBackWork?.cancel()
+        rollingTitle = panes[activePaneIndex].title
+        // Swiping down brings the next pane in from the top, like an odometer
+        rollTitle(subtype: direction > 0 ? .fromTop : .fromBottom)
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.rollingTitle = nil
+            self.rollTitle(subtype: nil)
+        }
+        rollBackWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: work)
+    }
+
+    /// Nudge the tab when there's no pane further in that direction
+    func bumpPaneEdge(direction: Int) {
+        let offset: CGFloat = direction > 0 ? 4 : -4
+        UIView.animate(withDuration: 0.08, animations: {
+            self.transform = CGAffineTransform(translationX: 0, y: offset)
+        }, completion: { _ in
+            UIView.animate(withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.45, initialSpringVelocity: 0) {
+                self.transform = .identity
+            }
+        })
+    }
+
+    /// Change the title with a push (pane change) or a fade (back to the session name)
+    private func rollTitle(subtype: CATransitionSubtype?) {
+        let transition = CATransition()
+        transition.type = subtype == nil ? .fade : .push
+        transition.subtype = subtype
+        transition.duration = subtype == nil ? 0.3 : 0.22
+        transition.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        titleLabel.layer.add(transition, forKey: "paneRoll")
+        updateTitleLabel()
+        UIView.animate(withDuration: 0.22) {
+            self.layoutContent()
+        }
+    }
+
     private func updateStatusColor() {
         switch tabType {
         case .terminal(let state):
@@ -1037,7 +1242,8 @@ class TabBubble: UIView {
 
     private func updateWaitingRing() {
         // Only show ring for non-active tabs waiting for input
-        let shouldShowRing = isWaitingForInput && !isActiveTab
+        // Sessions with panes show agent state on the pane indicator instead
+        let shouldShowRing = isWaitingForInput && !isActiveTab && !hasPanes
 
         if shouldShowRing {
             waitingRingView.isHidden = false
@@ -1110,6 +1316,27 @@ class TabBubble: UIView {
     }
 }
 
+// MARK: - UIGestureRecognizerDelegate
+
+extension TabBubble: UIGestureRecognizerDelegate {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === doubleTapGesture {
+            return isActiveTab && hasMultiplePanes && !isExpanded
+        }
+        if gestureRecognizer === longPressGesture {
+            // The context menu handles press and hold on terminal tabs
+            return !usesMenu
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // A single tap waits to see if it's a double tap only when double tap means something
+        gestureRecognizer === tapGesture && otherGestureRecognizer === doubleTapGesture
+            && isActiveTab && hasMultiplePanes && !isExpanded
+    }
+}
+
 // MARK: - UITextFieldDelegate
 
 extension TabBubble: UITextFieldDelegate {
@@ -1131,5 +1358,22 @@ extension TabBubble: UITextFieldDelegate {
     func textFieldDidEndEditing(_ textField: UITextField) {
         isEditingURL = false
         syncURLTextFieldIfNeeded()
+    }
+}
+
+// MARK: - UIContextMenuInteractionDelegate
+
+extension TabBubble: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        guard usesMenu, isActiveTab, !isExpanded, let menu = menuButton.menu else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu }
+    }
+
+    /// Lift the tab itself, clipped to its pill, rather than a rectangular snapshot
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration, highlightPreviewForItemWithIdentifier identifier: any NSCopying) -> UITargetedPreview? {
+        let parameters = UIPreviewParameters()
+        parameters.visiblePath = UIBezierPath(roundedRect: bounds, cornerRadius: glassCornerRadius)
+        parameters.backgroundColor = .clear
+        return UITargetedPreview(view: self, parameters: parameters)
     }
 }

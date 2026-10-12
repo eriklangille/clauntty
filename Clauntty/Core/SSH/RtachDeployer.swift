@@ -143,10 +143,11 @@ class RtachDeployer {
         return "\(Self.remoteBinPath) --proxy -A -C \(Self.clientId) \(sessionPath) $SHELL"
     }
 
-    /// Get the shell command for rtach (assumes already deployed)
-    func shellCommand(sessionId: String = "default") -> String {
+    /// Get the shell command for rtach (assumes already deployed). `program` is what a
+    /// new session runs: the login shell, or e.g. a Herdr pane's attach script.
+    func shellCommand(sessionId: String = "default", program: String = "$SHELL") -> String {
         let sessionPath = "\(Self.remoteSessionsPath)/\(sessionId)"
-        return "\(Self.remoteBinPath) --proxy -A -C \(Self.clientId) \(sessionPath) $SHELL"
+        return "\(Self.remoteBinPath) --proxy -A -C \(Self.clientId) \(sessionPath) \(program)"
     }
 
     /// List existing rtach sessions on the remote server

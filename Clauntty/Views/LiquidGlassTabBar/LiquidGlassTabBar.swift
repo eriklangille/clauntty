@@ -9,7 +9,8 @@ enum TabItem: Identifiable, Equatable {
 
     nonisolated var id: UUID {
         switch self {
-        case .terminal(let session): return session.id
+        // Every pane of a Herdr session is one tab
+        case .terminal(let session): return session.herdrTabId ?? session.id
         case .web(let webTab): return webTab.id
         }
     }
@@ -59,11 +60,22 @@ class LiquidGlassTabBar: UIView {
     var onWebShare: ((TabItem) -> Void)?
     var onWebNavigate: ((TabItem, String) -> Void)?  // Tab + path to navigate to
 
+    /// Herdr panes in a session tab (empty when the tab has none), and which one is
+    /// shown. A nil index leaves it to the bar (fake panes in the simulator).
+    var paneProvider: ((TabItem) -> (panes: [TabPane], activeIndex: Int?))?
+
+    /// Called when the user switches panes within a session tab
+    var onPaneSelected: ((TabItem, TabPane) -> Void)?
+
     // MARK: - State
 
     private var allTabs: [TabItem] = []
     private var activeTabId: UUID?
     private var expandedTabId: UUID?
+
+    /// Selected pane per session tab, and the one before it (for double tap)
+    private var activePaneIndex: [UUID: Int] = [:]
+    private var previousPaneIndex: [UUID: Int] = [:]
 
     // MARK: - Constants
 
@@ -456,6 +468,13 @@ class LiquidGlassTabBar: UIView {
         let nextTab = allTabs[currentIndex + 1]
         triggerHaptic()
 
+        // Terminal tabs open a menu instead of expanding, so land on them collapsed
+        if case .terminal = nextTab {
+            collapseExpanded()
+            onTabSelected?(nextTab)
+            return
+        }
+
         // Mark that we're transitioning
         isExpandedTransitioning = true
         transitionToNext = true
@@ -481,6 +500,13 @@ class LiquidGlassTabBar: UIView {
 
         let previousTab = allTabs[currentIndex - 1]
         triggerHaptic()
+
+        // Terminal tabs open a menu instead of expanding, so land on them collapsed
+        if case .terminal = previousTab {
+            collapseExpanded()
+            onTabSelected?(previousTab)
+            return
+        }
 
         // Mark that we're transitioning
         isExpandedTransitioning = true
@@ -832,6 +858,7 @@ class LiquidGlassTabBar: UIView {
             case .web(let webTab):
                 existing.configure(webTab: webTab)
             }
+            applyPanes(to: existing, for: tab)
             return existing
         }
 
@@ -843,6 +870,29 @@ class LiquidGlassTabBar: UIView {
             bubble.configure(session: session)
         case .web(let webTab):
             bubble.configure(webTab: webTab)
+        }
+        applyPanes(to: bubble, for: tab)
+
+        // Pane switching within the session
+        bubble.onPaneStep = { [weak self] step in
+            guard let self, let bubble = self.bubbleViews[tab.id] else { return }
+            let target = bubble.activePaneIndex + step
+            if bubble.panes.indices.contains(target) {
+                self.selectPane(target, in: tab)
+            } else {
+                bubble.bumpPaneEdge(direction: step)
+            }
+        }
+
+        bubble.onPaneSelected = { [weak self] index in
+            self?.selectPane(index, in: tab)
+        }
+
+        bubble.onPaneToggle = { [weak self] in
+            guard let self, let bubble = self.bubbleViews[tab.id] else { return }
+            let current = bubble.activePaneIndex
+            let previous = self.previousPaneIndex[tab.id] ?? (current + 1) % bubble.panes.count
+            self.selectPane(previous, in: tab)
         }
 
         // Tap handler (collapsed state)
@@ -939,10 +989,33 @@ class LiquidGlassTabBar: UIView {
         return bubble
     }
 
+    private func applyPanes(to bubble: TabBubble, for tab: TabItem) {
+        let provided = paneProvider?(tab)
+        let index = provided?.activeIndex ?? activePaneIndex[tab.id] ?? 0
+        bubble.setPanes(provided?.panes ?? [], activeIndex: index)
+    }
+
+    private func selectPane(_ index: Int, in tab: TabItem) {
+        guard let bubble = bubbleViews[tab.id], bubble.panes.indices.contains(index) else { return }
+        let current = bubble.activePaneIndex
+        guard index != current else { return }
+
+        previousPaneIndex[tab.id] = current
+        activePaneIndex[tab.id] = index
+        triggerHaptic()
+        bubble.setPanes(bubble.panes, activeIndex: index)
+        bubble.showPaneChange(direction: index > current ? 1 : -1)
+        onPaneSelected?(tab, bubble.panes[index])
+    }
+
     private func handleBubbleTap(_ tab: TabItem) {
         if tab.id == activeTabId {
-            // Tapped active tab - toggle expansion
             triggerHaptic()
+            if let bubble = bubbleViews[tab.id], bubble.usesMenu {
+                bubble.presentMenu()
+                return
+            }
+            // Tapped active tab - toggle expansion
             toggleExpansion()
         } else {
             // Tapped inactive tab - switch to it
@@ -1083,7 +1156,11 @@ class LiquidGlassTabBar: UIView {
         // Update active tab ID
         switch activeTab {
         case .terminal(let id):
-            activeTabId = id
+            // A Herdr tab's bubble is keyed on the id its panes' sessions share
+            activeTabId = orderedTabs.first(where: {
+                if case .terminal(let session) = $0 { return session.id == id }
+                return false
+            })?.id ?? id
         case .web(let id):
             activeTabId = id
         case .none:
@@ -1106,6 +1183,7 @@ class LiquidGlassTabBar: UIView {
             case .terminal(let session):
                 if let bubble = bubbleViews[session.id] {
                     bubble.configure(session: session)
+                    applyPanes(to: bubble, for: tab)
                 }
             case .web(let webTab):
                 if let bubble = bubbleViews[webTab.id] {

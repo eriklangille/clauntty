@@ -45,6 +45,18 @@ class SessionManager: ObservableObject {
     /// Contains all terminal session IDs and web tab IDs mixed together
     @Published var tabOrder: [UUID] = []
 
+    // MARK: Herdr (see SessionManager+Herdr.swift)
+
+    /// One tab per Herdr session on machines running Herdr, from `herdr api snapshot`
+    @Published var herdrTabs: [HerdrTab] = []
+    /// Machines where Herdr wasn't found, and when to look again
+    var herdrRetryAfter: [UUID: Date] = [:]
+    /// Machines with a snapshot request in flight
+    var herdrRefreshing: Set<UUID> = []
+    /// Herdr tabs the user closed in this run of the app
+    var hiddenHerdrTabIds: Set<UUID> = []
+    var herdrPollTask: Task<Void, Never>?
+
     /// Previously active tab (for "go back" navigation)
     private(set) var previousActiveTab: ActiveTab?
 
@@ -177,6 +189,8 @@ class SessionManager: ObservableObject {
             Logger.clauntty.debugOnly("SessionManager: listing sessions...")
             let sessions = try await deployer.listSessions()
             Logger.clauntty.debugOnly("SessionManager: found \(sessions.count) existing sessions")
+            Task { await refreshHerdr(for: config) }
+            startHerdrPolling()
             return (sessions: sessions, deployer: deployer)
         } catch {
             Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
@@ -241,7 +255,16 @@ class SessionManager: ObservableObject {
                 if isNewSession {
                     savePersistence()
                 }
-                shellCommand = deployer.shellCommand(sessionId: sessionId)
+                if let pane = session.herdrPane {
+                    // A Herdr pane: rtach runs a script that attaches to it
+                    guard let script = HerdrCommands.attachScript(rtachSessionId: sessionId, terminalId: pane.terminalId) else {
+                        throw HerdrError.unsafeId(pane.terminalId)
+                    }
+                    _ = try await connection.executeCommand(script.write)
+                    shellCommand = deployer.shellCommand(sessionId: sessionId, program: script.path)
+                } else {
+                    shellCommand = deployer.shellCommand(sessionId: sessionId)
+                }
                 usingRtach = true
                 Logger.clauntty.debugOnly("SessionManager: using rtach session: \(sessionId.prefix(8))...")
 
@@ -318,6 +341,10 @@ class SessionManager: ObservableObject {
         if usingRtach {
             checkImageInbox(for: session)
         }
+
+        // Look for Herdr on this machine (and keep its tabs current)
+        Task { await refreshHerdr(for: config) }
+        startHerdrPolling()
 
         // Request notification permission on first session connect
         await NotificationManager.shared.requestAuthorizationIfNeeded()
@@ -895,7 +922,12 @@ class SessionManager: ObservableObject {
 
         // First, add tabs in the specified order
         for id in tabOrder {
-            if let session = sessions.first(where: { $0.id == id }) {
+            if let herdrTab = herdrTabs.first(where: { $0.id == id }) {
+                if let session = currentSession(of: herdrTab) {
+                    result.append(.terminal(session))
+                }
+                orderedIds.insert(id)
+            } else if let session = sessions.first(where: { $0.id == id }) {
                 result.append(.terminal(session))
                 orderedIds.insert(id)
             } else if let webTab = webTabs.first(where: { $0.id == id }) {
@@ -905,8 +937,9 @@ class SessionManager: ObservableObject {
             // Skip IDs that no longer exist
         }
 
-        // Append any tabs not in the order (newly created)
-        for session in sessions where !orderedIds.contains(session.id) {
+        // Append any tabs not in the order (newly created). Herdr pane sessions only
+        // appear through their Herdr tab.
+        for session in sessions where !orderedIds.contains(session.id) && session.herdrTabId == nil {
             result.append(.terminal(session))
         }
         for webTab in webTabs where !orderedIds.contains(webTab.id) {
@@ -960,7 +993,7 @@ class SessionManager: ObservableObject {
 
     /// Ensure tabOrder contains all current tabs (rebuilds if incomplete)
     private func ensureTabOrderComplete() {
-        let allIds = Set(sessions.map { $0.id } + webTabs.map { $0.id })
+        let allIds = Set(sessions.filter { $0.herdrTabId == nil }.map { $0.id } + webTabs.map { $0.id } + herdrTabs.map { $0.id })
         let orderedIds = Set(tabOrder)
 
         // Check if tabOrder is missing any tabs
@@ -970,6 +1003,9 @@ class SessionManager: ObservableObject {
             // Append missing tabs (preserves existing order)
             for session in sessions where missingIds.contains(session.id) {
                 tabOrder.append(session.id)
+            }
+            for herdrTab in herdrTabs where missingIds.contains(herdrTab.id) {
+                tabOrder.append(herdrTab.id)
             }
             for webTab in webTabs where missingIds.contains(webTab.id) {
                 tabOrder.append(webTab.id)
@@ -1424,7 +1460,7 @@ class SessionManager: ObservableObject {
         var tabs: [PersistedTab] = []
 
         for (index, session) in sessions.enumerated() {
-            guard let rtachId = session.rtachSessionId else { continue }
+            guard let rtachId = session.rtachSessionId, session.herdrTabId == nil else { continue }
 
             let tab = PersistedTab(
                 id: session.id,
@@ -1603,11 +1639,12 @@ class SessionManager: ObservableObject {
     /// - Auto-creates tabs for sessions not in local persistence
     func syncSessionsWithServer(config: SavedConnection, deployer: RtachDeployer) async {
         do {
-            let serverSessions = try await deployer.listSessions()
+            // Herdr pane sessions come and go with their Herdr tab, not as plain tabs
+            let serverSessions = try await deployer.listSessions().filter { !HerdrCommands.isPaneSession($0.id) }
             let serverSessionIds = Set(serverSessions.map { $0.id })
 
             // Get local rtach IDs for this connection
-            let localSessions = sessions.filter { $0.connectionConfig.id == config.id }
+            let localSessions = sessions.filter { $0.connectionConfig.id == config.id && $0.herdrTabId == nil }
             let localRtachIds = Set(localSessions.compactMap { $0.rtachSessionId })
 
             // 1. Mark missing sessions as remotely deleted

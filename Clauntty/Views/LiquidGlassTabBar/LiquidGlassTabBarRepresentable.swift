@@ -29,6 +29,26 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         bar.onShowTabSelector = onShowTabSelector
         bar.onVoiceTapped = onVoiceTapped
 
+        // Herdr panes of a session tab, from SessionManager's Herdr snapshot
+        bar.paneProvider = { tab in
+            guard case .terminal(let session) = tab,
+                  let info = context.coordinator.sessionManager?.herdrPanes(for: session) else { return ([], nil) }
+            return (info.panes.map(TabPane.init), info.activeIndex)
+        }
+        bar.onPaneSelected = { tab, pane in
+            guard case .terminal(let session) = tab, let tabId = session.herdrTabId else { return }
+            context.coordinator.sessionManager?.selectHerdrPane(tabId: tabId, paneId: pane.id)
+        }
+        #if DEBUG
+        if FakeTabPanes.isEnabled {
+            bar.paneProvider = { tab in
+                guard case .terminal(let session) = tab else { return ([], nil) }
+                return (FakeTabPanes.panes(for: session.id), nil)
+            }
+            bar.onPaneSelected = nil
+        }
+        #endif
+
         // The voice pill updates every second during a session; drive it directly
         // rather than through updateUIView, which reconfigures every tab
         let agent = VoiceAgent.shared
@@ -51,7 +71,12 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         bar.onDisconnect = { tab in
             switch tab {
             case .terminal(let session):
-                context.coordinator.sessionManager?.closeSession(session)
+                if let tabId = session.herdrTabId {
+                    // Ends the tab's attaches; the Herdr session keeps running
+                    context.coordinator.sessionManager?.closeHerdrTab(tabId)
+                } else {
+                    context.coordinator.sessionManager?.closeSession(session)
+                }
             case .web(let webTab):
                 context.coordinator.sessionManager?.closeWebTab(webTab)
             }

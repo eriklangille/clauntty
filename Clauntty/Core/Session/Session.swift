@@ -15,6 +15,13 @@ class Session: ObservableObject, Identifiable {
     var connectionConfig: SavedConnection
     let createdAt: Date
 
+    /// Set for a session showing one pane of a Herdr session. Every pane of that Herdr
+    /// session shares this id, which is what the tab bar keys its one tab on.
+    let herdrTabId: UUID?
+
+    /// The Herdr pane this session shows
+    var herdrPane: HerdrPaneRef?
+
     // MARK: - State
 
     enum State: Equatable {
@@ -110,6 +117,10 @@ class Session: ObservableObject, Identifiable {
 
     /// Display title for tab - prefer dynamic title if set
     var title: String {
+        // A Herdr tab is named after its Herdr session, whichever pane it shows
+        if let label = herdrPane?.workspaceLabel, !label.isEmpty {
+            return label
+        }
         if let dynamic = dynamicTitle, !dynamic.isEmpty {
             return dynamic
         }
@@ -350,10 +361,11 @@ class Session: ObservableObject, Identifiable {
 
     // MARK: - Initialization
 
-    init(connectionConfig: SavedConnection, id: UUID = UUID(), createdAt: Date = Date()) {
+    init(connectionConfig: SavedConnection, id: UUID = UUID(), createdAt: Date = Date(), herdrTabId: UUID? = nil) {
         self.id = id
         self.connectionConfig = connectionConfig
         self.createdAt = createdAt
+        self.herdrTabId = herdrTabId
     }
 
     // MARK: - Channel Management
@@ -1163,4 +1175,12 @@ enum TabThumbnailStore {
             }
         }
     }
+}
+
+/// Which Herdr pane a session shows
+struct HerdrPaneRef: Equatable {
+    let workspaceId: String
+    var workspaceLabel: String
+    let paneId: String
+    let terminalId: String
 }
