@@ -720,11 +720,13 @@ class Session: ObservableObject, Identifiable {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): sendData called but channelHandler is nil!")
 
             // Connection dropped silently - update state if not already disconnected
-            if state != .disconnected {
-                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): detected disconnection, triggering reconnect")
+            if state == .connected {
                 handleChannelInactive()
-                onNeedsReconnect?()
             }
+            // Also when it was already marked disconnected: typing into a dead tab
+            // should bring it back (reconnect skips sessions already connecting)
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): no channel, triggering reconnect")
+            onNeedsReconnect?()
             return
         }
         // Route through rtach protocol - handles raw vs framed mode

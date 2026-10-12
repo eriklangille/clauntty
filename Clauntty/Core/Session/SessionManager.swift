@@ -292,6 +292,10 @@ class SessionManager: ObservableObject {
                     guard let session, let current = session.sshChannel, !current.isActive else { return }
                     Logger.clauntty.debugOnly("Session \(session.id.uuidString.prefix(8)): channel became inactive, marking disconnected")
                     session.handleChannelInactive()
+                    // The server may have closed it while the app was suspended; the close
+                    // arrives just after foregrounding, past the foreground handler's checks.
+                    // Without this the tab sits on a stale screen until the app restarts.
+                    session.onNeedsReconnect?()
                 }
             }
         )
@@ -325,6 +329,9 @@ class SessionManager: ObservableObject {
                 Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) needs reconnect but is not active, skipping auto-reconnect")
                 return
             }
+            // In the background the foreground handler reconnects it on return
+            guard UIApplication.shared.applicationState == .active else { return }
+            TailscaleDebugLog.note("tab \(session.id.uuidString.prefix(8)) lost its connection, reconnecting")
             Logger.clauntty.debugOnly("SessionManager: active session \(session.id.uuidString.prefix(8)) needs reconnect, triggering auto-reconnect")
             Task {
                 do {
@@ -406,7 +413,18 @@ class SessionManager: ObservableObject {
         }
 
         // Reconnect using existing rtach session ID
-        try await connect(session: session, rtachSessionId: rtachSessionId)
+        do {
+            try await connect(session: session, rtachSessionId: rtachSessionId)
+            TailscaleDebugLog.note("reconnected tab \(session.id.uuidString.prefix(8))")
+        } catch {
+            // connect() leaves it "connecting", which every later reconnect skips:
+            // the tab would stay dead until the app restarts
+            if session.state == .connecting {
+                session.state = .disconnected
+            }
+            TailscaleDebugLog.note("reconnecting tab \(session.id.uuidString.prefix(8)) failed: \(error.localizedDescription)")
+            throw error
+        }
     }
 
     /// Round-trip every open SSH connection, close the ones that don't answer, then

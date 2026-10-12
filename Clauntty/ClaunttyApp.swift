@@ -347,6 +347,7 @@ struct AppContentView: View {
             Logger.clauntty.debugOnly("APP_LIFECYCLE: BACKGROUNDING - activeSession='\(activeTitle)' [\(activeId)], totalSessions=\(self.sessionManager.sessions.count)")
 
             NotificationManager.shared.appIsBackgrounded = true
+            TailscaleDebugLog.note("app backgrounded")
             // A voice session keeps going: the `audio` background mode keeps the app
             // running while it records and plays, like a call. Pausing the tabs below
             // doesn't affect it; it reads conversations over its own SSH commands.
@@ -370,6 +371,7 @@ struct AppContentView: View {
             Logger.clauntty.debugOnly("APP_LIFECYCLE: FOREGROUNDING - activeSession='\(activeTitle)' [\(activeId)]")
 
             NotificationManager.shared.appIsBackgrounded = false
+            TailscaleDebugLog.note("app foregrounded, active tab \(activeId) \(sessionManager.activeSession?.stateDescription ?? "none")")
             if VoiceAgent.shared.isActive {
                 voiceTrace("app is back in the foreground")
             }
