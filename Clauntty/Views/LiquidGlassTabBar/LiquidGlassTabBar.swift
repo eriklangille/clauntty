@@ -9,8 +9,8 @@ enum TabItem: Identifiable, Equatable {
 
     nonisolated var id: UUID {
         switch self {
-        // Every pane of a Herdr session is one tab
-        case .terminal(let session): return session.herdrTabId ?? session.id
+        // Every pane of a session group is one tab
+        case .terminal(let session): return session.groupId ?? session.id
         case .web(let webTab): return webTab.id
         }
     }
@@ -60,7 +60,7 @@ class LiquidGlassTabBar: UIView {
     var onWebShare: ((TabItem) -> Void)?
     var onWebNavigate: ((TabItem, String) -> Void)?  // Tab + path to navigate to
 
-    /// Herdr panes in a session tab (empty when the tab has none), and which one is
+    /// Panes in a session tab (empty when the tab has none), and which one is
     /// shown. A nil index leaves it to the bar (fake panes in the simulator).
     var paneProvider: ((TabItem) -> (panes: [TabPane], activeIndex: Int?))?
 
@@ -1156,7 +1156,7 @@ class LiquidGlassTabBar: UIView {
         // Update active tab ID
         switch activeTab {
         case .terminal(let id):
-            // A Herdr tab's bubble is keyed on the id its panes' sessions share
+            // A group's bubble is keyed on the id its panes' sessions share
             activeTabId = orderedTabs.first(where: {
                 if case .terminal(let session) = $0 { return session.id == id }
                 return false
@@ -1181,7 +1181,7 @@ class LiquidGlassTabBar: UIView {
         for tab in orderedTabs {
             switch tab {
             case .terminal(let session):
-                if let bubble = bubbleViews[session.id] {
+                if let bubble = bubbleViews[tab.id] {
                     bubble.configure(session: session)
                     applyPanes(to: bubble, for: tab)
                 }

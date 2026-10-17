@@ -15,12 +15,12 @@ class Session: ObservableObject, Identifiable {
     var connectionConfig: SavedConnection
     let createdAt: Date
 
-    /// Set for a session showing one pane of a Herdr session. Every pane of that Herdr
-    /// session shares this id, which is what the tab bar keys its one tab on.
-    let herdrTabId: UUID?
+    /// Set for a session showing one pane of a SessionGroup. Every pane of the group
+    /// shares this id, which is what the tab bar keys its one tab on.
+    let groupId: UUID?
 
-    /// The Herdr pane this session shows
-    var herdrPane: HerdrPaneRef?
+    /// The group pane this session shows
+    var pane: PaneRef?
 
     // MARK: - State
 
@@ -117,8 +117,8 @@ class Session: ObservableObject, Identifiable {
 
     /// Display title for tab - prefer dynamic title if set
     var title: String {
-        // A Herdr tab is named after its Herdr session, whichever pane it shows
-        if let label = herdrPane?.workspaceLabel, !label.isEmpty {
+        // A group's tab is named after the group, whichever pane it shows
+        if let label = pane?.groupTitle, !label.isEmpty {
             return label
         }
         if let dynamic = dynamicTitle, !dynamic.isEmpty {
@@ -368,11 +368,11 @@ class Session: ObservableObject, Identifiable {
 
     // MARK: - Initialization
 
-    init(connectionConfig: SavedConnection, id: UUID = UUID(), createdAt: Date = Date(), herdrTabId: UUID? = nil) {
+    init(connectionConfig: SavedConnection, id: UUID = UUID(), createdAt: Date = Date(), groupId: UUID? = nil) {
         self.id = id
         self.connectionConfig = connectionConfig
         self.createdAt = createdAt
-        self.herdrTabId = herdrTabId
+        self.groupId = groupId
     }
 
     // MARK: - Channel Management
@@ -1190,10 +1190,8 @@ enum TabThumbnailStore {
     }
 }
 
-/// Which Herdr pane a session shows
-struct HerdrPaneRef: Equatable {
-    let workspaceId: String
-    var workspaceLabel: String
+/// Which pane of its SessionGroup a session shows
+struct PaneRef: Equatable {
     let paneId: String
-    let terminalId: String
+    var groupTitle: String
 }

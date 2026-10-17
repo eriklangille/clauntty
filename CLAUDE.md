@@ -84,14 +84,21 @@ cd ../ghostty && zig build -Demit-xcframework -Demit-macos-app=false -Doptimize=
 # See all commands
 ./scripts/sim.sh help
 
-# Run tests
-xcodebuild test -project Clauntty.xcodeproj -scheme ClaunttyTests \
-  -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
-
 # Build, install and launch on the connected iPhone (doctor = keychain/signing state)
 ./scripts/device.sh run
 CLAUNTTY_VERBOSE=1 ./scripts/device.sh run   # with verbose logging
 ```
+
+**Don't run the unit tests** (`ClaunttyTests`): they're broken and hang. Check changes by building and
+running the app in the simulator against the test container (see SSH Testing).
+
+**`simctl` hangs after an Xcode update** (so does `sim.sh`): Xcode's first-launch install hasn't run and
+CoreSimulator is out of date. Run `sudo xcodebuild -runFirstLaunch` in a real terminal on the Mac (over
+SSH, `ssh -t`). It asks for a password, so `!` in Claude Code can't run it.
+
+**Fake panes:** the tab bar's pane UI (dots, status glyph, swipe between panes, session menu) has no
+real data source yet. Turn on fake panes for every terminal tab in the simulator with
+`xcrun simctl spawn booted defaults write com.octerm.clauntty fakeTabPanes -bool YES`.
 
 ## IPA / TestFlight
 
@@ -414,7 +421,23 @@ The app registers `clauntty://` URL scheme:
 
 ## SSH Testing
 
-### Docker Test Server (Recommended)
+### Container Test Server (Recommended)
+
+For Macs without Docker: the same test image in Apple's native `container` VM.
+
+```bash
+./scripts/docker-ssh/container-ssh-server.sh start   # prints the IP, usually 192.168.64.2
+./scripts/docker-ssh/container-ssh-server.sh stop
+
+# Launch the app with a seeded connection to it and two new tabs
+CLAUNTTY_SEED_PASSWORD=testpass ./scripts/sim.sh quick container --seed-name container \
+  --seed-host 192.168.64.2 --seed-user testuser --tabs "new,new"
+```
+
+Test against the container, not the Mac itself: simulator tabs on the Mac leave rtach sessions in
+its `~/.clauntty/sessions`, and a phone adopts each one as a tab the next time it connects there.
+
+### Docker Test Server (machines with Docker)
 
 Spin up an isolated SSH server for safe testing:
 

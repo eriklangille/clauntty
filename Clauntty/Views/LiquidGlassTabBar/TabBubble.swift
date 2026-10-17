@@ -48,7 +48,7 @@ class TabBubble: UIView {
         }
     }
 
-    /// Herdr panes in this session (empty for plain terminals and web tabs)
+    /// Panes in this session's group (empty for plain terminals and web tabs)
     private(set) var panes: [TabPane] = []
     private(set) var activePaneIndex = 0
 
@@ -56,8 +56,8 @@ class TabBubble: UIView {
     private var hasMultiplePanes: Bool { panes.count > 1 }
 
     /// Session tabs with panes show the current pane's agent state instead of the
-    /// connection dot. It comes from Herdr, so it holds before a pane is attached too;
-    /// only a failed session shows its state.
+    /// connection dot. It comes from the group, not the pane's connection, so it holds
+    /// before a pane is attached too; only a failed session shows its state.
     private var showsPaneStatus: Bool {
         guard hasPanes, case .terminal(let state) = tabType else { return false }
         switch state {

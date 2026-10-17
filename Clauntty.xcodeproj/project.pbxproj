@@ -58,8 +58,7 @@
 		C0000015 /* KeyboardAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000015 /* KeyboardAccessoryView.swift */; };
 		C0000016 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000016 /* Session.swift */; };
 		C0000017 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000017 /* SessionManager.swift */; };
-		F770B64917105CC24DE54F64 /* HerdrSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D45A16CD35DCF9ECDE2129 /* HerdrSnapshot.swift */; };
-		58EC7CDEAC04D43407F0D433 /* SessionManager+Herdr.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64B1BF3C75529CDC4A628C8 /* SessionManager+Herdr.swift */; };
+		58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */; };
 		C0000018 /* SessionTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000018 /* SessionTabBar.swift */; };
 		C0000019 /* RtachDeployer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000019 /* RtachDeployer.swift */; };
 		C0000020 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; };
@@ -169,8 +168,7 @@
 		C1000015 /* KeyboardAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessoryView.swift; sourceTree = "<group>"; };
 		C1000016 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		C1000017 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
-		C9D45A16CD35DCF9ECDE2129 /* HerdrSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HerdrSnapshot.swift"; sourceTree = "<group>"; };
-		C64B1BF3C75529CDC4A628C8 /* SessionManager+Herdr.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Herdr.swift"; sourceTree = "<group>"; };
+		C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Groups.swift"; sourceTree = "<group>"; };
 		C1000018 /* SessionTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTabBar.swift; sourceTree = "<group>"; };
 		C1000019 /* RtachDeployer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RtachDeployer.swift; sourceTree = "<group>"; };
 		C1000020 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
@@ -404,8 +402,7 @@
 			children = (
 				C1000016 /* Session.swift */,
 				C1000017 /* SessionManager.swift */,
-				C9D45A16CD35DCF9ECDE2129 /* HerdrSnapshot.swift */,
-				C64B1BF3C75529CDC4A628C8 /* SessionManager+Herdr.swift */,
+				C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */,
 				C1000023 /* WordList.swift */,
 				BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */,
 				CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */,
@@ -651,8 +648,7 @@
 				C0000015 /* KeyboardAccessoryView.swift in Sources */,
 				C0000016 /* Session.swift in Sources */,
 				C0000017 /* SessionManager.swift in Sources */,
-				F770B64917105CC24DE54F64 /* HerdrSnapshot.swift in Sources */,
-				58EC7CDEAC04D43407F0D433 /* SessionManager+Herdr.swift in Sources */,
+				58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */,
 				C0000018 /* SessionTabBar.swift in Sources */,
 				80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */,
 				C0000023 /* WordList.swift in Sources */,

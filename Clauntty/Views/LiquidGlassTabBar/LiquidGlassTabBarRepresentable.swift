@@ -29,15 +29,15 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         bar.onShowTabSelector = onShowTabSelector
         bar.onVoiceTapped = onVoiceTapped
 
-        // Herdr panes of a session tab, from SessionManager's Herdr snapshot
+        // Panes of a session group's tab
         bar.paneProvider = { tab in
             guard case .terminal(let session) = tab,
-                  let info = context.coordinator.sessionManager?.herdrPanes(for: session) else { return ([], nil) }
-            return (info.panes.map(TabPane.init), info.activeIndex)
+                  let info = context.coordinator.sessionManager?.panes(for: session) else { return ([], nil) }
+            return (info.panes, info.activeIndex)
         }
         bar.onPaneSelected = { tab, pane in
-            guard case .terminal(let session) = tab, let tabId = session.herdrTabId else { return }
-            context.coordinator.sessionManager?.selectHerdrPane(tabId: tabId, paneId: pane.id)
+            guard case .terminal(let session) = tab, let groupId = session.groupId else { return }
+            context.coordinator.sessionManager?.selectPane(groupId: groupId, paneId: pane.id)
         }
         #if DEBUG
         if FakeTabPanes.isEnabled {
@@ -71,9 +71,9 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         bar.onDisconnect = { tab in
             switch tab {
             case .terminal(let session):
-                if let tabId = session.herdrTabId {
-                    // Ends the tab's attaches; the Herdr session keeps running
-                    context.coordinator.sessionManager?.closeHerdrTab(tabId)
+                if let groupId = session.groupId {
+                    // Detaches the group's panes; they keep running on the machine
+                    context.coordinator.sessionManager?.closeSessionGroup(groupId)
                 } else {
                     context.coordinator.sessionManager?.closeSession(session)
                 }

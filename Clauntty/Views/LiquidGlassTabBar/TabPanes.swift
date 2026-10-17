@@ -1,6 +1,6 @@
 import UIKit
 
-/// Agent state of one pane, as Herdr reports it
+/// Agent state of one pane
 enum PaneStatus: Equatable {
     /// No agent in the pane (a shell, a dev server)
     case none
@@ -20,31 +20,13 @@ enum PaneStatus: Equatable {
     }
 }
 
-/// One Herdr pane inside a session tab
+/// One pane inside a session tab
 struct TabPane: Equatable {
     let id: String
     var title: String
     var status: PaneStatus
-    /// Herdr tab the pane belongs to. Panes in the same group are splits on the laptop.
+    /// Tab the pane belongs to within its group. Panes in the same tab are splits on the desktop.
     var group: Int
-}
-
-extension PaneStatus {
-    init(_ status: HerdrAgentStatus) {
-        switch status {
-        case .none: self = .none
-        case .idle: self = .idle
-        case .working: self = .working
-        case .blocked: self = .blocked
-        case .done: self = .done
-        }
-    }
-}
-
-extension TabPane {
-    init(_ pane: HerdrPaneInfo) {
-        self.init(id: pane.paneId, title: pane.title, status: PaneStatus(pane.status), group: pane.group)
-    }
 }
 
 // MARK: - Status Indicator
@@ -244,7 +226,7 @@ extension PaneStatus {
 }
 
 /// Native menu for the active session tab: the tab's actions as an icon row, then
-/// its panes, one section per Herdr tab
+/// its panes, one section per tab in the group
 enum SessionTabMenu {
     static func make(
         title: String,
@@ -293,11 +275,11 @@ final class PassthroughMenuButton: UIButton {
 // MARK: - Fake Data
 
 #if DEBUG
-/// Fake Herdr panes for prototyping the pane UI without a Herdr connection.
-/// Enable with `-fakeHerdrPanes YES` as a launch argument.
+/// Fake panes for prototyping the pane UI without real session groups.
+/// Enable with `-fakeTabPanes YES` as a launch argument.
 enum FakeTabPanes {
     static var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "fakeHerdrPanes")
+        UserDefaults.standard.bool(forKey: "fakeTabPanes")
     }
 
     private static let scenarios: [[TabPane]] = [
