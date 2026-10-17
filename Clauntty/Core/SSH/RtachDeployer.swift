@@ -98,7 +98,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.11.0"
+    static let expectedVersion = "2.11.1"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -497,9 +497,9 @@ class RtachDeployer {
             "pkill -f 'rtach.*\(sessionId)' 2>/dev/null || true"
         )
 
-        // 2. Remove the socket and associated files (.log, .cmd, .title)
+        // 2. Remove the socket and associated files (.log, .cmd, .title, .lock)
         let socketPath = "\(Self.remoteSessionsPath)/\(sessionId)"
-        _ = try await connection.executeCommand("rm -f \(socketPath) \(socketPath).log \(socketPath).cmd \(socketPath).title")
+        _ = try await connection.executeCommand("rm -f \(socketPath) \(socketPath).log \(socketPath).cmd \(socketPath).title \(socketPath).lock")
 
         // 3. Remove from metadata
         var metadata = try await loadSessionMetadata()
