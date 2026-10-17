@@ -397,6 +397,8 @@ struct AppContentView: View {
                     Logger.clauntty.debugOnly("APP_LIFECYCLE: resuming connected active session")
                     activeSession.beginResuming()
                     activeSession.resumeOutput()
+                    // Take the terminal size back from other devices on the session
+                    activeSession.claimActive()
                     // It may have died while the app was suspended without closing
                     sessionManager.checkConnections(reason: "foreground")
                     // Images may have gone to a tab whose connection died meanwhile
