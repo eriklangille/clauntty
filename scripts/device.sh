@@ -17,7 +17,7 @@ LOG=/tmp/clauntty-device-build.log
 # "available (paired)" is a phone reachable over the network (same Wi-Fi), no cable needed
 find_device() {
     xcrun devicectl list devices 2>/dev/null |
-        awk '/physical/ && (/connected/ || /available/) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9A-F]{8}-[0-9A-F]{16}$/) { print $i; exit } }'
+        awk '!/simulated/ && (/connected/ || /available/) { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9A-F]{8}-[0-9A-F]{16}$/) { print $i; exit } }'
 }
 
 # Remote/multiplexed terminal sessions can start with only System.keychain in the
