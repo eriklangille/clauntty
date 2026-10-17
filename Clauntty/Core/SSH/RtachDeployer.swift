@@ -98,7 +98,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.12.0"
+    static let expectedVersion = "2.12.1"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -303,8 +303,8 @@ class RtachDeployer {
             let inUseOutput = try await connection.executeCommand(findInUseCmd)
             let inUseBinaries = Set(inUseOutput.split(separator: "\n").map { String($0) })
 
-            // Get all rtach binaries in ~/.clauntty/bin/
-            let listCmd = "ls -1 ~/.clauntty/bin/rtach-* 2>/dev/null || true"
+            // Get all versioned rtach binaries in ~/.clauntty/bin/ (not rtach-spawnd)
+            let listCmd = "ls -1 ~/.clauntty/bin/rtach-[0-9]* 2>/dev/null || true"
             let allOutput = try await connection.executeCommand(listCmd)
             let allBinaries = allOutput.split(separator: "\n").map { String($0) }
 
