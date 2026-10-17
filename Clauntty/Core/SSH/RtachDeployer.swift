@@ -47,6 +47,16 @@ class RtachDeployer {
     static let remoteMetadataPath = "~/.clauntty/sessions.json"
     static let claudeSettingsPath = "~/.claude/settings.json"
 
+    /// spawnd: rtach's LaunchAgent on macOS hosts that starts sessions in the desktop
+    /// session. Sessions started over SSH are in the Background session, where the login
+    /// keychain isn't available, so code signing fails in them.
+    static let spawndPlistPath = "~/Library/LaunchAgents/com.clauntty.rtach-spawnd.plist"
+    static let spawndProgramPath = "~/.clauntty/bin/rtach-spawnd"
+
+    /// On macOS hosts, whether spawnd is installed (checked by `ensureDeployed`). nil on
+    /// other hosts.
+    private(set) var spawndInstalled: Bool?
+
     /// Expected rtach version - must match rtach's version constant
     /// Increment this when rtach is updated to force redeployment
     /// 1.4.0 - Added shell integration (env var only)
@@ -98,7 +108,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.12.1"
+    static let expectedVersion = "2.12.2"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -279,7 +289,33 @@ class RtachDeployer {
         Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: cleaning up old binaries...")
         await cleanupOldBinaries()
 
+        await checkSpawnd()
+
         Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: done")
+    }
+
+    /// On macOS hosts, check whether spawnd is installed. spawnd runs its own copy of
+    /// rtach; when that differs from the deployed one, `spawnd install` replaces it.
+    private func checkSpawnd() async {
+        guard let platform = try? await connection.getRemotePlatform(), platform.os == "darwin" else {
+            spawndInstalled = nil
+            return
+        }
+        let output = (try? await connection.executeCommand(
+            "if [ -f \(Self.spawndPlistPath) ]; then " +
+            "cmp -s \(Self.remoteBinPath) \(Self.spawndProgramPath) || \(Self.remoteBinPath) spawnd install >/dev/null 2>&1; " +
+            "echo installed; else echo missing; fi"
+        )) ?? ""
+        spawndInstalled = output.contains("installed")
+        Logger.clauntty.debugOnly("RtachDeployer: spawnd \(spawndInstalled == true ? "installed" : "not installed")")
+    }
+
+    /// Install spawnd (macOS hosts). Returns rtach's message.
+    func installSpawnd() async throws -> String {
+        let output = try await connection.executeCommand("\(Self.remoteBinPath) spawnd install 2>&1")
+        // "spawnd is installed and loaded", or "spawnd is installed, but launchd didn't load it"
+        spawndInstalled = output.contains("spawnd is installed")
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Clean up old rtach binaries that are no longer in use

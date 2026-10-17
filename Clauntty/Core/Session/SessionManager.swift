@@ -22,6 +22,21 @@ class SessionManager: ObservableObject {
     /// Images sent with `clauntty show`, presented full screen while non-nil
     @Published var imageViewer: ImageViewerContent?
 
+    /// A Mac host to offer spawnd for, so code signing works in its sessions (asked
+    /// while non-nil)
+    @Published var spawndOffer: SpawndOffer?
+    /// What installing spawnd reported, when the user should see it
+    @Published var spawndMessage: String?
+    /// Hosts offered spawnd this run. "Not now" isn't saved, so the offer comes back the
+    /// next time the app connects to the host.
+    private var spawndOffered: Set<String> = []
+
+    struct SpawndOffer: Identifiable {
+        let poolKey: String
+        let hostName: String
+        var id: String { poolKey }
+    }
+
     /// `clauntty show a.png b.png` sends one command per file; collect them into one viewer
     private var pendingImagePaths: [(session: Session, path: String, inboxId: String?)] = []
     private var pendingImageTask: Task<Void, Never>?
@@ -177,6 +192,7 @@ class SessionManager: ObservableObject {
             Logger.clauntty.debugOnly("SessionManager: ensuring rtach deployed...")
             try await deployer.ensureDeployed()
             rtachDeployers[poolKey] = deployer
+            offerSpawndIfNeeded(deployer, config: config)
             Logger.clauntty.debugOnly("SessionManager: listing sessions...")
             let sessions = try await deployer.listSessions()
             Logger.clauntty.debugOnly("SessionManager: found \(sessions.count) existing sessions")
@@ -184,6 +200,36 @@ class SessionManager: ObservableObject {
         } catch {
             Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    // MARK: spawnd
+
+    /// Offer spawnd for a Mac host that doesn't have it, once per run
+    private func offerSpawndIfNeeded(_ deployer: RtachDeployer, config: SavedConnection) {
+        let poolKey = connectionKey(for: config)
+        guard deployer.spawndInstalled == false, !spawndOffered.contains(poolKey) else { return }
+        spawndOffered.insert(poolKey)
+        spawndOffer = SpawndOffer(poolKey: poolKey, hostName: config.displayName)
+    }
+
+    func installSpawnd(_ offer: SpawndOffer) async {
+        guard let deployer = rtachDeployers[offer.poolKey] else {
+            spawndMessage = "Couldn't install it: not connected to \(offer.hostName). It'll be offered again next time."
+            spawndOffered.remove(offer.poolKey)
+            return
+        }
+        do {
+            let output = try await deployer.installSpawnd()
+            Logger.clauntty.info("SessionManager: spawnd install on \(offer.hostName): \(output)")
+            // Loaded: nothing to say. Otherwise rtach explains (nobody logged in at the desktop).
+            if !output.contains("installed and loaded") {
+                spawndMessage = output
+            }
+        } catch {
+            Logger.clauntty.error("SessionManager: spawnd install failed: \(error.localizedDescription)")
+            spawndMessage = "Couldn't install it: \(error.localizedDescription)"
+            spawndOffered.remove(offer.poolKey)
         }
     }
 
@@ -227,6 +273,7 @@ class SessionManager: ObservableObject {
                     try await newDeployer.ensureDeployed()
                     rtachDeployers[poolKey] = newDeployer
                     deployer = newDeployer
+                    offerSpawndIfNeeded(newDeployer, config: config)
                     Logger.clauntty.debugOnly("SessionManager: rtach deployed successfully")
                 } catch {
                     Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
@@ -386,6 +433,7 @@ class SessionManager: ObservableObject {
             let deployer = RtachDeployer(connection: connection)
             try await deployer.ensureDeployed()
             rtachDeployers[poolKey] = deployer
+            offerSpawndIfNeeded(deployer, config: config)
         }
 
         // Reconnect using existing rtach session ID

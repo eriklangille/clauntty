@@ -176,6 +176,32 @@ struct ContentView: View {
     } message: {
       Text("This will download approximately 800 MB of data for on-device speech recognition. The model runs entirely on your device for privacy.")
     }
+    .alert(
+      "Allow Code Signing on \(sessionManager.spawndOffer?.hostName ?? "This Mac")?",
+      isPresented: Binding(
+        get: { sessionManager.spawndOffer != nil },
+        set: { if !$0 { sessionManager.spawndOffer = nil } }
+      ),
+      presenting: sessionManager.spawndOffer
+    ) { offer in
+      Button("Install") {
+        Task { await sessionManager.installSpawnd(offer) }
+      }
+      Button("Not Now", role: .cancel) {}
+    } message: { _ in
+      Text("Sessions started from Clauntty can't use this Mac's login keychain, so code signing (Xcode builds) fails in them. Install a small helper so new sessions start in the desktop session? Remove it anytime with `rtach spawnd uninstall`.")
+    }
+    .alert(
+      "Code Signing Helper",
+      isPresented: Binding(
+        get: { sessionManager.spawndMessage != nil },
+        set: { if !$0 { sessionManager.spawndMessage = nil } }
+      )
+    ) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(sessionManager.spawndMessage ?? "")
+    }
   }
 
   /// Voice button: set up a key first, start a session, or open the session panel
