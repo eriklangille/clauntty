@@ -56,6 +56,9 @@ class RtachDeployer {
     /// On macOS hosts, whether spawnd is installed (checked by `ensureDeployed`). nil on
     /// other hosts.
     private(set) var spawndInstalled: Bool?
+    /// The Mac's own name (`uname -n`). Saved connections can reach one Mac by different
+    /// names; this tells them apart.
+    private(set) var spawndHostName: String?
 
     /// Expected rtach version - must match rtach's version constant
     /// Increment this when rtach is updated to force redeployment
@@ -304,9 +307,11 @@ class RtachDeployer {
         let output = (try? await connection.executeCommand(
             "if [ -f \(Self.spawndPlistPath) ]; then " +
             "cmp -s \(Self.remoteBinPath) \(Self.spawndProgramPath) || \(Self.remoteBinPath) spawnd install >/dev/null 2>&1; " +
-            "echo installed; else echo missing; fi"
+            "echo installed; else echo missing; fi; uname -n"
         )) ?? ""
-        spawndInstalled = output.contains("installed")
+        let lines = output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        spawndInstalled = lines.first == "installed"
+        spawndHostName = lines.count > 1 && !lines[1].isEmpty ? lines[1] : nil
         Logger.clauntty.debugOnly("RtachDeployer: spawnd \(spawndInstalled == true ? "installed" : "not installed")")
     }
 

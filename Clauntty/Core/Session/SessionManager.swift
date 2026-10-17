@@ -27,14 +27,15 @@ class SessionManager: ObservableObject {
     @Published var spawndOffer: SpawndOffer?
     /// What installing spawnd reported, when the user should see it
     @Published var spawndMessage: String?
-    /// Hosts offered spawnd this run. "Not now" isn't saved, so the offer comes back the
-    /// next time the app connects to the host.
+    /// Macs offered spawnd this run, by their own name. "Not now" isn't saved, so the
+    /// offer comes back the next time the app connects to the Mac.
     private var spawndOffered: Set<String> = []
 
     struct SpawndOffer: Identifiable {
-        let poolKey: String
-        let hostName: String
-        var id: String { poolKey }
+        /// The Mac's own name, or the connection's pool key
+        let id: String
+        let config: SavedConnection
+        var hostName: String { config.displayName }
     }
 
     /// `clauntty show a.png b.png` sends one command per file; collect them into one viewer
@@ -207,20 +208,15 @@ class SessionManager: ObservableObject {
 
     /// Offer spawnd for a Mac host that doesn't have it, once per run
     private func offerSpawndIfNeeded(_ deployer: RtachDeployer, config: SavedConnection) {
-        let poolKey = connectionKey(for: config)
-        guard deployer.spawndInstalled == false, !spawndOffered.contains(poolKey) else { return }
-        spawndOffered.insert(poolKey)
-        spawndOffer = SpawndOffer(poolKey: poolKey, hostName: config.displayName)
+        let key = deployer.spawndHostName ?? connectionKey(for: config)
+        guard deployer.spawndInstalled == false, !spawndOffered.contains(key) else { return }
+        spawndOffered.insert(key)
+        spawndOffer = SpawndOffer(id: key, config: config)
     }
 
     func installSpawnd(_ offer: SpawndOffer) async {
-        guard let deployer = rtachDeployers[offer.poolKey] else {
-            spawndMessage = "Couldn't install it: not connected to \(offer.hostName). It'll be offered again next time."
-            spawndOffered.remove(offer.poolKey)
-            return
-        }
         do {
-            let output = try await deployer.installSpawnd()
+            let output = try await runSpawndInstall(config: offer.config)
             Logger.clauntty.info("SessionManager: spawnd install on \(offer.hostName): \(output)")
             // Loaded: nothing to say. Otherwise rtach explains (nobody logged in at the desktop).
             if !output.contains("installed and loaded") {
@@ -228,9 +224,29 @@ class SessionManager: ObservableObject {
             }
         } catch {
             Logger.clauntty.error("SessionManager: spawnd install failed: \(error.localizedDescription)")
-            spawndMessage = "Couldn't install it: \(error.localizedDescription)"
-            spawndOffered.remove(offer.poolKey)
+            spawndMessage = "Couldn't install it on \(offer.hostName): \(error.localizedDescription)"
+            spawndOffered.remove(offer.id)
         }
+    }
+
+    /// Over the pooled connection if that works, else a new one: the connection kept
+    /// from deploying may have closed since
+    private func runSpawndInstall(config: SavedConnection) async throws -> String {
+        if let pooled = connectionPool[connectionKey(for: config)], pooled.isConnected,
+           let output = try? await RtachDeployer(connection: pooled).installSpawnd() {
+            return output
+        }
+        let connection = SSHConnection(
+            host: config.host,
+            port: config.port,
+            username: config.username,
+            authMethod: config.authMethod,
+            connectionId: config.id,
+            useTailscale: config.useTailscale
+        )
+        try await connection.connect()
+        defer { connection.disconnect() }
+        return try await RtachDeployer(connection: connection).installSpawnd()
     }
 
     /// Connect a session with optional rtach session ID
