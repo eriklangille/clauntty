@@ -6,7 +6,8 @@ import UIKit
 /// onto its live terminal. Tap a window to type into it (the pane becomes the active
 /// tab: keyboard, key bar); tap another to switch, keyboard up. Swipe a window to
 /// switch its panes. Fullscreen grows the window into the whole screen, the session
-/// view; collapse or drag its pill down to come back.
+/// view; collapse or drag its pill down to come back. The typed-into window's pill opens
+/// the tab's session menu (new pane, new tab, ports, close, its panes).
 ///
 /// Every terminal keeps the phone's full size and is only scaled and cropped into its
 /// window, so opening the switcher, focusing or going fullscreen never resizes a pane.
@@ -14,6 +15,7 @@ struct AgentSwitcherView: View {
     @EnvironmentObject var sessionManager: SessionManager
     let onNewTab: () -> Void
     let onVoice: () -> Void
+    let onPorts: (Session) -> Void
 
     /// The window typed into (its tab id)
     @State private var focused: UUID?
@@ -37,10 +39,8 @@ struct AgentSwitcherView: View {
     /// Bumped whenever the keyboard shows: a pending collapse to the overview checks it
     @State private var keyboardShows = 0
 
-    /// The overview's status line above the windows
+    /// The overview's status line above the windows, with voice and a new tab
     static let headerHeight: CGFloat = 30
-    /// The controls row after the windows
-    static let controlsHeight: CGFloat = 56
 
     /// How much of the window above stays in view, below the status bar, to tap
     static let peek: CGFloat = 44
@@ -81,8 +81,8 @@ struct AgentSwitcherView: View {
             let focusedIndex = items.firstIndex { $0.id == focused }
             let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, items.count - 1))
             let contentHeight = lead + laidOut.reduce(0, +) + spacing * CGFloat(max(0, items.count - 1))
-                + (fullscreen ? 0 : spacing + Self.controlsHeight)
-            let maxScroll = max(0, contentHeight - size.height + 20)
+            // The last window stops above the key bar
+            let maxScroll = max(0, contentHeight - barTop(size) + Self.spacing)
             let offset: CGFloat = {
                 if focused == nil && !fullscreen {
                     // Overview: free scrolling, rubber-banded past the ends
@@ -110,10 +110,6 @@ struct AgentSwitcherView: View {
                         .opacity(hidden ? 0 : 1)
                         .allowsHitTesting(!hidden)
                 }
-                if !fullscreen {
-                    controls
-                        .frame(height: Self.controlsHeight)
-                }
             }
             .padding(.leading, fullscreen ? 0 : 10)
             .padding(.trailing, fullscreen ? 0 : (focused != nil ? Self.railColumn : 10))
@@ -139,10 +135,15 @@ struct AgentSwitcherView: View {
             .simultaneousGesture(fullscreen ? nil : pager(count: items.count, heights: specs.map(\.height), items: items, maxScroll: maxScroll))
             .overlay(alignment: .trailing) {
                 if focused != nil && !fullscreen {
-                    StatusRail(statuses: items.map { attentionStatus($0.session) }, current: current) { target in
-                        jump(to: target, items: items)
-                    } onScrubEnd: { target in
-                        commitFocus(target, items: items)
+                    // Voice and a new tab stay in reach while typing, around the rail
+                    VStack(spacing: 10) {
+                        GlassCircle(systemName: "waveform", size: 30, action: onVoice)
+                        StatusRail(statuses: items.map { attentionStatus($0.session) }, current: current) { target in
+                            jump(to: target, items: items)
+                        } onScrubEnd: { target in
+                            commitFocus(target, items: items)
+                        }
+                        GlassCircle(systemName: "plus", size: 30, action: onNewTab)
                     }
                     .frame(width: Self.railColumn)
                     // Centered beside the focused window, in the room above the key bar
@@ -157,6 +158,37 @@ struct AgentSwitcherView: View {
                     let anchor: CGFloat = current == 0 ? 4 : Self.peek
                     scrollOffset = min(max(0, tops[current] - anchor), maxScroll)
                 }
+            }
+            // A window closed: the overview stays within its ends
+            .onChange(of: maxScroll) { _, limit in
+                if scrollOffset > limit { withAnimation(snap) { scrollOffset = limit } }
+            }
+            // The window typed into closed: back to the overview
+            .onChange(of: items.map(\.id)) { _, ids in
+                if let focused, !ids.contains(focused) {
+                    withAnimation(snap) {
+                        self.focused = nil
+                        fullscreen = false
+                        frozenOrder = nil
+                    }
+                }
+            }
+            // While typing, focus follows the tab shown: a new tab from the menu, or a pane
+            // an agent opened with `rtach ws`
+            .onChange(of: sessionManager.activeTab) { _, tab in
+                guard focused != nil, case .terminal(let sessionId) = tab,
+                      let target = items.firstIndex(where: { $0.session.id == sessionId }) else { return }
+                let session = items[target].session
+                if items[target].id != focused {
+                    withAnimation(snap) {
+                        frozenOrder = items.map(\.id)
+                        focused = items[target].id
+                        index = target
+                        drag = 0
+                    }
+                }
+                // A new pane or tab is a new terminal view: give it the keyboard
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { session.showKeyboard?() }
             }
             .onReceive(cursorChanges(items.map(\.session))) { _ in cursorTick &+= 1 }
             .onAppear { originY = geo.frame(in: .global).minY }
@@ -433,33 +465,28 @@ struct AgentSwitcherView: View {
             terminalSize: spec.terminalSize,
             windowWidth: spec.width,
             windowHeight: spec.height,
+            menu: focused == tabId ? menu(for: session, panes: panes, activeIndex: activeIndex) : nil,
             onTap: { tapped(tabId, index: i, session: session) },
             onSwipe: { step in swipe(session, step: step) },
-            onFullscreen: { setFullscreen(!fullscreen) }
+            onFullscreen: { setFullscreen(!fullscreen) },
+            onMenuWillOpen: { Task { await sessionManager.refreshWorkspaces(for: session.connectionConfig) } }
         )
     }
 
     // MARK: Actions
 
-    /// Tap a window to type into it; tap the focused one's pill to put it down
+    /// Tap a window to type into it (the focused one's pill opens its menu instead)
     private func tapped(_ tabId: UUID, index i: Int, session: Session) {
-        if fullscreen { return }
+        if fullscreen || focused == tabId { return }
         withAnimation(snap) {
-            if focused == tabId {
-                focused = nil
-                frozenOrder = nil
-            } else {
-                frozenOrder = frozenOrder ?? windows.map(\.id)
-                focused = tabId
-                index = i
-                drag = 0
-            }
+            frozenOrder = frozenOrder ?? windows.map(\.id)
+            focused = tabId
+            index = i
+            drag = 0
         }
-        if focused == tabId {
-            sessionManager.switchTo(session)
-            // Typing into it: the keyboard comes up even if it was hidden with the key bar
-            DispatchQueue.main.async { session.showKeyboard?() }
-        }
+        sessionManager.switchTo(session)
+        // Typing into it: the keyboard comes up even if it was hidden with the key bar
+        DispatchQueue.main.async { session.showKeyboard?() }
     }
 
     private func setFullscreen(_ on: Bool) {
@@ -477,12 +504,13 @@ struct AgentSwitcherView: View {
 
     // MARK: Header and controls
 
-    /// What needs you, or that nothing does
+    /// What needs you, or that nothing does, between voice and a new tab (on the rail
+    /// while typing)
     private var header: some View {
         let panes = sessionManager.sessionGroups.flatMap(\.panes)
         let blocked = panes.filter { $0.status == .blocked }.count
         let done = panes.filter { $0.status == .done }.count
-        return HStack(spacing: 6) {
+        let status = HStack(spacing: 6) {
             if blocked == 0 && done == 0 {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Color(uiColor: PaneStatus.done.tint))
@@ -501,16 +529,36 @@ struct AgentSwitcherView: View {
         }
         .font(.system(size: 13, weight: .semibold))
         .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity)
+        return HStack {
+            GlassCircle(systemName: "waveform", size: Self.headerHeight, action: onVoice)
+            Spacer(minLength: 8)
+            status
+            Spacer(minLength: 8)
+            GlassCircle(systemName: "plus", size: Self.headerHeight, action: onNewTab)
+        }
+        .opacity(focused == nil ? 1 : 0)
+        .allowsHitTesting(focused == nil)
     }
 
-    /// Voice and a new workspace, after the windows
-    private var controls: some View {
-        HStack(spacing: 14) {
-            GlassCircle(systemName: "waveform", size: 44, action: onVoice)
-            GlassCircle(systemName: "plus", size: 44, action: onNewTab)
-        }
-        .padding(.top, 6)
+    /// The tab bar's session menu, for the window typed into
+    private func menu(for session: Session, panes: [TabPane], activeIndex: Int) -> UIMenu {
+        let groupId = session.groupId
+        return SessionTabMenu.make(
+            title: session.connectionConfig.displayName,
+            panes: panes,
+            activeIndex: activeIndex,
+            onSelectPane: { index in
+                guard let groupId, panes.indices.contains(index) else { return }
+                sessionManager.selectPane(groupId: groupId, paneId: panes[index].id)
+            },
+            onPaneAction: groupId == nil || panes.isEmpty ? nil : { action in
+                guard let groupId else { return }
+                Task { await sessionManager.performPaneAction(action, groupId: groupId) }
+            },
+            onNewTab: onNewTab,
+            onPorts: { onPorts(session) },
+            onClose: { sessionManager.closeTab(session) }
+        )
     }
 
 }
@@ -537,9 +585,12 @@ struct SwitcherWindow: View {
     let windowWidth: CGFloat
     /// From the switcher, which lays the windows out with the same math
     let windowHeight: CGFloat
+    /// The session menu, opened from the pill while typing into the window
+    let menu: UIMenu?
     let onTap: () -> Void
     let onSwipe: (Int) -> Void
     let onFullscreen: () -> Void
+    let onMenuWillOpen: () -> Void
 
     enum Mode: Equatable {
         /// The last couple of lines: what the agent said, or the shell's prompt
@@ -553,6 +604,8 @@ struct SwitcherWindow: View {
     }
 
     @State private var pullDown: CGFloat = 0
+    /// Bumped to open the menu
+    @State private var menuRequests = 0
 
     static let bottomPad: CGFloat = 8
     /// What the terminal keeps at its bottom for the key bar while the keyboard is up
@@ -693,8 +746,17 @@ struct SwitcherWindow: View {
     private var header: some View {
         HStack(spacing: 8) {
             PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex)
+                .background(MenuAnchor(menu: menu, requests: menuRequests))
                 .contentShape(Capsule())
-                .onTapGesture { if !isFullscreen { onTap() } }
+                .onTapGesture {
+                    // Typing into it, the pill is the tab: its menu
+                    if isFocused, menu != nil {
+                        onMenuWillOpen()
+                        menuRequests &+= 1
+                    } else if !isFullscreen {
+                        onTap()
+                    }
+                }
                 .gesture(isFullscreen ? pullGesture : nil)
                 .simultaneousGesture(isFullscreen ? nil : swipeGesture)
             Spacer(minLength: 0)
@@ -791,6 +853,35 @@ private struct ClipHost<Content: View>: UIViewRepresentable {
 
     final class Coordinator {
         var host: UIHostingController<Content>?
+    }
+}
+
+/// Presents a native menu from the view it backs (as the tab bubble does) each time
+/// `requests` goes up
+private struct MenuAnchor: UIViewRepresentable {
+    let menu: UIMenu?
+    let requests: Int
+
+    func makeUIView(context: Context) -> PassthroughMenuButton {
+        let button = PassthroughMenuButton()
+        button.showsMenuAsPrimaryAction = true
+        return button
+    }
+
+    func updateUIView(_ button: PassthroughMenuButton, context: Context) {
+        button.menu = menu
+        guard requests != context.coordinator.requests else { return }
+        context.coordinator.requests = requests
+        if menu != nil, #available(iOS 17.4, *) {
+            button.performPrimaryAction()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(requests: requests) }
+
+    final class Coordinator {
+        var requests: Int
+        init(requests: Int) { self.requests = requests }
     }
 }
 

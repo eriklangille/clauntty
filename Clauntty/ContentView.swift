@@ -24,7 +24,8 @@ struct ContentView: View {
           // Agent mode: the switcher replaces the tab bar and the tabs
           AgentSwitcherView(
             onNewTab: { showingNewTabSheet = true },
-            onVoice: handleVoiceTapped
+            onVoice: handleVoiceTapped,
+            onPorts: { session in portsSheetSession = session }
           )
         } else {
         // Show tabs + content when there are active sessions or web tabs
