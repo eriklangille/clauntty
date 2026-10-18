@@ -68,8 +68,6 @@ struct AgentSwitcherView: View {
     @State private var edgeShows = 0
     /// A finger on the edge keeps it out
     @State private var edgeHeld = false
-    /// The windows whose news brought it out
-    @State private var edgeNews: Set<UUID> = []
 
     enum DragMode {
         /// A quick swipe: the next or previous window
@@ -254,8 +252,7 @@ struct AgentSwitcherView: View {
                 if fullscreen {
                     EdgeDots(statuses: items.map { attentionStatus($0.session) },
                              current: items.firstIndex { $0.id == focused },
-                             news: Set(items.indices.filter { edgeNews.contains(items[$0].id) }),
-                             pulse: edgeShows, isOut: edgeOut) { held in
+                             isOut: edgeOut) { held in
                         edgeHeld = held
                     } onSelect: { target in
                         hideEdge()
@@ -269,10 +266,10 @@ struct AgentSwitcherView: View {
             // Fullscreen, another window finished or needs you: out of the edge
             .onChange(of: Dictionary(uniqueKeysWithValues: items.map { ($0.id, attentionStatus($0.session)) })) { old, new in
                 guard fullscreen else { return }
-                let news = new.filter { id, status in
+                let news = new.contains { id, status in
                     id != focused && (status == .done || status == .blocked) && old[id] != nil && old[id] != status
                 }
-                if !news.isEmpty { showEdge(news: Set(news.keys)) }
+                if news { showEdge() }
             }
             .onChange(of: fullscreen) { _, on in if !on { hideEdge() } }
             .onChange(of: focused) { old, new in
@@ -843,14 +840,11 @@ struct AgentSwitcherView: View {
     }
 
     /// The edge's dots out, with a tap, then back in after `edgeTime` (once let go)
-    private func showEdge(news: Set<UUID>) {
+    private func showEdge() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         edgeShows &+= 1
         let shows = edgeShows
-        withAnimation(.spring(duration: 0.45, bounce: 0.3)) {
-            edgeNews = edgeOut ? edgeNews.union(news) : news
-            edgeOut = true
-        }
+        withAnimation(.spring(duration: 0.45, bounce: 0.3)) { edgeOut = true }
         func later() {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.edgeTime) {
                 guard edgeShows == shows, edgeOut else { return }
@@ -1622,9 +1616,6 @@ private struct StatusRail: View {
 private struct EdgeDots: View {
     let statuses: [PaneStatus]
     let current: Int?
-    /// The dots that brought it out: they pulse
-    let news: Set<Int>
-    let pulse: Int
     let isOut: Bool
     let onHold: (Bool) -> Void
     let onSelect: (Int) -> Void
@@ -1632,41 +1623,30 @@ private struct EdgeDots: View {
     /// The dot under the finger
     @State private var highlighted: Int?
 
-    private static let reach: CGFloat = 14
-    private static let pitch: CGFloat = 14
+    private static let reach: CGFloat = 10
+    private static let pitch: CGFloat = 11
     /// The curve from the screen's edge out to the bump, at each end
-    private static let neck: CGFloat = 14
+    private static let neck: CGFloat = 10
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(statuses.enumerated()), id: \.offset) { i, status in
-                ZStack {
-                    if i == (highlighted ?? current) {
-                        Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.25)
-                            .frame(width: 11, height: 11)
-                    }
-                    Group {
-                        if status == .none || status == .idle {
-                            Circle().fill(Color.white.opacity(0.35)).frame(width: 5, height: 5)
-                        } else {
-                            StatusGlyph(status: status).frame(width: 7, height: 7)
-                        }
-                    }
-                    .phaseAnimator([1, news.contains(i) ? 1.8 : 1, 1], trigger: pulse) { dot, scale in
-                        dot.scaleEffect(scale)
-                    }
-                }
-                .frame(width: Self.reach, height: Self.pitch)
+                // Still dots: the window's color, the current one (or the one under the
+                // finger) white
+                Circle()
+                    .fill(color(status, isCurrent: i == (highlighted ?? current)))
+                    .frame(width: 5, height: 5)
+                    .frame(width: Self.reach, height: Self.pitch)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
         .opacity(isOut ? 1 : 0)
         .offset(x: isOut ? 0 : Self.reach)
         .padding(.vertical, Self.neck)
         .background {
             BezelBump(reach: isOut ? Self.reach : 0, neck: Self.neck).fill(Color.black)
         }
-        .contentShape(Rectangle())
+        .contentShape(Rectangle().inset(by: -8))
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
@@ -1686,8 +1666,16 @@ private struct EdgeDots: View {
         .allowsHitTesting(isOut)
     }
 
+    private func color(_ status: PaneStatus, isCurrent: Bool) -> Color {
+        if isCurrent { return .white }
+        switch status {
+        case .blocked, .done, .working: return Color(uiColor: status.tint)
+        default: return Color.white.opacity(0.35)
+        }
+    }
+
     private func slot(at y: CGFloat) -> Int {
-        min(max(0, Int((y - Self.neck - 4) / Self.pitch)), max(0, statuses.count - 1))
+        min(max(0, Int((y - Self.neck - 2) / Self.pitch)), max(0, statuses.count - 1))
     }
 }
 
