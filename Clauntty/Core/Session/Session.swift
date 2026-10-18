@@ -333,6 +333,10 @@ class Session: ObservableObject, Identifiable {
     /// Brings the soft keyboard back if it was hidden with the key bar; set by the
     /// terminal view
     var showKeyboard: (() -> Void)?
+    /// Scrolls the terminal as a one-finger drag would: nil starts a drag, then each
+    /// call is the finger's move in points (down: back through the history). Set by the
+    /// terminal view; agent mode's windows don't take touches themselves.
+    var scrollTerminal: ((CGFloat?) -> Void)?
     private var cursorUpdatePending = false
 
     /// Refresh cursorBottom soon (output arrived), at most a few times a second

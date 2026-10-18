@@ -1545,95 +1545,78 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     private let scrollThreshold: CGFloat = 10.0  // Points per "line" of scroll
 
     @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
-        guard let surface = self.surface else { return }
-
         let location = gesture.location(in: self)
+        switch gesture.state {
+        case .began:
+            Logger.clauntty.verbose("[MOUSE] handleScroll began: isMouseCaptured=\(self.isMouseCaptured), location=(\(Int(location.x)), \(Int(location.y)))")
+            beginScroll(at: location)
+        case .changed:
+            scroll(by: gesture.translation(in: self).y, at: location)
+            // Reset translation for incremental tracking
+            gesture.setTranslation(.zero, in: self)
+        case .ended, .cancelled:
+            scrollAccumulator = 0
+        default:
+            break
+        }
+    }
+
+    /// Start a one-finger scroll at `location`
+    func beginScroll(at location: CGPoint) {
+        scrollAccumulator = 0
+        guard let surface, isMouseCaptured else { return }
+        // Send initial position so TUI knows which pane we're over
+        ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
+    }
+
+    /// One step of a one-finger scroll: the finger moved `dy` points (down: back through
+    /// the history) at `location`. The terminal's own pan scrolls through here, and so do
+    /// agent mode's windows, which don't take the touches themselves.
+    func scroll(by dy: CGFloat, at location: CGPoint) {
+        guard let surface else { return }
 
         // When TUI app has mouse tracking enabled, send scroll events instead of scrollback
-        let captured = isMouseCaptured
-        if gesture.state == .began {
-            Logger.clauntty.verbose("[MOUSE] handleScroll began: isMouseCaptured=\(captured), location=(\(Int(location.x)), \(Int(location.y)))")
-        }
-
-        if captured {
+        if isMouseCaptured {
             // Send scroll events with position (like desktop mouse wheel over a pane)
             // This allows scrolling inactive TUI panes by position, not just the focused one
-            let translation = gesture.translation(in: self)
+            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
 
-            switch gesture.state {
-            case .began:
-                scrollAccumulator = 0
-                // Send initial position so TUI knows which pane we're over
-                ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
-                Logger.clauntty.verbose("[MOUSE] TUI scroll began at (\(Int(location.x)), \(Int(location.y)))")
-
-            case .changed:
-                // Update position as finger moves (hover simulation)
-                ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
-
-                // Accumulate scroll and send wheel events
-                scrollAccumulator += translation.y
-                let scrollLines = scrollAccumulator / scrollThreshold
-
-                if abs(scrollLines) >= 1 {
-                    Logger.clauntty.verbose("[MOUSE] TUI scroll: \(Int(scrollLines)) lines at (\(Int(location.x)), \(Int(location.y)))")
-                    ghostty_surface_mouse_scroll(surface, 0, Double(scrollLines), 0)
-                    scrollAccumulator = scrollAccumulator.truncatingRemainder(dividingBy: scrollThreshold)
-                }
-
-                gesture.setTranslation(.zero, in: self)
-
-            case .ended, .cancelled:
-                scrollAccumulator = 0
-
-            default:
-                break
+            // Accumulate scroll and send wheel events
+            scrollAccumulator += dy
+            let scrollLines = scrollAccumulator / scrollThreshold
+            if abs(scrollLines) >= 1 {
+                Logger.clauntty.verbose("[MOUSE] TUI scroll: \(Int(scrollLines)) lines at (\(Int(location.x)), \(Int(location.y)))")
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollLines), 0)
+                scrollAccumulator = scrollAccumulator.truncatingRemainder(dividingBy: scrollThreshold)
             }
             return
         }
 
         // Normal scroll behavior (scrollback history)
-        let translation = gesture.translation(in: self)
+        // Accumulate vertical scroll (negative = scroll up to see history)
+        scrollAccumulator += dy
 
-        switch gesture.state {
-        case .began:
-            scrollAccumulator = 0
+        // Convert to scroll "lines" - Ghostty expects scroll delta in lines
+        // Positive y in gesture = finger moving down = scroll up in history
+        let scrollLines = scrollAccumulator / scrollThreshold
 
-        case .changed:
-            // Accumulate vertical scroll (negative = scroll up to see history)
-            scrollAccumulator += translation.y
+        if abs(scrollLines) >= 1 {
+            // Send scroll to Ghostty (y positive = scroll up/back in history)
+            Logger.clauntty.verbose("[SCROLL] calling ghostty_surface_mouse_scroll with y=\(scrollLines)")
+            ghostty_surface_mouse_scroll(surface, 0, Double(scrollLines), 0)
+            scrollAccumulator = scrollAccumulator.truncatingRemainder(dividingBy: scrollThreshold)
 
-            // Convert to scroll "lines" - Ghostty expects scroll delta in lines
-            // Positive y in gesture = finger moving down = scroll up in history
-            let scrollLines = scrollAccumulator / scrollThreshold
+            // Update selection handles after scroll (positions change)
+            updateSelectionHandlePositions()
 
-            if abs(scrollLines) >= 1 {
-                // Send scroll to Ghostty (y positive = scroll up/back in history)
-                Logger.clauntty.verbose("[SCROLL] calling ghostty_surface_mouse_scroll with y=\(scrollLines)")
-                ghostty_surface_mouse_scroll(surface, 0, Double(scrollLines), 0)
-                scrollAccumulator = scrollAccumulator.truncatingRemainder(dividingBy: scrollThreshold)
-
-                // Update selection handles after scroll (positions change)
-                updateSelectionHandlePositions()
-
-                // Check if we're near the top of scrollback (for lazy loading)
-                // Skip this when on alternate screen - no scrollback there
-                if let callback = onScrollNearTop, !isAlternateScreen {
-                    let offset = scrollbackOffset
-                    if offset < scrollNearTopThreshold {
-                        callback(offset)
-                    }
+            // Check if we're near the top of scrollback (for lazy loading)
+            // Skip this when on alternate screen - no scrollback there
+            if let callback = onScrollNearTop, !isAlternateScreen {
+                let offset = scrollbackOffset
+                if offset < scrollNearTopThreshold {
+                    callback(offset)
                 }
             }
-
-            // Reset translation for incremental tracking
-            gesture.setTranslation(.zero, in: self)
-
-        case .ended, .cancelled:
-            scrollAccumulator = 0
-
-        default:
-            break
         }
     }
 

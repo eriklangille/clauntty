@@ -47,6 +47,21 @@ struct AgentSwitcherView: View {
     @State private var webReturn: UUID?
     /// The web tab a window shows instead of its terminal (window id → web tab id)
     @State private var shownWeb: [UUID: UUID] = [:]
+    /// What a vertical drag in the typed-into window does, chosen when it starts
+    @State private var dragMode: DragMode?
+    /// How far the finger had moved at the last scroll step
+    @State private var scrolledY: CGFloat = 0
+
+    enum DragMode {
+        /// A quick swipe: the next or previous window
+        case page
+        /// A slower drag: scrolls the window's terminal (or page) under the finger
+        case scroll
+    }
+
+    /// Starting faster than this (points a second), a drag in the typed-into window
+    /// pages; slower, it scrolls back through the terminal
+    static let flickSpeed: CGFloat = 700
 
     /// The overview's status line above the windows
     static let headerHeight: CGFloat = 30
@@ -406,18 +421,33 @@ struct AgentSwitcherView: View {
 
     // MARK: Paging
 
-    /// Overview: scrolls freely with momentum. Typing: one swipe, one window, through the
-    /// attention order; the keyboard goes with it.
+    /// Overview: scrolls freely with momentum. Typing: a quick swipe moves one window
+    /// through the attention order, the keyboard going with it; a slower drag scrolls the
+    /// window's terminal, as in a tab.
     private func pager(count: Int, heights: [CGFloat], items: [(id: UUID, session: Session)], loose: [WebTab],
                        maxScroll: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
                 let dx = value.translation.width
                 let dy = value.translation.height
-                guard abs(dy) > abs(dx) else { return }
                 if focused == nil {
+                    guard abs(dy) > abs(dx) else { return }
                     drag = dy
-                } else {
+                    return
+                }
+                if dragMode == nil {
+                    guard abs(dy) > abs(dx) else { return }
+                    // By how fast it starts. The controls have nothing to scroll.
+                    let quick = abs(value.velocity.height) > Self.flickSpeed
+                    dragMode = quick || index >= count ? .page : .scroll
+                    scrolledY = 0
+                    if dragMode == .scroll { scrollFocused(nil, items: items, loose: loose) }
+                }
+                switch dragMode {
+                case .scroll:
+                    scrollFocused(dy - scrolledY, items: items, loose: loose)
+                    scrolledY = dy
+                default:
                     // The controls are one stop past the last window
                     let atEdge = (index == 0 && dy > 0) || (index >= count && dy < 0)
                     drag = atEdge ? dy * 0.3 : dy
@@ -426,6 +456,13 @@ struct AgentSwitcherView: View {
             .onEnded { value in
                 let dy = value.translation.height
                 let projected = value.predictedEndTranslation.height
+                let mode = dragMode
+                dragMode = nil
+                if focused != nil && mode != .page {
+                    // A scroll (or a tap-like drag that never chose) doesn't page
+                    withAnimation(snap) { drag = 0 }
+                    return
+                }
                 if focused == nil {
                     // Carry on with the flick's momentum, then settle within the ends
                     let target = min(max(0, scrollOffset - projected), maxScroll)
@@ -496,6 +533,22 @@ struct AgentSwitcherView: View {
                 index = newIndex
             }
         }
+    }
+
+    /// Scroll the typed-into window under a slow drag: its terminal, as a one-finger drag
+    /// in a tab would, or the page it shows. nil starts the drag.
+    private func scrollFocused(_ dy: CGFloat?, items: [(id: UUID, session: Session)], loose: [WebTab]) {
+        guard let focused else { return }
+        let page = webShown(in: focused) ?? loose.first { $0.id == focused }
+        if let page {
+            guard let dy, let scroll = page.webView?.scrollView else { return }
+            let top = -scroll.adjustedContentInset.top
+            let bottom = max(top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+            let y = min(max(top, scroll.contentOffset.y - dy), bottom)
+            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: false)
+            return
+        }
+        items.first { $0.id == focused }?.session.scrollTerminal?(dy)
     }
 
     /// The rail tapped or scrubbed: show that window (focus follows when the finger lifts)
