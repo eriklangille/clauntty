@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -19,16 +20,26 @@ struct AgentSwitcherView: View {
     @State private var fullscreen = false
     /// Window order, kept while one is focused so windows don't move under your finger
     @State private var frozenOrder: [UUID]?
-    /// The window the list is settled on (it pages one window at a time)
-    @State private var position: UUID?
+    /// The window the pager is settled on: one swipe moves one window, like short videos
+    @State private var index = 0
+    /// The finger's pull while paging
+    @State private var drag: CGFloat = 0
+    /// The keyboard's height, kept when it hides: a focused window is sized for it, so the
+    /// keyboard coming and going never resizes anything
+    @State private var keyboardHeight: CGFloat = 336
+    @State private var keyboardVisible = false
+    /// Bumped when a window's cursor moves (its crop and height follow it)
+    @State private var cursorTick = 0
 
     /// How much of the window above stays in view, below the status bar, to tap
     static let peek: CGFloat = 44
-
     /// Room at the top of each window for its pill
     static let pillStrip: CGFloat = 52
     /// What the terminal keeps at its bottom for the key bar
     static let barReserve: CGFloat = 78
+    /// The key bar above the keyboard
+    static let keyBarAboveKeyboard: CGFloat = 74
+    static let spacing: CGFloat = 10
 
     @EnvironmentObject private var ghosttyApp: GhosttyApp
     @ObservedObject private var themeManager = ThemeManager.shared
@@ -39,68 +50,165 @@ struct AgentSwitcherView: View {
             ?? Color(red: 40 / 255, green: 44 / 255, blue: 52 / 255)
     }
 
+    private let snap = Animation.spring(response: 0.3, dampingFraction: 0.86)
+
     var body: some View {
-        GeometryReader { outer in
-            let fullHeight = outer.size.height
-            VStack(spacing: 0) {
-                GeometryReader { geo in
-                    ScrollViewReader { scroller in
-                        ScrollView {
-                            // One list in every mode: a window keeps its live terminal view.
-                            // Fullscreen shrinks the others away rather than showing the
-                            // window somewhere else, which would make a new, empty terminal.
-                            VStack(spacing: fullscreen ? 0 : 10) {
-                                ForEach(windows, id: \.id) { tab in
-                                    if case .terminal(let session) = tab {
-                                        let hidden = fullscreen && focused != tab.id
-                                        window(for: session, tabId: tab.id, viewport: geo.size, fullHeight: fullHeight, scroller: scroller)
-                                            .frame(height: hidden ? 0 : nil, alignment: .top)
-                                            .clipped()
-                                            .opacity(hidden ? 0 : 1)
-                                            .allowsHitTesting(!hidden)
-                                            .id(tab.id)
-                                    }
-                                }
-                                if !fullscreen {
-                                    controls
-                                }
-                            }
-                            // Pages a window at a time, like short videos
-                            .scrollTargetLayout()
-                            .padding(.horizontal, fullscreen ? 0 : 10)
-                            .padding(.top, fullscreen ? 0 : 2)
-                            // Room to scroll a focused window to the top, clear of the key bar
-                            .padding(.bottom, fullscreen ? 0 : (focused == nil ? 12 : geo.size.height))
-                        }
-                        .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-                        .scrollPosition(id: $position, anchor: .top)
-                        // Windows settle below the status bar with the one above peeking out
-                        .contentMargins(.top, fullscreen ? 0 : Self.peek, for: .scrollContent)
-                        .scrollDisabled(fullscreen)
-                        .scrollDismissesKeyboard(.never)
-                        .onChange(of: fullscreen) { _, on in
-                            if on, let id = focused { position = id }
-                        }
-                        // The keyboard coming up re-snaps the list to the nearest window:
-                        // bring the focused one back to the top once it's in place
-                        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
-                            guard let id = focused else { return }
-                            withAnimation(.spring(duration: 0.3, bounce: 0.05)) { scroller.scrollTo(id, anchor: .top) }
-                        }
-                        .onChange(of: position) { _, settled in
-                            // Typing, a swipe moves the focus (and keyboard) to the window it
-                            // settles on
-                            guard let settled, let current = focused, settled != current,
-                                  case .terminal(let session)? = windows.first(where: { $0.id == settled }) else { return }
-                            withAnimation(.spring(duration: 0.38, bounce: 0.1)) { focused = settled }
-                            sessionManager.switchTo(session)
-                        }
-                    }
+        GeometryReader { geo in
+            let size = geo.size
+            let items = windows.compactMap { tab -> (id: UUID, session: Session)? in
+                if case .terminal(let session) = tab { return (tab.id, session) }
+                return nil
+            }
+            let specs = items.map { spec(for: $0.session, tabId: $0.id, size: size) }
+            let tops = Self.tops(specs.map(\.height), spacing: fullscreen ? 0 : Self.spacing)
+            let current = min(index, max(0, items.count - 1))
+            let anchor: CGFloat = fullscreen ? 0 : (current == 0 ? 4 : Self.peek)
+            let offset = (tops.indices.contains(current) ? anchor - tops[current] : 0) + drag
+
+            VStack(spacing: fullscreen ? 0 : Self.spacing) {
+                // One list in every mode: a window keeps its live terminal view. Fullscreen
+                // shrinks the others away rather than showing the window somewhere else,
+                // which would make a new, empty terminal.
+                ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+                    let hidden = fullscreen && focused != item.id
+                    window(for: item.session, tabId: item.id, index: i, spec: specs[i], size: size)
+                        .frame(height: hidden ? 0 : specs[i].height, alignment: .top)
+                        .clipped()
+                        .opacity(hidden ? 0 : 1)
+                        .allowsHitTesting(!hidden)
                 }
+                if !fullscreen {
+                    controls
+                }
+            }
+            .padding(.horizontal, fullscreen ? 0 : 10)
+            .frame(width: size.width, alignment: .top)
+            .offset(y: offset)
+            .frame(width: size.width, height: size.height, alignment: .top)
+            .contentShape(Rectangle())
+            .simultaneousGesture(fullscreen ? nil : pager(count: items.count, heights: specs.map(\.height), items: items))
+            .onReceive(cursorChanges(items.map(\.session))) { _ in cursorTick &+= 1 }
+        }
+        .ignoresSafeArea(.keyboard)
+        // The window above slides under the status bar: fade it there, so only its last
+        // lines show below
+        .overlay(alignment: .top) {
+            if !fullscreen {
+                GeometryReader { g in
+                    LinearGradient(stops: [
+                        .init(color: background, location: 0),
+                        .init(color: background, location: 0.7),
+                        .init(color: background.opacity(0), location: 1),
+                    ], startPoint: .top, endPoint: .bottom)
+                    .frame(height: g.safeAreaInsets.top + 10)
+                    .offset(y: -g.safeAreaInsets.top)
+                }
+                .allowsHitTesting(false)
             }
         }
         .background(background.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+            if let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect, frame.height > 100 {
+                keyboardHeight = frame.height
+            }
+            keyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardVisible = false
+        }
+    }
+
+    // MARK: Layout
+
+    /// Each window's mode and height, from the same math the window crops with
+    private func spec(for session: Session, tabId: UUID, size: CGSize) -> WindowSpec {
+        _ = cursorTick
+        let isFocused = focused == tabId
+        let isFull = fullscreen && isFocused
+        let info = sessionManager.panes(for: session)
+        let status = info.flatMap { $0.panes.indices.contains($0.activeIndex) ? $0.panes[$0.activeIndex].status : nil } ?? .none
+        let isAgent = session.pane.flatMap { sessionManager.paneStates[$0.paneId] }?.hasAgent ?? false
+        // One size in every mode, so focusing or the keyboard never resizes the pane (and
+        // Claude never redraws): windows only crop it
+        let terminalSize = CGSize(width: size.width, height: size.height - Self.pillStrip)
+        let keyboardSpace = keyboardHeight + Self.keyBarAboveKeyboard
+        let mode: SwitcherWindow.Mode = {
+            if isFull {
+                // Down to the key bar: above the keyboard when it's up
+                return .fullscreen(height: size.height - (keyboardVisible ? keyboardSpace : Self.barReserve))
+            }
+            // The room above the keyboard, below the window above's peek
+            if isFocused { return .focused(maxHeight: max(160, size.height - Self.peek - keyboardSpace - 8)) }
+            return status == .blocked ? .blocked : .collapsed
+        }()
+        let width = isFull ? size.width : size.width - 20
+        let height = SwitcherWindow.height(cursor: session.cursorRow, mode: mode, isAgent: isAgent,
+                                           terminalSize: terminalSize, windowWidth: width)
+        return WindowSpec(mode: mode, isAgent: isAgent, status: status, terminalSize: terminalSize, width: width, height: height)
+    }
+
+    struct WindowSpec {
+        let mode: SwitcherWindow.Mode
+        let isAgent: Bool
+        let status: PaneStatus
+        let terminalSize: CGSize
+        let width: CGFloat
+        let height: CGFloat
+    }
+
+    static func tops(_ heights: [CGFloat], spacing: CGFloat) -> [CGFloat] {
+        var y: CGFloat = 0
+        return heights.map { h in
+            defer { y += h + spacing }
+            return y
+        }
+    }
+
+    private func cursorChanges(_ sessions: [Session]) -> AnyPublisher<Void, Never> {
+        // dropFirst: a @Published emits its value on subscribing, and this subscribes on
+        // every render
+        Publishers.MergeMany(sessions.map { $0.$cursorRow.dropFirst().removeDuplicates().map { _ in () }.eraseToAnyPublisher() })
+            .eraseToAnyPublisher()
+    }
+
+    // MARK: Paging
+
+    /// One swipe, one window: follows the finger, then springs to the next or previous
+    private func pager(count: Int, heights: [CGFloat], items: [(id: UUID, session: Session)]) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                guard abs(dy) > abs(dx) else { return }
+                let atEdge = (index == 0 && dy > 0) || (index >= count - 1 && dy < 0)
+                drag = atEdge ? dy * 0.3 : dy
+            }
+            .onEnded { value in
+                let dy = value.translation.height
+                let projected = value.predictedEndTranslation.height
+                let current = min(index, max(0, count - 1))
+                let threshold = min(120, (heights.indices.contains(current) ? heights[current] : 120) * 0.3)
+                var target = current
+                if dy < -threshold || projected < -200 { target = current + 1 }
+                if dy > threshold || projected > 200 { target = current - 1 }
+                target = min(max(0, target), max(0, count - 1))
+                let moved = target != current
+                withAnimation(snap) {
+                    index = target
+                    drag = 0
+                    // Typing: the keyboard goes with the swipe
+                    if moved, focused != nil, items.indices.contains(target) {
+                        focused = items[target].id
+                    }
+                }
+                if moved {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    if focused != nil, items.indices.contains(target) {
+                        sessionManager.switchTo(items[target].session)
+                    }
+                }
+            }
     }
 
     // MARK: Windows
@@ -126,71 +234,47 @@ struct AgentSwitcherView: View {
         return info.panes.contains { $0.status == .blocked }
     }
 
-    private func window(for session: Session, tabId: UUID, viewport: CGSize, fullHeight: CGFloat, scroller: ScrollViewProxy?) -> some View {
-        let isFocused = focused == tabId
-        let isFull = fullscreen && isFocused
+    private func window(for session: Session, tabId: UUID, index i: Int, spec: WindowSpec, size: CGSize) -> some View {
         let info = sessionManager.panes(for: session)
         let panes = info?.panes ?? []
         let activeIndex = info?.activeIndex ?? 0
-        let status = panes.indices.contains(activeIndex) ? panes[activeIndex].status : .none
-        let isAgent = session.pane.flatMap { sessionManager.paneStates[$0.paneId] }?.hasAgent ?? false
-        // One size in every mode, so focusing or the keyboard never resizes the pane (and
-        // Claude never redraws): windows only crop it
-        let terminalHeight = fullHeight - Self.pillStrip
-        let mode: SwitcherWindow.Mode = {
-            if isFull { return .fullscreen(height: viewport.height) }
-            // Most of the room above the key bar, so the other windows stay in view below
-            // while you type
-            if isFocused { return .focused(maxHeight: max(180, (viewport.height - Self.barReserve) * 0.6)) }
-            return status == .blocked ? .blocked : .collapsed
-        }()
         return SwitcherWindow(
             session: session,
             title: panes.indices.contains(activeIndex) ? panes[activeIndex].title : session.title,
             workspace: session.pane?.groupTitle ?? session.connectionConfig.displayName,
             panes: panes,
             activeIndex: activeIndex,
-            status: status,
-            isAgent: isAgent,
-            mode: mode,
+            status: spec.status,
+            isAgent: spec.isAgent,
+            mode: spec.mode,
             background: background,
-            terminalSize: CGSize(width: viewport.width, height: terminalHeight),
-            windowWidth: isFull ? viewport.width : viewport.width - 20,
-            onTap: { toggleFocus(tabId, session: session, scroller: scroller) },
+            terminalSize: spec.terminalSize,
+            windowWidth: spec.width,
+            windowHeight: spec.height,
+            onTap: { tapped(tabId, index: i, session: session) },
             onSwipe: { step in swipe(session, step: step) },
-            onPage: { step in page(from: tabId, step: step, scroller: scroller) },
             onFullscreen: { setFullscreen(!fullscreen) }
         )
     }
 
     // MARK: Actions
 
-    private func toggleFocus(_ tabId: UUID, session: Session, scroller: ScrollViewProxy?) {
+    /// Tap a window to type into it; tap the focused one's pill to put it down
+    private func tapped(_ tabId: UUID, index i: Int, session: Session) {
         if fullscreen { return }
-        withAnimation(.spring(duration: 0.38, bounce: 0.1)) {
+        withAnimation(snap) {
             if focused == tabId {
                 focused = nil
                 frozenOrder = nil
             } else {
                 frozenOrder = frozenOrder ?? windows.map(\.id)
                 focused = tabId
+                index = i
             }
         }
         if focused == tabId {
             sessionManager.switchTo(session)
-            // Right after the window grows: a scroll in the same update goes nowhere
-            DispatchQueue.main.async {
-                withAnimation(.spring(duration: 0.38, bounce: 0.1)) { position = tabId }
-            }
         }
-    }
-
-    /// The focused window's pill swiped up or down: type into the next or previous window
-    private func page(from tabId: UUID, step: Int, scroller: ScrollViewProxy?) {
-        let ids = windows.map(\.id)
-        guard let index = ids.firstIndex(of: tabId), ids.indices.contains(index + step),
-              case .terminal(let session) = windows[index + step] else { return }
-        toggleFocus(ids[index + step], session: session, scroller: scroller)
     }
 
     private func setFullscreen(_ on: Bool) {
@@ -237,7 +321,7 @@ struct AgentSwitcherView: View {
 
 /// One workspace's live terminal, scaled and cropped to whole rows, under the tab bar's
 /// glass pill
-private struct SwitcherWindow: View {
+struct SwitcherWindow: View {
     @EnvironmentObject var ghosttyApp: GhosttyApp
     @EnvironmentObject var sessionManager: SessionManager
     @EnvironmentObject var appState: AppState
@@ -253,10 +337,10 @@ private struct SwitcherWindow: View {
     let background: Color
     let terminalSize: CGSize
     let windowWidth: CGFloat
+    /// From the switcher, which lays the windows out with the same math
+    let windowHeight: CGFloat
     let onTap: () -> Void
     let onSwipe: (Int) -> Void
-    /// Vertical swipe on the pill: the next (1) or previous (-1) window
-    let onPage: (Int) -> Void
     let onFullscreen: () -> Void
 
     enum Mode: Equatable {
@@ -272,7 +356,7 @@ private struct SwitcherWindow: View {
 
     @State private var pullDown: CGFloat = 0
 
-    private static let bottomPad: CGFloat = 8
+    static let bottomPad: CGFloat = 8
 
     private var isFocused: Bool {
         switch mode {
@@ -288,13 +372,18 @@ private struct SwitcherWindow: View {
 
     private var scale: CGFloat { windowWidth / terminalSize.width }
 
+    private var crop: (bottom: CGFloat, rows: Int, cell: CGFloat) {
+        Self.crop(cursor: session.cursorRow, mode: mode, isAgent: isAgent, terminalSize: terminalSize, windowWidth: windowWidth)
+    }
+
     /// Where the window's terminal ends (in the terminal's points) and how many rows it
     /// shows, always whole rows from the cursor's
-    private var crop: (bottom: CGFloat, rows: Int, cell: CGFloat) {
+    static func crop(cursor: Session.CursorRow?, mode: Mode, isAgent: Bool, terminalSize: CGSize, windowWidth: CGFloat)
+        -> (bottom: CGFloat, rows: Int, cell: CGFloat) {
+        let scale = windowWidth / terminalSize.width
         let usable = terminalSize.height - AgentSwitcherView.barReserve
-        guard let cursor = session.cursorRow else {
-            let cell: CGFloat = 17
-            return (usable, mode == .blocked ? 7 : 2, cell)
+        guard let cursor else {
+            return (usable, mode == .blocked ? 7 : 2, 17)
         }
         let cell = cursor.height
         // The last whole row above the key bar's strip
@@ -314,15 +403,16 @@ private struct SwitcherWindow: View {
             // Down to the input (Claude's box and footer, or the prompt), as many rows
             // above it as fit: with the keyboard up the rest of the terminal is under it
             let bottom = isAgent ? agentBottom : promptLine
-            let fit = Int((maxHeight - AgentSwitcherView.pillStrip - Self.bottomPad) / (cell * scale))
+            let fit = Int((maxHeight - AgentSwitcherView.pillStrip - bottomPad) / (cell * scale))
             return (bottom, max(2, min(fit, Int(bottom / cell))), cell)
         }
     }
 
-    private var windowHeight: CGFloat {
+    static func height(cursor: Session.CursorRow?, mode: Mode, isAgent: Bool, terminalSize: CGSize, windowWidth: CGFloat) -> CGFloat {
         if case .fullscreen(let height) = mode { return height }
-        let c = crop
-        return AgentSwitcherView.pillStrip + CGFloat(c.rows) * c.cell * scale + Self.bottomPad
+        let c = crop(cursor: cursor, mode: mode, isAgent: isAgent, terminalSize: terminalSize, windowWidth: windowWidth)
+        let scale = windowWidth / terminalSize.width
+        return AgentSwitcherView.pillStrip + CGFloat(c.rows) * c.cell * scale + bottomPad
     }
 
     var body: some View {
@@ -346,7 +436,8 @@ private struct SwitcherWindow: View {
                     .environmentObject(sessionManager)
                     .environmentObject(appState)
             }
-            .allowsHitTesting(isFocused)
+            // Fullscreen it's the terminal; in the switcher a swipe anywhere pages
+            .allowsHitTesting(isFullscreen)
 
             // The pill's strip over the rows above the crop, and the bottom pad over the
             // rows below it
@@ -360,12 +451,12 @@ private struct SwitcherWindow: View {
                     .allowsHitTesting(false)
             }
 
-            if !isFocused {
+            if !isFullscreen {
                 // Taps and sideways swipes go to the window, not the terminal; vertical
-                // drags still scroll the list
+                // drags page the switcher
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture(perform: onTap)
+                    .onTapGesture { if !isFocused { onTap() } }
                     .simultaneousGesture(swipeGesture)
             }
         }
@@ -387,8 +478,7 @@ private struct SwitcherWindow: View {
                 .contentShape(Capsule())
                 .onTapGesture { if !isFullscreen { onTap() } }
                 .gesture(isFullscreen ? pullGesture : nil)
-                .simultaneousGesture(isFullscreen ? nil : (isFocused ? pillGesture : nil))
-                .simultaneousGesture(isFocused ? nil : swipeGesture)
+                .simultaneousGesture(isFullscreen ? nil : swipeGesture)
             Spacer(minLength: 0)
             if isFocused {
                 Button(action: onFullscreen) {
@@ -417,20 +507,6 @@ private struct SwitcherWindow: View {
                 let dy = value.translation.height
                 if abs(dx) > abs(dy), abs(dx) > 40 {
                     onSwipe(dx < 0 ? 1 : -1)
-                }
-            }
-    }
-
-    /// On the focused window's pill, vertical swipes also move between windows
-    private var pillGesture: some Gesture {
-        DragGesture(minimumDistance: 20)
-            .onEnded { value in
-                let dx = value.translation.width
-                let dy = value.translation.height
-                if abs(dx) > abs(dy), abs(dx) > 40 {
-                    onSwipe(dx < 0 ? 1 : -1)
-                } else if abs(dy) > 30 {
-                    onPage(dy < 0 ? 1 : -1)
                 }
             }
     }

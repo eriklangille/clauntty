@@ -2063,8 +2063,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             accessoryBar.isUserInteractionEnabled = false
 
             focusDidChange(false)
-            if isFirstResponder {
-                _ = resignFirstResponder()
+            // A turn later: the tab taking over becomes first responder in the same turn
+            // and takes the keyboard from this one directly. Resigning first would leave
+            // nobody, and the keyboard would start to drop between the two.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isActiveTab, self.isFirstResponder else { return }
+                _ = self.resignFirstResponder()
             }
 
             // Still on screen (agent mode): keep rendering and streaming
