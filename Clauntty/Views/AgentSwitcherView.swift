@@ -63,7 +63,8 @@ struct AgentSwitcherView: View {
                             }
                             .padding(.horizontal, fullscreen ? 0 : 10)
                             .padding(.top, fullscreen ? 0 : 4)
-                            .padding(.bottom, fullscreen ? 0 : 12)
+                            // Room to scroll a focused window to the top, clear of the key bar
+                            .padding(.bottom, fullscreen ? 0 : (focused == nil ? 12 : geo.size.height))
                         }
                         .scrollDisabled(fullscreen)
                         .scrollDismissesKeyboard(.never)
@@ -113,8 +114,9 @@ struct AgentSwitcherView: View {
         let terminalHeight = (isFocused ? viewport.height : fullHeight) - Self.pillStrip
         let mode: SwitcherWindow.Mode = {
             if isFull { return .fullscreen(height: viewport.height) }
-            // About half the room, so the other windows stay in view while you type
-            if isFocused { return .focused(maxHeight: max(200, viewport.height * 0.55)) }
+            // Most of the room above the key bar, so the other windows stay in view below
+            // while you type
+            if isFocused { return .focused(maxHeight: max(180, (viewport.height - Self.barReserve) * 0.6)) }
             return status == .blocked ? .blocked : .collapsed
         }()
         return SwitcherWindow(
@@ -348,7 +350,7 @@ private struct SwitcherWindow: View {
             Spacer(minLength: 0)
             if isFocused {
                 Button(action: onFullscreen) {
-                    Image(systemName: isFullscreen ? "chevron.down" : "arrow.up.left.and.arrow.down.right")
+                    Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 14, weight: .semibold))
                         .frame(width: 36, height: 36)
                         .glass(in: Circle())
