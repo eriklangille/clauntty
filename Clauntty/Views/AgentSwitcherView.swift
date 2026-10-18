@@ -714,13 +714,11 @@ struct SwitcherWindow: View {
         ZStack(alignment: .top) {
             // Clipped by UIKit: the terminal draws with Metal, which SwiftUI's clipping
             // doesn't reach
-            ClipHost(passesTouches: !isFullscreen) {
+            ClipHost(passesTouches: !isFullscreen, contentSize: terminalSize, scale: placement.scale,
+                     origin: CGPoint(x: placement.x, y: placement.y)) {
                 TerminalView(session: session, isTabSelectorPresented: !isFocused, isVisible: true)
                     .id(session.id)
                     .frame(width: terminalSize.width, height: terminalSize.height)
-                    .scaleEffect(placement.scale, anchor: .topLeading)
-                    .offset(x: placement.x, y: placement.y)
-                    .frame(width: windowWidth, height: windowHeight, alignment: .topLeading)
                     .environmentObject(ghosttyApp)
                     .environmentObject(sessionManager)
                     .environmentObject(appState)
@@ -760,7 +758,6 @@ struct SwitcherWindow: View {
         )
         .overlay(alignment: .top) { header }
         .offset(y: pullDown)
-        .animation(.spring(duration: 0.35, bounce: 0.12), value: mode)
     }
 
     private var header: some View {
@@ -830,9 +827,15 @@ struct SwitcherWindow: View {
 }
 
 /// Hosts SwiftUI content in a UIKit view that clips to its bounds, and can let touches
-/// pass through it
+/// pass through it. The content keeps its own size; UIKit scales and places it, with the
+/// switcher's animation: a hosting view centers content that doesn't fit it, so sizing
+/// it to the window made the terminal jump while the window animated.
 private struct ClipHost<Content: View>: UIViewRepresentable {
     var passesTouches = false
+    let contentSize: CGSize
+    let scale: CGFloat
+    /// Where the scaled content's top-left corner goes
+    let origin: CGPoint
     @ViewBuilder let content: () -> Content
 
     final class Container: UIView {
@@ -852,21 +855,32 @@ private struct ClipHost<Content: View>: UIViewRepresentable {
         // would shift the terminal when the window reaches under the keyboard
         host.safeAreaRegions = []
         host.view.backgroundColor = .clear
-        host.view.translatesAutoresizingMaskIntoConstraints = false
+        // Placed by its top-left corner
+        host.view.layer.anchorPoint = .zero
+        host.view.bounds = CGRect(origin: .zero, size: contentSize)
+        place(host.view)
         container.addSubview(host.view)
-        NSLayoutConstraint.activate([
-            host.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            host.view.topAnchor.constraint(equalTo: container.topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
         context.coordinator.host = host
         return container
     }
 
     func updateUIView(_ uiView: Container, context: Context) {
         uiView.passesTouches = passesTouches
-        context.coordinator.host?.rootView = content()
+        guard let host = context.coordinator.host else { return }
+        host.rootView = content()
+        if host.view.bounds.size != contentSize {
+            host.view.bounds = CGRect(origin: .zero, size: contentSize)
+        }
+        if #available(iOS 18.0, *), let animation = context.transaction.animation {
+            UIView.animate(animation) { place(host.view) }
+        } else {
+            place(host.view)
+        }
+    }
+
+    private func place(_ view: UIView) {
+        view.center = origin
+        view.transform = CGAffineTransform(scaleX: scale, y: scale)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
