@@ -25,8 +25,6 @@ struct AgentSwitcherView: View {
     /// The window typed into (its tab id)
     @State private var focused: UUID?
     @State private var fullscreen = false
-    /// Window order, kept while one is focused so windows don't move under your finger
-    @State private var frozenOrder: [UUID]?
     /// The window the pager is settled on: one swipe moves one window, like short videos
     @State private var index = 0
     /// The finger's pull while paging
@@ -83,8 +81,8 @@ struct AgentSwitcherView: View {
     static let flickAverageSpeed: CGFloat = 450
     static let flickTime: TimeInterval = 0.5
 
-    /// The overview's status line above the windows
-    static let headerHeight: CGFloat = 30
+    /// Above the first window, below the status bar
+    static let topPad: CGFloat = 8
     /// Voice and a new tab, after the windows: the pager's last stop while typing
     static let controlsHeight: CGFloat = 56
 
@@ -134,7 +132,7 @@ struct AgentSwitcherView: View {
                     return Self.webHeight(width: webWidth, size: size)
                 }
             let spacing = fullscreen ? 0 : Self.spacing
-            let lead = fullscreen ? 0 : Self.headerHeight + spacing
+            let lead = fullscreen ? 0 : Self.topPad
             let tops = Self.tops(laidOut, spacing: spacing).map { $0 + lead }
             let focusedIndex = ids.firstIndex { $0 == focused }
             let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, ids.count - 1))
@@ -159,10 +157,6 @@ struct AgentSwitcherView: View {
             }()
 
             VStack(spacing: fullscreen ? 0 : Self.spacing) {
-                if !fullscreen {
-                    header
-                        .frame(height: Self.headerHeight)
-                }
                 // One list in every mode: a window keeps its live terminal view. Fullscreen
                 // shrinks the others away rather than showing the window somewhere else,
                 // which would make a new, empty terminal.
@@ -206,6 +200,7 @@ struct AgentSwitcherView: View {
                         .frame(height: Self.controlsHeight)
                 }
             }
+            .padding(.top, lead)
             .padding(.leading, fullscreen ? 0 : 10)
             .padding(.trailing, fullscreen ? 0 : (focused != nil ? Self.railColumn : 10))
             .frame(width: size.width, alignment: .top)
@@ -267,7 +262,6 @@ struct AgentSwitcherView: View {
                     withAnimation(snap) {
                         self.focused = nil
                         fullscreen = false
-                        frozenOrder = nil
                     }
                 }
             }
@@ -295,7 +289,6 @@ struct AgentSwitcherView: View {
                 let session = items[target].session
                 if items[target].id != focused {
                     withAnimation(snap) {
-                        frozenOrder = items.map(\.id)
                         focused = items[target].id
                         index = target
                         drag = 0
@@ -351,7 +344,6 @@ struct AgentSwitcherView: View {
                     // (A web page in front puts the keyboard away itself)
                     if focused != nil && !fullscreen && !focusShowsWeb {
                         focused = nil
-                        frozenOrder = nil
                     }
                 }
             }
@@ -451,7 +443,7 @@ struct AgentSwitcherView: View {
     // MARK: Paging
 
     /// Overview: scrolls freely with momentum. Typing: a quick swipe moves one window
-    /// through the attention order, the keyboard going with it; a slower drag scrolls the
+    /// to the next, the keyboard going with it; a slower drag scrolls the
     /// window's terminal, as in a tab.
     private func pager(count: Int, heights: [CGFloat], items: [(id: UUID, session: Session)], loose: [WebTab],
                        maxScroll: CGFloat) -> some Gesture {
@@ -549,9 +541,8 @@ struct AgentSwitcherView: View {
             }
     }
 
-    /// Type into the window at `target`, then put the queue back in attention order
-    /// (the focused window stays put on screen; the others settle around it). A window
-    /// showing a page, or a web tab's own window, puts the keyboard away instead.
+    /// Type into the window at `target`. A window showing a page, or a web tab's own
+    /// window, puts the keyboard away instead.
     private func commitFocus(_ target: Int, items: [(id: UUID, session: Session)], loose: [WebTab]) {
         // Past the last window: the controls (the keyboard stays with the window)
         if target == items.count + loose.count {
@@ -587,15 +578,6 @@ struct AgentSwitcherView: View {
         } else {
             DispatchQueue.main.async { session.showKeyboard?() }
         }
-        // Answered agents drop down the queue; the next one needing you comes next
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            let order = attentionOrder()
-            guard order != frozenOrder, let newIndex = order.firstIndex(of: id) else { return }
-            withAnimation(snap) {
-                frozenOrder = order
-                index = newIndex
-            }
-        }
     }
 
     /// Scroll the typed-into window under a slow drag: its terminal, as a one-finger drag
@@ -629,12 +611,8 @@ struct AgentSwitcherView: View {
 
     // MARK: Windows
 
-    /// Terminal tabs in attention order (frozen while you type)
-    private var windows: [TabItem] {
-        let tabs = terminalTabs
-        let order = frozenOrder ?? attentionOrder()
-        return tabs.sorted { (order.firstIndex(of: $0.id) ?? .max) < (order.firstIndex(of: $1.id) ?? .max) }
-    }
+    /// Terminal tabs, in tab order: windows stay where they are whatever their agents do
+    private var windows: [TabItem] { terminalTabs }
 
     private var terminalTabs: [TabItem] {
         sessionManager.orderedTabs().filter {
@@ -680,25 +658,6 @@ struct AgentSwitcherView: View {
 
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-
-    /// Needs you, then finished and unseen, then the rest in tab order
-    private func attentionOrder() -> [UUID] {
-        terminalTabs.enumerated().sorted { a, b in
-            let ra = rank(a.element), rb = rank(b.element)
-            return ra != rb ? ra < rb : a.offset < b.offset
-        }.map(\.element.id)
-    }
-
-    private func rank(_ tab: TabItem) -> Int {
-        guard case .terminal(let session) = tab else { return 4 }
-        // Only what needs you moves up. A window that starts or stops working (the one
-        // you just typed into, say) keeps its place.
-        switch attentionStatus(session) {
-        case .blocked: return 0
-        case .done: return 1
-        default: return 2
-        }
     }
 
     /// The most pressing state among a workspace's panes
@@ -758,7 +717,6 @@ struct AgentSwitcherView: View {
         if let web = webShown(in: tabId) { return openWeb(web) }
         if focused == tabId { return }
         withAnimation(snap) {
-            frozenOrder = frozenOrder ?? windows.map(\.id)
             focused = tabId
             index = i
             drag = 0
@@ -806,7 +764,6 @@ struct AgentSwitcherView: View {
                 index = back
             } else {
                 focused = nil
-                frozenOrder = nil
             }
         }
         if let back, case .terminal(let session) = terminals[back] {
@@ -883,34 +840,7 @@ struct AgentSwitcherView: View {
         }
     }
 
-    // MARK: Header and controls
-
-    /// What needs you, or that nothing does
-    private var header: some View {
-        let panes = sessionManager.sessionGroups.flatMap(\.panes)
-        let blocked = panes.filter { $0.status == .blocked }.count
-        let done = panes.filter { $0.status == .done }.count
-        return HStack(spacing: 6) {
-            if blocked == 0 && done == 0 {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(Color(uiColor: PaneStatus.done.tint))
-                Text("All caught up")
-            } else {
-                if blocked > 0 {
-                    Circle().fill(Color(uiColor: PaneStatus.blocked.tint)).frame(width: 7, height: 7)
-                    Text(blocked == 1 ? "1 needs you" : "\(blocked) need you")
-                }
-                if done > 0 {
-                    Circle().fill(Color(uiColor: PaneStatus.done.tint)).frame(width: 7, height: 7)
-                        .padding(.leading, blocked > 0 ? 6 : 0)
-                    Text("\(done) done")
-                }
-            }
-        }
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity)
-    }
+    // MARK: Controls
 
     /// Voice and a new tab, after the windows
     private var controls: some View {
@@ -1559,7 +1489,7 @@ private struct PanePill: View {
     }
 }
 
-/// While typing: one dot per window, in queue order, colored like the tab glyphs, then a
+/// While typing: one dot per window, in order, colored like the tab glyphs, then a
 /// plus for the controls after them. Tap a dot to go there; drag along the rail to scrub.
 private struct StatusRail: View {
     let statuses: [PaneStatus]
