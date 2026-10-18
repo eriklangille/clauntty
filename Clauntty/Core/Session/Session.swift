@@ -330,6 +330,9 @@ class Session: ObservableObject, Identifiable {
     var readCursorRow: (() -> CursorRow?)?
     /// Shows the terminal's paste menu at the cursor; set by the terminal view
     var presentPasteMenu: (() -> Void)?
+    /// Brings the soft keyboard back if it was hidden with the key bar; set by the
+    /// terminal view
+    var showKeyboard: (() -> Void)?
     private var cursorUpdatePending = false
 
     /// Refresh cursorBottom soon (output arrived), at most a few times a second

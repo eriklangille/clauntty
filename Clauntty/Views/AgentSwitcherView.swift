@@ -34,6 +34,8 @@ struct AgentSwitcherView: View {
     @State private var scrollOffset: CGFloat = 0
     /// Where the layout's top is on screen: the key bar is measured from the screen bottom
     @State private var originY: CGFloat = 0
+    /// Bumped whenever the keyboard shows: a pending collapse to the overview checks it
+    @State private var keyboardShows = 0
 
     /// The overview's status line above the windows
     static let headerHeight: CGFloat = 30
@@ -184,6 +186,7 @@ struct AgentSwitcherView: View {
             // How far the keyboard reaches up from the bottom of the screen
             let height = UIScreen.main.bounds.height - frame.minY
             guard height > 100 else { return }
+            keyboardShows &+= 1
             // With the keyboard, so the window follows the key bar up
             withAnimation(.easeOut(duration: 0.25)) {
                 keyboardHeight = height
@@ -191,13 +194,18 @@ struct AgentSwitcherView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            withAnimation(.easeOut(duration: 0.25)) {
-                keyboardVisible = false
-                // The keyboard collapsed: back to the overview of every agent (fullscreen
-                // just gets the room)
-                if focused != nil && !fullscreen {
-                    focused = nil
-                    frozenOrder = nil
+            // The keyboard collapsed: back to the overview of every agent (fullscreen just
+            // gets the room). A moment later, and only if it stayed down: bringing a
+            // hidden keyboard back hides and shows it in quick succession.
+            let shows = keyboardShows
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                guard keyboardShows == shows else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    keyboardVisible = false
+                    if focused != nil && !fullscreen {
+                        focused = nil
+                        frozenOrder = nil
+                    }
                 }
             }
         }
@@ -333,6 +341,8 @@ struct AgentSwitcherView: View {
             drag = 0
         }
         sessionManager.switchTo(items[target].session)
+        let session = items[target].session
+        DispatchQueue.main.async { session.showKeyboard?() }
         // Answered agents drop down the queue; the next one needing you comes next
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             let order = attentionOrder()
@@ -434,6 +444,8 @@ struct AgentSwitcherView: View {
         }
         if focused == tabId {
             sessionManager.switchTo(session)
+            // Typing into it: the keyboard comes up even if it was hidden with the key bar
+            DispatchQueue.main.async { session.showKeyboard?() }
         }
     }
 

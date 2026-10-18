@@ -344,6 +344,7 @@ struct TerminalView: View {
         // dim suggestions from typed text)
         session.readCursorRow = { [weak surface] in surface?.cursorRow() }
         session.presentPasteMenu = { [weak surface] in surface?.showPasteMenuAtCursor() }
+        session.showKeyboard = { [weak surface] in surface?.showSoftwareKeyboard() }
         session.scheduleCursorUpdate()
         session.readTerminalText = { [weak surface] wholeScreen in
             surface?.captureVisibleText(wholeScreen: wholeScreen, styled: true)
