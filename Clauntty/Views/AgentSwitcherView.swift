@@ -191,9 +191,15 @@ struct AgentSwitcherView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            // The keyboard collapsed: the window grows down to the key bar at the bottom.
-            // Tap the pill for the overview.
-            withAnimation(.easeOut(duration: 0.25)) { keyboardVisible = false }
+            withAnimation(.easeOut(duration: 0.25)) {
+                keyboardVisible = false
+                // The keyboard collapsed: back to the overview of every agent (fullscreen
+                // just gets the room)
+                if focused != nil && !fullscreen {
+                    focused = nil
+                    frozenOrder = nil
+                }
+            }
         }
     }
 
@@ -212,8 +218,11 @@ struct AgentSwitcherView: View {
         // Fullscreen is the session view: like a tab, the terminal fits the screen below
         // the pill and above the keyboard (it reserves the key bar itself), so a TUI
         // shows top to bottom. That resizes it once, as switching tabs does.
+        // (The keyboard is measured from the screen's bottom; the layout stops above the
+        // home indicator.)
+        let keyboardTop = UIScreen.main.bounds.height - originY - keyboardHeight
         let terminalSize = isFull
-            ? CGSize(width: size.width, height: size.height - Self.pillStrip - (keyboardVisible ? keyboardHeight : 0))
+            ? CGSize(width: size.width, height: (keyboardVisible ? keyboardTop : size.height) - Self.pillStrip)
             : CGSize(width: size.width, height: size.height - Self.pillStrip)
         let mode: SwitcherWindow.Mode = {
             if isFull {
