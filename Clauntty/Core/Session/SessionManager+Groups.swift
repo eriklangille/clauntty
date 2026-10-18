@@ -218,7 +218,14 @@ extension SessionManager {
     /// the workspace and its tab along); a plain tab (no rtach) closes its session
     func closeTab(_ session: Session) {
         if let groupId = session.groupId {
-            Task { await performPaneAction(.close, groupId: groupId) }
+            session.isClosing = true
+            Task {
+                await performPaneAction(.close, groupId: groupId)
+                // Still there (closing failed): it reconnects as usual again
+                if let paneId = session.pane?.paneId, workspacePaneIds[session.connectionConfig.id]?.contains(paneId) == true {
+                    session.isClosing = false
+                }
+            }
         } else {
             closeSession(session)
         }

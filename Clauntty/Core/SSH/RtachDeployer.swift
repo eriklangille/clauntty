@@ -111,7 +111,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.19.0"
+    static let expectedVersion = "2.19.1"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -156,11 +156,17 @@ class RtachDeployer {
         return "\(Self.remoteBinPath) --proxy -A -C \(Self.clientId) \(sessionPath) $SHELL"
     }
 
-    /// Get the shell command for rtach (assumes already deployed)
-    func shellCommand(sessionId: String = "default") -> String {
+    /// Get the shell command for rtach (assumes already deployed). `create`: start the
+    /// session if it isn't running (-A); otherwise only attach (-a), which exits
+    /// `noSessionExit` if it's gone. A workspace pane's session is started by `rtach ws`,
+    /// so its tab only attaches: re-creating it would bring back a pane that was closed.
+    func shellCommand(sessionId: String = "default", create: Bool = true) -> String {
         let sessionPath = "\(Self.remoteSessionsPath)/\(sessionId)"
-        return "\(Self.remoteBinPath) --proxy -A -C \(Self.clientId) \(sessionPath) $SHELL"
+        return "\(Self.remoteBinPath) --proxy \(create ? "-A" : "-a") -C \(Self.clientId) \(sessionPath) $SHELL"
     }
+
+    /// rtach -a's exit status when the session doesn't exist (2.19.1+)
+    static let noSessionExit = 3
 
     /// List existing rtach sessions on the remote server
     /// Returns sessions sorted by last active time (most recent first)

@@ -369,6 +369,10 @@ class Session: ObservableObject, Identifiable {
     /// Called when session needs reconnection (detected nil channel on send attempt)
     var onNeedsReconnect: (() -> Void)?
 
+    /// The user closed it: when its channel closes (the host ended the session), it
+    /// ends rather than reconnecting
+    var isClosing = false
+
     /// Called when a URL should be opened in the device browser
     var onOpenBrowserRequested: ((String) -> Void)?
 

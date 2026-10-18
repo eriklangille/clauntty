@@ -313,7 +313,7 @@ class SessionManager: ObservableObject {
                 if isNewSession {
                     savePersistence()
                 }
-                shellCommand = deployer.shellCommand(sessionId: sessionId)
+                shellCommand = deployer.shellCommand(sessionId: sessionId, create: session.pane == nil)
                 usingRtach = true
                 Logger.clauntty.debugOnly("SessionManager: using rtach session: \(sessionId.prefix(8))...")
 
@@ -334,13 +334,24 @@ class SessionManager: ObservableObject {
                     session?.handleDataReceived(data)
                 }
             },
-            onChannelInactive: { [weak session] in
+            onChannelInactive: { [weak self, weak session] in
                 Task { @MainActor in
                     // Only if the session is still on a dead channel: it may have been
                     // detached already, or reconnected on a new channel since
                     guard let session, let current = session.sshChannel, !current.isActive else { return }
                     Logger.clauntty.debugOnly("Session \(session.id.uuidString.prefix(8)): channel became inactive, marking disconnected")
+                    let sessionGone = session.channelHandler?.exitStatus == RtachDeployer.noSessionExit
                     session.handleChannelInactive()
+                    // Its rtach session ended (closed, or its shell exited): the tab ends
+                    // too, rather than reconnecting. The host's workspaces no longer have
+                    // the pane, so refreshing takes the tab away.
+                    if sessionGone || session.isClosing {
+                        session.state = .remotelyDeleted
+                        if let self, session.pane != nil {
+                            Task { await self.refreshWorkspaces(for: session.connectionConfig) }
+                        }
+                        return
+                    }
                     // The server may have closed it while the app was suspended; the close
                     // arrives just after foregrounding, past the foreground handler's checks.
                     // Without this the tab sits on a stale screen until the app restarts.

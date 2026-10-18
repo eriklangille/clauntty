@@ -560,6 +560,15 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
         return _context
     }
 
+    private var _exitStatus: Int?
+    /// The remote command's exit status, once it has exited (it arrives before the
+    /// channel closes)
+    var exitStatus: Int? {
+        contextLock.lock()
+        defer { contextLock.unlock() }
+        return _exitStatus
+    }
+
     init(onDataReceived: ((Data) -> Void)?, onChannelInactive: (() -> Void)? = nil) {
         self.onDataReceived = onDataReceived
         self.onChannelInactive = onChannelInactive
@@ -633,6 +642,9 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
         switch event {
         case let status as SSHChannelRequestEvent.ExitStatus:
             Logger.clauntty.debugOnly("SSH channel: remote exit status \(status.exitStatus)")
+            contextLock.lock()
+            _exitStatus = status.exitStatus
+            contextLock.unlock()
         case let signal as SSHChannelRequestEvent.ExitSignal:
             Logger.clauntty.debugOnly("SSH channel: remote exit signal \(signal.signalName)")
         case ChannelEvent.inputClosed:
