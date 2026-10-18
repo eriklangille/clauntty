@@ -48,6 +48,9 @@ struct PillMenu<Label: View>: View {
     static var space: String { "pillMenu" }
     private static var rowHeight: CGFloat { 44 }
     private static var actionsHeight: CGFloat { 50 }
+    /// How far the open panel reaches past the pill, up and to the left: to the corner of
+    /// the window around it
+    private static var margin: CGFloat { 8 }
 
     var body: some View {
         label()
@@ -59,7 +62,8 @@ struct PillMenu<Label: View>: View {
             .background(alignment: .topLeading) {
                 // The pill's glass, which is the panel's: one shape that grows
                 GeometryReader { g in
-                    panel(pill: g.size)
+                    // Short of the screen's edge
+                    panel(pill: g.size, lead: min(Self.margin, max(0, g.frame(in: .global).minX - 6)))
                 }
             }
             .background {
@@ -76,25 +80,31 @@ struct PillMenu<Label: View>: View {
             .onPreferenceChange(RowFrames.self) { rowFrames = $0 }
     }
 
-    private func panel(pill: CGSize) -> some View {
-        let width = max(pill.width, min(maxWidth, 320))
+    /// Open, the panel's corner moves out past the pill's by `lead` (and the margin up),
+    /// so the pill sits inside it with room around
+    private func panel(pill: CGSize, lead: CGFloat) -> some View {
+        let lead = isOpen ? lead : 0
+        let lift = isOpen ? Self.margin : 0
+        let width = max(pill.width + 2 * lead, min(maxWidth + lead, 330))
+        let shape = RoundedRectangle(cornerRadius: isOpen ? 22 : pill.height / 2, style: .continuous)
         return VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: pill.height)
+            Color.clear.frame(height: pill.height + lift)
             if isOpen, let menu {
-                content(menu, pill: pill)
+                content(menu, pill: pill, lead: lead)
                     .transition(.opacity.combined(with: .offset(y: -6)))
             }
         }
         .frame(width: isOpen ? width : pill.width, alignment: .topLeading)
         // The rows stay inside the glass as it grows
-        .clipShape(RoundedRectangle(cornerRadius: isOpen ? 24 : pill.height / 2, style: .continuous))
-        .glass(in: RoundedRectangle(cornerRadius: isOpen ? 24 : pill.height / 2, style: .continuous))
+        .clipShape(shape)
+        .glass(in: shape)
+        .offset(x: -lead, y: -lift)
     }
 
-    private func content(_ menu: WindowMenu, pill: CGSize) -> some View {
+    private func content(_ menu: WindowMenu, pill: CGSize, lead: CGFloat) -> some View {
         let rows = CGFloat(menu.sections.reduce(0) { $0 + $1.count }) * Self.rowHeight
             + CGFloat(max(0, menu.sections.count - 1)) * 9
-        let fixed = pill.height + (menu.caption == nil ? 0 : 22) + Self.actionsHeight + 16
+        let fixed = pill.height + (menu.caption == nil ? 0 : 22) + Self.actionsHeight + 22
         let fits = rows <= room - fixed
         return VStack(alignment: .leading, spacing: 0) {
             if let caption = menu.caption {
@@ -103,7 +113,8 @@ struct PillMenu<Label: View>: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .padding(.horizontal, 14)
+                    .padding(.leading, lead + 12)
+                    .padding(.trailing, 20)
                     .frame(height: 22)
             }
             HStack(spacing: 0) {
@@ -111,29 +122,30 @@ struct PillMenu<Label: View>: View {
                     actionButton(item)
                 }
             }
-            .padding(.horizontal, 6)
-            .frame(height: Self.actionsHeight)
+            .padding(.horizontal, 10)
+            .padding(.top, 4)
+            .frame(height: Self.actionsHeight + 4)
             if !menu.sections.isEmpty {
-                separator
+                separator.padding(.top, 4)
                 if fits {
-                    sections(menu.sections)
+                    sections(menu.sections, lead: lead).padding(.top, 4)
                 } else {
-                    ScrollView { sections(menu.sections) }
+                    ScrollView { sections(menu.sections, lead: lead).padding(.top, 4) }
                         .frame(height: max(Self.rowHeight * 2, room - fixed))
                 }
             }
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 10)
     }
 
-    private func sections(_ sections: [[WindowMenu.Item]]) -> some View {
+    private func sections(_ sections: [[WindowMenu.Item]], lead: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
                 if index > 0 {
                     separator.padding(.vertical, 4)
                 }
                 ForEach(section) { item in
-                    row(item)
+                    row(item, lead: lead)
                 }
             }
         }
@@ -143,7 +155,7 @@ struct PillMenu<Label: View>: View {
         Rectangle()
             .fill(Color.white.opacity(0.12))
             .frame(height: 0.5)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 20)
     }
 
     private func actionButton(_ item: WindowMenu.Item) -> some View {
@@ -161,7 +173,9 @@ struct PillMenu<Label: View>: View {
         .background(frameReader(item))
     }
 
-    private func row(_ item: WindowMenu.Item) -> some View {
+    /// A row's icon in the pill's glyph column: `lead` in from the panel's edge, as the
+    /// pill is
+    private func row(_ item: WindowMenu.Item, lead: CGFloat) -> some View {
         Button { choose(item) } label: {
             // The icons in the pill's glyph column, the current one checked at the end
             HStack(spacing: 10) {
@@ -187,13 +201,13 @@ struct PillMenu<Label: View>: View {
                 }
             }
             .foregroundStyle(item.isDestructive ? Color.red : Color.primary)
-            .padding(.leading, 4)
-            .padding(.trailing, 10)
+            .padding(.leading, max(6, lead))
+            .padding(.trailing, 12)
             .frame(height: Self.rowHeight)
             .contentShape(Rectangle())
         }
-        .buttonStyle(MenuRowStyle(highlighted: highlighted == item.id, cornerRadius: 12))
-        .padding(.horizontal, 6)
+        .buttonStyle(MenuRowStyle(highlighted: highlighted == item.id, cornerRadius: 14))
+        .padding(.horizontal, 8)
         .disabled(item.isDisabled)
         .opacity(item.isDisabled ? 0.35 : 1)
         .background(frameReader(item))
