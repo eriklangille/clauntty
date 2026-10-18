@@ -30,6 +30,13 @@ struct AgentSwitcherView: View {
     @State private var keyboardVisible = false
     /// Bumped when a window's cursor moves (its crop and height follow it)
     @State private var cursorTick = 0
+    /// The overview's scroll position (nothing focused): it scrolls freely
+    @State private var scrollOffset: CGFloat = 0
+
+    /// The overview's status line above the windows
+    static let headerHeight: CGFloat = 30
+    /// The controls row after the windows
+    static let controlsHeight: CGFloat = 56
 
     /// How much of the window above stays in view, below the status bar, to tap
     static let peek: CGFloat = 44
@@ -62,13 +69,30 @@ struct AgentSwitcherView: View {
             let specs = items.map { spec(for: $0.session, tabId: $0.id, size: size) }
             // Fullscreen lays the other windows out at zero height: position with that
             let laidOut = zip(items, specs).map { item, spec in fullscreen && focused != item.id ? 0 : spec.height }
-            let tops = Self.tops(laidOut, spacing: fullscreen ? 0 : Self.spacing)
+            let spacing = fullscreen ? 0 : Self.spacing
+            let lead = fullscreen ? 0 : Self.headerHeight + spacing
+            let tops = Self.tops(laidOut, spacing: spacing).map { $0 + lead }
             let focusedIndex = items.firstIndex { $0.id == focused }
             let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, items.count - 1))
-            let anchor: CGFloat = fullscreen ? 0 : (current == 0 ? 4 : Self.peek)
-            let offset = (tops.indices.contains(current) ? anchor - tops[current] : 0) + drag
+            let contentHeight = lead + laidOut.reduce(0, +) + spacing * CGFloat(max(0, items.count - 1))
+                + (fullscreen ? 0 : spacing + Self.controlsHeight)
+            let maxScroll = max(0, contentHeight - size.height + 20)
+            let offset: CGFloat = {
+                if focused == nil && !fullscreen {
+                    // Overview: free scrolling, rubber-banded past the ends
+                    let raw = scrollOffset - drag
+                    let banded = raw < 0 ? raw * 0.3 : (raw > maxScroll ? maxScroll + (raw - maxScroll) * 0.3 : raw)
+                    return -banded
+                }
+                let anchor: CGFloat = fullscreen ? 0 : (current == 0 ? 4 : Self.peek)
+                return (tops.indices.contains(current) ? anchor - tops[current] : 0) + (focused == nil ? 0 : drag)
+            }()
 
             VStack(spacing: fullscreen ? 0 : Self.spacing) {
+                if !fullscreen {
+                    header
+                        .frame(height: Self.headerHeight)
+                }
                 // One list in every mode: a window keeps its live terminal view. Fullscreen
                 // shrinks the others away rather than showing the window somewhere else,
                 // which would make a new, empty terminal.
@@ -82,6 +106,7 @@ struct AgentSwitcherView: View {
                 }
                 if !fullscreen {
                     controls
+                        .frame(height: Self.controlsHeight)
                 }
             }
             .padding(.horizontal, fullscreen ? 0 : 10)
@@ -89,7 +114,28 @@ struct AgentSwitcherView: View {
             .offset(y: offset)
             .frame(width: size.width, height: size.height, alignment: .top)
             .contentShape(Rectangle())
-            .simultaneousGesture(fullscreen ? nil : pager(count: items.count, heights: specs.map(\.height), items: items))
+            .simultaneousGesture(fullscreen ? nil : pager(count: items.count, heights: specs.map(\.height), items: items, maxScroll: maxScroll))
+            .overlay(alignment: .trailing) {
+                if focused != nil && !fullscreen {
+                    StatusRail(statuses: items.map { attentionStatus($0.session) }, current: current) { target in
+                        jump(to: target, items: items)
+                    } onScrubEnd: { target in
+                        commitFocus(target, items: items)
+                    }
+                    .padding(.trailing, 2)
+                    // Centered in the room above the keyboard
+                    .frame(height: size.height - keyboardHeight - Self.keyBarAboveKeyboard, alignment: .center)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+            .onChange(of: focused) { old, new in
+                // Back to the overview: keep the window where it was on screen
+                if new == nil, old != nil, tops.indices.contains(current) {
+                    let anchor: CGFloat = current == 0 ? 4 : Self.peek
+                    scrollOffset = min(max(0, tops[current] - anchor), maxScroll)
+                }
+            }
             .onReceive(cursorChanges(items.map(\.session))) { _ in cursorTick &+= 1 }
         }
         .ignoresSafeArea(.keyboard)
@@ -119,6 +165,13 @@ struct AgentSwitcherView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardVisible = false
+            // The keyboard put away: back to the overview
+            if focused != nil && !fullscreen {
+                withAnimation(snap) {
+                    focused = nil
+                    frozenOrder = nil
+                }
+            }
         }
     }
 
@@ -177,64 +230,117 @@ struct AgentSwitcherView: View {
 
     // MARK: Paging
 
-    /// One swipe, one window: follows the finger, then springs to the next or previous
-    private func pager(count: Int, heights: [CGFloat], items: [(id: UUID, session: Session)]) -> some Gesture {
+    /// Overview: scrolls freely with momentum. Typing: one swipe, one window, through the
+    /// attention order; the keyboard goes with it.
+    private func pager(count: Int, heights: [CGFloat], items: [(id: UUID, session: Session)], maxScroll: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
                 let dx = value.translation.width
                 let dy = value.translation.height
                 guard abs(dy) > abs(dx) else { return }
-                let atEdge = (index == 0 && dy > 0) || (index >= count - 1 && dy < 0)
-                drag = atEdge ? dy * 0.3 : dy
+                if focused == nil {
+                    drag = dy
+                } else {
+                    let atEdge = (index == 0 && dy > 0) || (index >= count - 1 && dy < 0)
+                    drag = atEdge ? dy * 0.3 : dy
+                }
             }
             .onEnded { value in
                 let dy = value.translation.height
                 let projected = value.predictedEndTranslation.height
+                if focused == nil {
+                    // Carry on with the flick's momentum, then settle within the ends
+                    let target = min(max(0, scrollOffset - projected), maxScroll)
+                    withAnimation(.spring(response: 0.5, dampingFraction: 1)) {
+                        scrollOffset = target
+                        drag = 0
+                    }
+                    return
+                }
                 let current = min(index, max(0, count - 1))
                 let threshold = min(120, (heights.indices.contains(current) ? heights[current] : 120) * 0.3)
                 var target = current
                 if dy < -threshold || projected < -200 { target = current + 1 }
                 if dy > threshold || projected > 200 { target = current - 1 }
                 target = min(max(0, target), max(0, count - 1))
-                let moved = target != current
-                withAnimation(snap) {
-                    index = target
-                    drag = 0
-                    // Typing: the keyboard goes with the swipe
-                    if moved, focused != nil, items.indices.contains(target) {
-                        focused = items[target].id
-                    }
+                if target == current {
+                    withAnimation(snap) { drag = 0 }
+                    return
                 }
-                if moved {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    if focused != nil, items.indices.contains(target) {
-                        sessionManager.switchTo(items[target].session)
-                    }
-                }
+                commitFocus(target, items: items)
             }
+    }
+
+    /// Type into the window at `target`, then put the queue back in attention order
+    /// (the focused window stays put on screen; the others settle around it)
+    private func commitFocus(_ target: Int, items: [(id: UUID, session: Session)]) {
+        guard items.indices.contains(target) else { return }
+        let id = items[target].id
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(snap) {
+            focused = id
+            index = target
+            drag = 0
+        }
+        sessionManager.switchTo(items[target].session)
+        // Answered agents drop down the queue; the next one needing you comes next
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            let order = attentionOrder()
+            guard order != frozenOrder, let newIndex = order.firstIndex(of: id) else { return }
+            withAnimation(snap) {
+                frozenOrder = order
+                index = newIndex
+            }
+        }
+    }
+
+    /// The rail tapped or scrubbed: show that window (focus follows when the finger lifts)
+    private func jump(to target: Int, items: [(id: UUID, session: Session)]) {
+        guard items.indices.contains(target), target != index else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        withAnimation(snap) { index = target }
     }
 
     // MARK: Windows
 
-    /// Terminal tabs, the ones that need you first (frozen while you type)
+    /// Terminal tabs in attention order (frozen while you type)
     private var windows: [TabItem] {
-        let tabs = sessionManager.orderedTabs().filter {
+        let tabs = terminalTabs
+        let order = frozenOrder ?? attentionOrder()
+        return tabs.sorted { (order.firstIndex(of: $0.id) ?? .max) < (order.firstIndex(of: $1.id) ?? .max) }
+    }
+
+    private var terminalTabs: [TabItem] {
+        sessionManager.orderedTabs().filter {
             if case .terminal = $0 { return true }
             return false
         }
-        if let order = frozenOrder {
-            return tabs.sorted { (order.firstIndex(of: $0.id) ?? .max) < (order.firstIndex(of: $1.id) ?? .max) }
-        }
-        return tabs.enumerated().sorted { a, b in
-            let ra = needsYou(a.element) ? 0 : 1
-            let rb = needsYou(b.element) ? 0 : 1
-            return ra != rb ? ra < rb : a.offset < b.offset
-        }.map(\.element)
     }
 
-    private func needsYou(_ tab: TabItem) -> Bool {
-        guard case .terminal(let session) = tab, let info = sessionManager.panes(for: session) else { return false }
-        return info.panes.contains { $0.status == .blocked }
+    /// Needs you, then finished and unseen, then working, then the rest; ties keep the
+    /// tab order
+    private func attentionOrder() -> [UUID] {
+        terminalTabs.enumerated().sorted { a, b in
+            let ra = rank(a.element), rb = rank(b.element)
+            return ra != rb ? ra < rb : a.offset < b.offset
+        }.map(\.element.id)
+    }
+
+    private func rank(_ tab: TabItem) -> Int {
+        guard case .terminal(let session) = tab else { return 4 }
+        switch attentionStatus(session) {
+        case .blocked: return 0
+        case .done: return 1
+        case .working: return 2
+        default: return 3
+        }
+    }
+
+    /// The most pressing state among a workspace's panes
+    private func attentionStatus(_ session: Session) -> PaneStatus {
+        let statuses = sessionManager.panes(for: session)?.panes.map(\.status) ?? []
+        for s in [PaneStatus.blocked, .done, .working, .idle] where statuses.contains(s) { return s }
+        return .none
     }
 
     private func window(for session: Session, tabId: UUID, index i: Int, spec: WindowSpec, size: CGSize) -> some View {
@@ -273,6 +379,7 @@ struct AgentSwitcherView: View {
                 frozenOrder = frozenOrder ?? windows.map(\.id)
                 focused = tabId
                 index = i
+                drag = 0
             }
         }
         if focused == tabId {
@@ -293,31 +400,44 @@ struct AgentSwitcherView: View {
         sessionManager.selectPane(groupId: groupId, paneId: info.panes[target].id)
     }
 
-    // MARK: Controls
+    // MARK: Header and controls
+
+    /// What needs you, or that nothing does
+    private var header: some View {
+        let panes = sessionManager.sessionGroups.flatMap(\.panes)
+        let blocked = panes.filter { $0.status == .blocked }.count
+        let done = panes.filter { $0.status == .done }.count
+        return HStack(spacing: 6) {
+            if blocked == 0 && done == 0 {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color(uiColor: PaneStatus.done.tint))
+                Text("All caught up")
+            } else {
+                if blocked > 0 {
+                    Circle().fill(Color(uiColor: PaneStatus.blocked.tint)).frame(width: 7, height: 7)
+                    Text(blocked == 1 ? "1 needs you" : "\(blocked) need you")
+                }
+                if done > 0 {
+                    Circle().fill(Color(uiColor: PaneStatus.done.tint)).frame(width: 7, height: 7)
+                        .padding(.leading, blocked > 0 ? 6 : 0)
+                    Text("\(done) done")
+                }
+            }
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+    }
 
     /// Voice and a new workspace, after the windows
     private var controls: some View {
         HStack(spacing: 14) {
             GlassCircle(systemName: "waveform", size: 44, action: onVoice)
-            if !summary.isEmpty {
-                Text(summary)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
             GlassCircle(systemName: "plus", size: 44, action: onNewTab)
         }
         .padding(.top, 6)
     }
 
-    private var summary: String {
-        let panes = sessionManager.sessionGroups.flatMap(\.panes)
-        let blocked = panes.filter { $0.status == .blocked }.count
-        let working = panes.filter { $0.status == .working }.count
-        var parts: [String] = []
-        if blocked > 0 { parts.append("\(blocked) needs you") }
-        if working > 0 { parts.append("\(working) working") }
-        return parts.isEmpty ? "" : parts.joined(separator: " · ")
-    }
 }
 
 // MARK: - Window
@@ -609,6 +729,48 @@ private struct PanePill: View {
         case .blocked, .done: return Color(uiColor: pane.status.tint)
         default: return Color.white.opacity(0.3)
         }
+    }
+}
+
+/// While typing: one dot per window, in queue order, colored like the tab glyphs. Tap a
+/// dot to go there; drag along the rail to scrub.
+private struct StatusRail: View {
+    let statuses: [PaneStatus]
+    let current: Int
+    let onSelect: (Int) -> Void
+    let onScrubEnd: (Int) -> Void
+
+    private static let pitch: CGFloat = 18
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(statuses.enumerated()), id: \.offset) { i, status in
+                ZStack {
+                    if i == current {
+                        Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
+                            .frame(width: 14, height: 14)
+                    }
+                    if status == .none || status == .idle {
+                        Circle().fill(Color.white.opacity(0.35)).frame(width: 6, height: 6)
+                    } else {
+                        StatusGlyph(status: status).frame(width: 8, height: 8)
+                    }
+                }
+                .frame(width: 24, height: Self.pitch)
+            }
+        }
+        .padding(.vertical, 8)
+        .glass(in: Capsule())
+        .contentShape(Capsule())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in onSelect(slot(at: value.location.y)) }
+                .onEnded { value in onScrubEnd(slot(at: value.location.y)) }
+        )
+    }
+
+    private func slot(at y: CGFloat) -> Int {
+        min(max(0, Int((y - 8) / Self.pitch)), statuses.count - 1)
     }
 }
 
