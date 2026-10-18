@@ -9,6 +9,10 @@ import UIKit
 /// view; collapse or drag its pill down to come back. The typed-into window's pill opens
 /// the tab's session menu (new pane, new tab, ports, close, its panes).
 ///
+/// Web tabs are windows after the terminals, showing the top of the live page. Tap one, or
+/// open a port from a terminal (`clauntty open`), and it goes fullscreen; coming back
+/// returns to the terminal you were typing into.
+///
 /// Every terminal keeps the phone's full size and is only scaled and cropped into its
 /// window, so opening the switcher, focusing or going fullscreen never resizes a pane.
 struct AgentSwitcherView: View {
@@ -38,6 +42,8 @@ struct AgentSwitcherView: View {
     @State private var originY: CGFloat = 0
     /// Bumped whenever the keyboard shows: a pending collapse to the overview checks it
     @State private var keyboardShows = 0
+    /// The terminal typed into when a web tab went fullscreen: back to it after
+    @State private var webReturn: UUID?
 
     /// The overview's status line above the windows
     static let headerHeight: CGFloat = 30
@@ -75,16 +81,23 @@ struct AgentSwitcherView: View {
                 return nil
             }
             let specs = items.enumerated().map { i, item in spec(for: item.session, tabId: item.id, index: i, size: size) }
+            let webs = webTabs
+            let webWidth = size.width - 10 - (focused != nil && !fullscreen ? Self.railColumn : 10)
+            // Every window's id, terminals then web tabs, in layout order
+            let ids = items.map(\.id) + webs.map(\.id)
             // Fullscreen lays the other windows out at zero height: position with that
             let laidOut = zip(items, specs).map { item, spec in fullscreen && focused != item.id ? 0 : spec.height }
+                + webs.map { web in
+                    fullscreen ? (focused == web.id ? size.height : 0) : Self.webHeight(width: webWidth, size: size)
+                }
             let spacing = fullscreen ? 0 : Self.spacing
             let lead = fullscreen ? 0 : Self.headerHeight + spacing
             let tops = Self.tops(laidOut, spacing: spacing).map { $0 + lead }
-            let focusedIndex = items.firstIndex { $0.id == focused }
+            let focusedIndex = ids.firstIndex { $0 == focused }
             let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, items.count - 1))
             // Typing, paged past the last window: on the controls
             let atControls = focused != nil && !fullscreen && index >= items.count
-            let controlsTop = lead + laidOut.reduce(0, +) + spacing * CGFloat(items.count)
+            let controlsTop = lead + laidOut.reduce(0, +) + spacing * CGFloat(ids.count)
             let contentHeight = controlsTop + (fullscreen ? 0 : Self.controlsHeight)
             // The controls stop above the key bar
             let maxScroll = max(0, contentHeight - barTop(size) + Self.spacing)
@@ -117,6 +130,25 @@ struct AgentSwitcherView: View {
                         .clipped()
                         .opacity(hidden ? 0 : 1)
                         .allowsHitTesting(!hidden)
+                }
+                ForEach(Array(webs.enumerated()), id: \.element.id) { i, web in
+                    let isFull = fullscreen && focused == web.id
+                    let hidden = fullscreen && !isFull
+                    WebWindow(
+                        webTab: web,
+                        isFullscreen: isFull,
+                        background: background,
+                        contentSize: CGSize(width: size.width, height: size.height - Self.pillStrip),
+                        windowWidth: isFull ? size.width : webWidth,
+                        windowHeight: laidOut[items.count + i],
+                        menu: isFull ? webMenu(web) : nil,
+                        onOpen: { openWeb(web) },
+                        onExit: { exitWeb(items: items) }
+                    )
+                    .frame(height: hidden ? 0 : laidOut[items.count + i], alignment: .top)
+                    .clipped()
+                    .opacity(hidden ? 0 : 1)
+                    .allowsHitTesting(!hidden)
                 }
                 if !fullscreen {
                     controls
@@ -173,9 +205,11 @@ struct AgentSwitcherView: View {
             .onChange(of: maxScroll) { _, limit in
                 if scrollOffset > limit { withAnimation(snap) { scrollOffset = limit } }
             }
-            // The window typed into closed: back to the overview
-            .onChange(of: items.map(\.id)) { _, ids in
+            // The window typed into closed: back to the overview (or, from a web tab, to
+            // the terminal typed into before)
+            .onChange(of: ids) { _, ids in
                 if let focused, !ids.contains(focused) {
+                    if webReturn != nil { return exitWeb(items: items) }
                     withAnimation(snap) {
                         self.focused = nil
                         fullscreen = false
@@ -185,7 +219,17 @@ struct AgentSwitcherView: View {
             }
             // While typing, focus follows the tab shown: a new tab from the menu, or a pane
             // an agent opened with `rtach ws`
+            // A new web tab (`clauntty tab`, which opens it in the background): show it
+            .onChange(of: webs.map(\.id)) { old, new in
+                if let id = new.first(where: { !old.contains($0) }), let web = webs.first(where: { $0.id == id }) {
+                    openWeb(web)
+                }
+            }
             .onChange(of: sessionManager.activeTab) { _, tab in
+                // A web tab shown: fullscreen
+                if case .web(let id) = tab, let web = webs.first(where: { $0.id == id }) {
+                    return openWeb(web)
+                }
                 guard focused != nil, case .terminal(let sessionId) = tab,
                       let target = items.firstIndex(where: { $0.session.id == sessionId }) else { return }
                 let session = items[target].session
@@ -442,6 +486,19 @@ struct AgentSwitcherView: View {
         }
     }
 
+    /// Web tabs in tab order, after the terminals
+    private var webTabs: [WebTab] {
+        sessionManager.orderedTabs().compactMap {
+            if case .web(let web) = $0 { return web }
+            return nil
+        }
+    }
+
+    /// A web window: its pill over the top of the page
+    static func webHeight(width: CGFloat, size: CGSize) -> CGFloat {
+        pillStrip + 200 * (width / size.width) + SwitcherWindow.bottomPad
+    }
+
     /// Needs you, then finished and unseen, then the rest in tab order
     private func attentionOrder() -> [UUID] {
         terminalTabs.enumerated().sorted { a, b in
@@ -507,6 +564,63 @@ struct AgentSwitcherView: View {
         sessionManager.switchTo(session)
         // Typing into it: the keyboard comes up even if it was hidden with the key bar
         DispatchQueue.main.async { session.showKeyboard?() }
+    }
+
+    /// Show a web tab fullscreen, remembering the terminal typed into
+    private func openWeb(_ web: WebTab) {
+        if !(fullscreen && focused == web.id) {
+            if let focused, focused != web.id, !webTabs.contains(where: { $0.id == focused }) {
+                webReturn = focused
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(duration: 0.42, bounce: 0.1)) {
+                focused = web.id
+                fullscreen = true
+                drag = 0
+            }
+        }
+        if sessionManager.activeTab != .web(web.id) {
+            sessionManager.switchTo(web)
+        }
+    }
+
+    /// Leave a fullscreen web tab: back to the terminal typed into before, keyboard up,
+    /// or to the overview
+    private func exitWeb(items: [(id: UUID, session: Session)]) {
+        let back = webReturn.flatMap { id in items.firstIndex { $0.id == id } }
+        webReturn = nil
+        withAnimation(.spring(duration: 0.42, bounce: 0.1)) {
+            fullscreen = false
+            if let back {
+                focused = items[back].id
+                index = back
+            } else {
+                focused = nil
+                frozenOrder = nil
+            }
+        }
+        if let back {
+            let session = items[back].session
+            sessionManager.switchTo(session)
+            DispatchQueue.main.async { session.showKeyboard?() }
+        }
+    }
+
+    /// A fullscreen web tab's pill: navigation, and close
+    private func webMenu(_ web: WebTab) -> UIMenu {
+        let row: [UIMenuElement] = [
+            UIAction(title: "Back", image: UIImage(systemName: "chevron.backward"),
+                     attributes: web.canGoBack ? [] : .disabled) { _ in web.goBack() },
+            UIAction(title: "Forward", image: UIImage(systemName: "chevron.forward"),
+                     attributes: web.canGoForward ? [] : .disabled) { _ in web.goForward() },
+            UIAction(title: "Reload", image: UIImage(systemName: "arrow.clockwise")) { _ in web.reload() },
+            UIAction(title: "Close", image: UIImage(systemName: "xmark"), attributes: .destructive) { _ in
+                sessionManager.closeWebTab(web)
+            },
+        ]
+        return UIMenu(title: web.urlDisplayString, children: [
+            UIMenu(options: .displayInline, preferredElementSize: .small, children: row),
+        ])
     }
 
     private func setFullscreen(_ on: Bool) {
@@ -823,6 +937,123 @@ struct SwitcherWindow: View {
         if isFullscreen { return .clear }
         if status == .blocked { return Color(uiColor: PaneStatus.blocked.tint).opacity(0.55) }
         return Color.white.opacity(isFocused ? 0.35 : 0.08)
+    }
+}
+
+// MARK: - Web window
+
+/// A web tab: the live page under a pill (globe, page title, port), scaled into the window.
+/// Tap it to go fullscreen; the page keeps one size, so that's a zoom.
+struct WebWindow: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    @ObservedObject var webTab: WebTab
+    let isFullscreen: Bool
+    let background: Color
+    /// The page's size: the screen below the pill
+    let contentSize: CGSize
+    let windowWidth: CGFloat
+    let windowHeight: CGFloat
+    /// The pill's menu, fullscreen
+    let menu: UIMenu?
+    let onOpen: () -> Void
+    let onExit: () -> Void
+
+    @State private var pullDown: CGFloat = 0
+    @State private var menuRequests = 0
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            ClipHost(passesTouches: !isFullscreen, contentSize: contentSize,
+                     scale: isFullscreen ? 1 : windowWidth / contentSize.width,
+                     origin: CGPoint(x: 0, y: AgentSwitcherView.pillStrip)) {
+                WebTabView(webTab: webTab)
+                    .id(webTab.id)
+                    .frame(width: contentSize.width, height: contentSize.height)
+                    .environmentObject(sessionManager)
+            }
+            if !isFullscreen {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onOpen)
+            }
+        }
+        .frame(width: windowWidth, height: windowHeight)
+        .background(background)
+        .clipShape(RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous)
+                .strokeBorder(isFullscreen ? Color.clear : Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .overlay(alignment: .top) { header }
+        .offset(y: pullDown)
+        // A restored tab reconnects when it's shown (in tabs, when switched to): here
+        // it's on screen
+        .task(id: webTab.id) {
+            if webTab.state == .closed {
+                try? await sessionManager.reconnectWebTab(webTab)
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 7) {
+                if webTab.isLoading {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                // The page's title, then its port (the title is the port until it loads)
+                Text(webTab.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                if webTab.pageTitle?.isEmpty == false {
+                    Text(":\(String(webTab.remotePort.port))")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .glass(in: Capsule())
+            .background(MenuAnchor(menu: menu, requests: menuRequests))
+            .contentShape(Capsule())
+            .onTapGesture {
+                if isFullscreen { menuRequests &+= 1 } else { onOpen() }
+            }
+            .gesture(isFullscreen ? pullGesture : nil)
+            Spacer(minLength: 0)
+            if isFullscreen {
+                Button(action: onExit) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .glass(in: Circle())
+                        .padding(6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(-6)
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+        .frame(height: AgentSwitcherView.pillStrip, alignment: .top)
+    }
+
+    /// Drag the pill down to come back
+    private var pullGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in pullDown = max(0, value.translation.height) * 0.6 }
+            .onEnded { value in
+                let exit = value.translation.height > 80
+                withAnimation(.spring(duration: 0.35)) { pullDown = 0 }
+                if exit { onExit() }
+            }
     }
 }
 
