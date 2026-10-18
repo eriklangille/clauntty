@@ -319,6 +319,25 @@ class Session: ObservableObject, Identifiable {
     /// it has a surface.
     var readTerminalText: ((Bool) -> String?)?
 
+    /// The bottom of the cursor in the terminal, in points from its top: agent mode's
+    /// windows crop the terminal to end there (a shell's prompt, Claude's input box)
+    @Published private(set) var cursorBottom: CGFloat?
+    /// Set by the terminal view
+    var readCursorBottom: (() -> CGFloat?)?
+    private var cursorUpdatePending = false
+
+    /// Refresh cursorBottom soon (output arrived), at most a few times a second
+    func scheduleCursorUpdate() {
+        guard !cursorUpdatePending, readCursorBottom != nil else { return }
+        cursorUpdatePending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            self.cursorUpdatePending = false
+            let value = self.readCursorBottom?()
+            if value != self.cursorBottom { self.cursorBottom = value }
+        }
+    }
+
     /// Called when a port forward is requested via OSC 777
     var onPortForwardRequested: ((Int) -> Void)?
 
@@ -631,6 +650,7 @@ class Session: ObservableObject, Identifiable {
 
         // Forward to terminal
         onDataReceived?(data)
+        scheduleCursorUpdate()
 
         // If we were pre-fetching on idle, re-pause now that we have the data
         if isPrefetchingOnIdle {

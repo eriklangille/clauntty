@@ -57,6 +57,10 @@ struct TerminalSurface: UIViewRepresentable {
     /// Whether this terminal is currently the active tab
     var isActive: Bool = true
 
+    /// On screen without being the active tab (agent mode's switcher shows several):
+    /// keeps rendering and streaming output, without the keyboard
+    var isVisible: Bool = false
+
     /// Initial font size for this session (nil = use global default)
     var initialFontSize: Float?
 
@@ -108,6 +112,7 @@ struct TerminalSurface: UIViewRepresentable {
         // Handle focus changes when active state changes. updateUIView runs on every
         // SwiftUI update (e.g. each terminal title change), so only act on real changes.
         uiView.updateActiveFromSwiftUI(isActive)
+        uiView.updateVisibleFromSwiftUI(isVisible)
 
         // Call onSurfaceReady on first update (when coordinator.surfaceView is set but not yet notified)
         // This ensures SwiftUI state updates work properly
@@ -1916,6 +1921,32 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         scheduleSetActive(active, force: false)
     }
 
+    /// Shown without being the active tab: render and stream, no keyboard
+    private var isVisibleOnly = false
+
+    /// Called when a visible-but-inactive terminal starts or stops needing output
+    var onVisibleStateChanged: ((Bool) -> Void)?
+
+    func updateVisibleFromSwiftUI(_ visible: Bool) {
+        guard visible != isVisibleOnly else { return }
+        isVisibleOnly = visible
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isActiveTab || !self.hasAppliedActiveState else { return }
+            self.applyVisible()
+        }
+    }
+
+    /// Rendering and output for an inactive terminal, from isVisibleOnly
+    private func applyVisible() {
+        if let surface = self.surface {
+            ghostty_surface_set_occlusion(surface, isVisibleOnly && !isAppBackgrounded)
+        }
+        onVisibleStateChanged?(isVisibleOnly)
+        if isVisibleOnly {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.forceRedraw() }
+        }
+    }
+
     /// Latest requested active state waiting to be applied after the current SwiftUI update
     private var pendingActive: (active: Bool, force: Bool)?
 
@@ -2031,6 +2062,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             focusDidChange(false)
             if isFirstResponder {
                 _ = resignFirstResponder()
+            }
+
+            // Still on screen (agent mode): keep rendering and streaming
+            if isVisibleOnly {
+                applyVisible()
             }
         }
     }
@@ -2175,6 +2211,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// - Returns: The visible terminal text as a string, or nil if capture failed
     /// - Parameter wholeScreen: include the scrollback, not just the viewport
     /// - Parameter styled: keep the styling as VT (SGR) sequences, lines unwrapped
+    /// The bottom edge of the cursor, in points from the top of this view
+    func cursorBottom() -> CGFloat? {
+        guard let surface = self.surface else { return nil }
+        var x: Double = 0, y: Double = 0, w: Double = 0, h: Double = 0
+        ghostty_surface_ime_point(surface, &x, &y, &w, &h)
+        Logger.clauntty.debugOnly("cursorBottom[\(self.sessionId)]: ime=(\(Int(x)),\(Int(y)),\(Int(w)),\(Int(h))) bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height))")
+        return CGFloat(y + h)
+    }
+
     func captureVisibleText(wholeScreen: Bool = false, styled: Bool = false) -> String? {
         guard let surface = self.surface else {
             Logger.clauntty.warning("captureVisibleText: no surface")

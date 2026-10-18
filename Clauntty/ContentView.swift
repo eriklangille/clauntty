@@ -8,6 +8,8 @@ struct ContentView: View {
 
   @State private var showingNewTabSheet = false
   @State private var showingFullTabSelector = false
+  /// Settings → Agent Mode: the agent switcher instead of the tab bar
+  @AppStorage("agentMode") private var agentMode = false
   @State private var portsSheetSession: Session?
   @State private var hasCheckedAutoConnect = false
   @State private var showingSpeechModelDownload = false
@@ -17,6 +19,14 @@ struct ContentView: View {
   var body: some View {
     NavigationStack {
       if sessionManager.hasSessions {
+        Group {
+        if agentMode {
+          // Agent mode: the switcher replaces the tab bar and the tabs
+          AgentSwitcherView(
+            onNewTab: { showingNewTabSheet = true },
+            onVoice: handleVoiceTapped
+          )
+        } else {
         // Show tabs + content when there are active sessions or web tabs
         // Tab bar overlays terminal content with transparent background
         GeometryReader { geometry in
@@ -100,6 +110,8 @@ struct ContentView: View {
               }
             }
           }
+        }
+        }
         }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingNewTabSheet) {

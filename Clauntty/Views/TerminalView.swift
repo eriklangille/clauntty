@@ -23,6 +23,9 @@ struct TerminalView: View {
     /// Whether the full tab selector is currently presented
     var isTabSelectorPresented: Bool
 
+    /// On screen without being the active tab (agent mode's switcher)
+    var isVisible: Bool = false
+
     /// Reference to the terminal surface view for SSH data flow (wrapped in class for SwiftUI)
     @StateObject private var surfaceHolder = TerminalSurfaceHolder()
 
@@ -80,6 +83,7 @@ struct TerminalView: View {
                     ghosttyApp: ghosttyApp,
                     sessionId: String(session.id.uuidString.prefix(8)),
                     isActive: isActive,
+                    isVisible: isVisible,
                     initialFontSize: session.fontSize,
                     onTextInput: { data in
                         // Send keyboard input to SSH via session
@@ -338,6 +342,8 @@ struct TerminalView: View {
 
         // Let the voice agent read this tab's text, styling included (to tell
         // dim suggestions from typed text)
+        session.readCursorBottom = { [weak surface] in surface?.cursorBottom() }
+        session.scheduleCursorUpdate()
         session.readTerminalText = { [weak surface] wholeScreen in
             surface?.captureVisibleText(wholeScreen: wholeScreen, styled: true)
         }
@@ -362,6 +368,15 @@ struct TerminalView: View {
 
         // Set up callback for active state changes (power management)
         // Pause output streaming when tab is inactive, resume when active
+        surface.onVisibleStateChanged = { [weak session] visible in
+            if visible {
+                session?.resumeOutput()
+                // The phone's size applies while it's on screen here
+                session?.claimActive()
+            } else {
+                session?.pauseOutput()
+            }
+        }
         surface.onActiveStateChanged = { [weak session] active in
             session?.setActiveState(active)
             if active {
