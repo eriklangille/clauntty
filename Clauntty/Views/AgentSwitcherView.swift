@@ -1079,9 +1079,18 @@ struct SwitcherWindow: View {
                     // TUI, else paste (a page goes fullscreen)
                     .onTapGesture { location in
                         guard isFocused, web == nil else { return onTap() }
-                        session.tapTerminal?(CGPoint(x: (location.x - placement.x) / placement.scale,
-                                                     y: (location.y - placement.y) / placement.scale))
+                        session.tapTerminal?(terminalPoint(location, placement))
                     }
+                    // Held: the menu with Paste, as in a tab
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.5)
+                            .sequenced(before: DragGesture(minimumDistance: 0))
+                            .onEnded { value in
+                                guard isFocused, web == nil, case .second(true, let drag?) = value else { return }
+                                session.holdTerminal?(terminalPoint(drag.startLocation, placement))
+                            },
+                        including: isFocused && web == nil ? .all : .subviews
+                    )
                     .simultaneousGesture(swipeGesture)
             }
         }
@@ -1165,7 +1174,12 @@ struct SwitcherWindow: View {
             }
     }
 
-    /// Why the terminal has nothing to show yet, or no more
+    /// A point in the window, in the terminal's points as it's placed
+    private func terminalPoint(_ location: CGPoint, _ placement: (scale: CGFloat, x: CGFloat, y: CGFloat)) -> CGPoint {
+        CGPoint(x: (location.x - placement.x) / placement.scale, y: (location.y - placement.y) / placement.scale)
+    }
+
+        /// Why the terminal has nothing to show yet, or no more
     private var notice: (icon: String?, tint: Color, text: String)? {
         switch session.state {
         case .error: return ("exclamationmark.triangle.fill", .red, "Couldn't connect")

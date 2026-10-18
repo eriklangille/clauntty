@@ -344,6 +344,7 @@ struct TerminalView: View {
         // dim suggestions from typed text)
         session.readCursorRow = { [weak surface] in surface?.cursorRow() }
         session.tapTerminal = { [weak surface] point in surface?.windowTap(at: point) }
+        session.holdTerminal = { [weak surface] point in surface?.windowHold(at: point) }
         session.showKeyboard = { [weak surface] in surface?.showSoftwareKeyboard() }
         session.scrollTerminal = { [weak surface] dy in
             guard let surface else { return }

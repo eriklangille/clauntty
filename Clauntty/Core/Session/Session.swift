@@ -332,6 +332,8 @@ class Session: ObservableObject, Identifiable {
     /// mouse, else the paste menu at the cursor. Set by the terminal view; agent mode's
     /// windows don't take touches themselves.
     var tapTerminal: ((CGPoint) -> Void)?
+    /// A press and hold there: the edit menu (Paste), as a long press shows it
+    var holdTerminal: ((CGPoint) -> Void)?
     /// The terminal has had output since the app started (agent mode's windows say
     /// they're connecting until then)
     @Published private(set) var hasOutput = false

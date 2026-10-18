@@ -1437,7 +1437,6 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
     }
 
-    /// The paste menu at the cursor (agent mode: a tap on the focused window)
     /// A tap on agent mode's window, whose terminal doesn't take touches: a click when a
     /// TUI takes the mouse, else the paste menu at the cursor
     func windowTap(at location: CGPoint) {
@@ -1454,6 +1453,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         showPasteMenuAtCursor()
     }
 
+    /// A press and hold on agent mode's window: the menu there, as a long press shows it
+    /// (Paste even when a TUI takes the mouse)
+    func windowHold(at location: CGPoint) {
+        showEditMenu(at: location)
+    }
+
+    /// The paste menu at the cursor (agent mode: a tap on the focused window)
     func showPasteMenuAtCursor() {
         guard UIPasteboard.general.hasStrings || UIPasteboard.general.hasImages,
               let row = cursorRow() else { return }
