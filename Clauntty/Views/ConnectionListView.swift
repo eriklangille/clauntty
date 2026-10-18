@@ -40,14 +40,6 @@ struct ConnectionListView: View {
                             } label: {
                                 Label("New Workspace…", systemImage: "rectangle.split.2x1")
                             }
-                            // Workspaces closed on this phone
-                            ForEach(sessionManager.hiddenWorkspaces(for: connection), id: \.id) { workspace in
-                                Button {
-                                    openWorkspace(workspace.id, on: connection)
-                                } label: {
-                                    Label("Open \(workspace.name)", systemImage: "rectangle.stack")
-                                }
-                            }
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
@@ -205,15 +197,6 @@ struct ConnectionListView: View {
         }
     }
 
-    private func openWorkspace(_ workspaceId: String, on connection: SavedConnection) {
-        isConnecting = true
-        Task {
-            await sessionManager.openWorkspace(workspaceId, config: connection)
-            isConnecting = false
-            dismiss()
-        }
-    }
-
     private func connect(to connection: SavedConnection) {
         switch connection.authMethod {
         case .password:
@@ -250,18 +233,14 @@ struct ConnectionListView: View {
                     await sessionManager.syncSessionsWithServer(config: connection, deployer: result.deployer)
                 }
 
-                await MainActor.run {
-                    isConnecting = false
-
-                    // Create a new session and tab
-                    let session = sessionManager.createSession(for: connection)
-                    Logger.clauntty.debugOnly("ConnectionListView: created new session \(session.id.uuidString.prefix(8))")
-
-                    // Save persistence immediately
-                    sessionManager.savePersistence()
-
-                    // Navigation happens automatically when sessionManager.hasSessions becomes true
-                    // TerminalView will call sessionManager.connect() via connectSession()
+                // A new tab: a one-pane workspace. Its TerminalView connects it.
+                let session = await sessionManager.openTerminal(on: connection)
+                sessionManager.savePersistence()
+                isConnecting = false
+                if session == nil, let message = sessionManager.workspaceMessage {
+                    sessionManager.workspaceMessage = nil
+                    connectionError = message
+                    showingError = true
                 }
             } catch {
                 await MainActor.run {

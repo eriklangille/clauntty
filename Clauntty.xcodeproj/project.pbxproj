@@ -18,7 +18,6 @@
 		06E63D06C52859FA31DA95C7 /* SSHKeyImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */; };
 		1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */; };
 		3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */; };
-		431B348146F6153B8D328E91 /* PersistedTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */; };
 		570C2F179E1D3237D5566647 /* TabBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DDF3950FD48E767BF27175 /* TabBubble.swift */; };
 		A3DD5A3D2EFE126521BD8AF4 /* TabPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAE48ED4FB13F83D75BD4F8 /* TabPanes.swift */; };
 		5AE31ABCC791B62288ED04F5 /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A3E2A64FA9B3B72703629BB /* ThemeManager.swift */; };
@@ -183,7 +182,6 @@
 		C1000028 /* PortsSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortsSheetView.swift; sourceTree = "<group>"; };
 		C10000A1 /* ImageViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewerView.swift; sourceTree = "<group>"; };
 		C1000029 /* PersistedWebTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedWebTab.swift; sourceTree = "<group>"; };
-		CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PersistedTab.swift; sourceTree = "<group>"; };
 		D2000001 /* GhosttyAppTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyAppTests.swift; path = ../Tests/ClaunttyTests/GhosttyAppTests.swift; sourceTree = "<group>"; };
 		D2000002 /* TerminalSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TerminalSurfaceTests.swift; path = ../Tests/ClaunttyTests/TerminalSurfaceTests.swift; sourceTree = "<group>"; };
 		D2000003 /* KeyboardAccessoryViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = KeyboardAccessoryViewTests.swift; path = ../Tests/ClaunttyTests/KeyboardAccessoryViewTests.swift; sourceTree = "<group>"; };
@@ -405,7 +403,6 @@
 				C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */,
 				C1000023 /* WordList.swift */,
 				BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */,
-				CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */,
 				C1000029 /* PersistedWebTab.swift */,
 			);
 			path = Session;
@@ -677,7 +674,6 @@
 				F9C5C4A2CF04EB4C6A929250 /* ExpandedTabOverlay.swift in Sources */,
 				EE2DD46DA05C44309BB94180 /* FullTabSelector.swift in Sources */,
 				C80A313220D32B0F645D406F /* LiquidGlassTabBarRepresentable.swift in Sources */,
-				431B348146F6153B8D328E91 /* PersistedTab.swift in Sources */,
 				C0000029 /* PersistedWebTab.swift in Sources */,
 				ADA5806394E7136002E7FE76 /* ServerPickerView.swift in Sources */,
 				CC4B62670E3311459A29FF4C /* SSHKey.swift in Sources */,

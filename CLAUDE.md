@@ -96,11 +96,13 @@ running the app in the simulator against the test container (see SSH Testing).
 CoreSimulator is out of date. Run `sudo xcodebuild -runFirstLaunch` in a real terminal on the Mac (over
 SSH, `ssh -t`). It asks for a password, so `!` in Claude Code can't run it.
 
-**Workspace tabs:** each rtach workspace (`rtach ws`) on a connected host is one tab (a `SessionGroup`,
-`SessionManager+Groups.swift`); its panes are the dots, swipes and menu sections. The app refreshes
-`rtach ws list --json` when a host deploys, on foreground and when a tab's menu opens. Closing a
-workspace tab hides it on the phone (reopen from the server row's context menu, which also has "New
-Workspace…"). To try it in the simulator, run `rtach ws new demo` and `rtach ws split -v` in a tab on the
+**Workspace tabs:** with rtach, every terminal tab is an rtach workspace (`rtach ws`): a `SessionGroup`
+in `SessionManager+Groups.swift`, its panes the dots, swipes and menu sections. A new tab is `ws new` in
+`~`; Close is `ws end` (asks first with several panes); sessions in no workspace are adopted with
+`ws add` when a host syncs. The app refreshes `rtach ws list --json` when a host deploys, on foreground,
+when a tab's menu opens and when rtach sends `workspace;…` (a `rtach ws` change from a terminal or an
+agent, shown right away). The server row's context menu has "New Workspace…". Plain tabs only exist
+with rtach turned off. To try it in the simulator, run `rtach ws new demo` and `rtach ws split -v` in a tab on the
 test container, then open the tab's menu. Fake panes for every terminal tab, without a host:
 `xcrun simctl spawn booted defaults write com.octerm.clauntty fakeTabPanes -bool YES` (`NO` to turn off).
 

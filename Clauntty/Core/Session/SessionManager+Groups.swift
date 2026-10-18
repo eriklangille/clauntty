@@ -6,7 +6,7 @@ import os.log
 /// is an rtach session; the tab keeps a Session for each pane it has shown.
 ///
 /// Groups come from rtach workspaces (`rtach ws`): every workspace on a connected host
-/// is a tab, unless the user closed it on this phone.
+/// is a tab. With rtach, every terminal tab is a workspace; a new tab is a one-pane one.
 struct SessionGroup: Identifiable, Equatable {
     let id: UUID
     let connectionId: UUID
@@ -108,16 +108,35 @@ extension SessionManager {
 
     // MARK: Closing
 
-    /// The user closed a group's tab: detach its panes and stop showing the workspace on
-    /// this phone. The panes keep running on the machine.
-    func closeSessionGroup(_ groupId: UUID) {
-        if let group = sessionGroups.first(where: { $0.id == groupId }) {
-            hiddenWorkspaces.insert(Self.workspaceKey(group.connectionId, group.workspaceId))
+    /// The user closed a group's tab: end the workspace and its panes. With more than
+    /// one pane, ask first (ContentView shows `workspaceToEnd`).
+    func requestCloseGroup(_ groupId: UUID) {
+        guard let group = sessionGroups.first(where: { $0.id == groupId }) else { return }
+        if group.panes.count > 1 {
+            workspaceToEnd = group
+        } else {
+            Task { await endWorkspace(groupId) }
         }
-        removeSessionGroup(groupId)
     }
 
-    /// Take a group's tab away (its workspace closed, or the user hid it)
+    /// End a workspace on its host and take its tab away
+    func endWorkspace(_ groupId: UUID) async {
+        guard let group = sessionGroups.first(where: { $0.id == groupId }),
+              let config = sessions.first(where: { $0.groupId == groupId })?.connectionConfig else { return }
+        removeSessionGroup(groupId)
+        do {
+            _ = try await withHost(config) { connection in
+                try await RtachDeployer(connection: connection)
+                    .workspaceCommand(["end", group.workspaceId, "--quiet"], as: WorkspaceEnded.self)
+            }
+        } catch {
+            workspaceMessage = error.localizedDescription
+            // It's still there: bring the tab back
+            await refreshWorkspaces(for: config)
+        }
+    }
+
+    /// Take a group's tab away (its workspace ended)
     private func removeSessionGroup(_ groupId: UUID) {
         sessionGroups.removeAll { $0.id == groupId }
         tabOrder.removeAll { $0 == groupId }
@@ -129,23 +148,6 @@ extension SessionManager {
     }
 
     // MARK: Workspaces from the host
-
-    static func workspaceKey(_ connectionId: UUID, _ workspaceId: String) -> String {
-        "\(connectionId.uuidString)/\(workspaceId)"
-    }
-
-    /// Workspaces closed on this phone. They stay running and can be opened again from
-    /// the server list.
-    var hiddenWorkspaces: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: "clauntty_hidden_workspaces") ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: "clauntty_hidden_workspaces") }
-    }
-
-    /// Workspaces on a host that aren't shown as tabs here
-    func hiddenWorkspaces(for config: SavedConnection) -> [RemoteWorkspace] {
-        let shown = Set(sessionGroups.filter { $0.connectionId == config.id }.map(\.workspaceId))
-        return (knownWorkspaces[config.id] ?? []).filter { !shown.contains($0.id) }
-    }
 
     /// Fetch a host's workspaces and update their tabs
     func refreshWorkspaces(for config: SavedConnection) async {
@@ -172,10 +174,9 @@ extension SessionManager {
     func applyWorkspaces(_ workspaces: [RemoteWorkspace], hostName: String?, config: SavedConnection) {
         knownWorkspaces[config.id] = workspaces
         workspacePaneIds[config.id] = Set(workspaces.flatMap { $0.tabs.flatMap { $0.panes.map(\.id) } })
-        let hidden = hiddenWorkspaces
         var shown = Set<UUID>()
 
-        for workspace in workspaces where !hidden.contains(Self.workspaceKey(config.id, workspace.id)) {
+        for workspace in workspaces {
             let panes = workspace.tabs.enumerated().flatMap { tabIndex, tab in
                 tab.panes.map { pane in
                     TabPane(id: pane.id, title: pane.title.flatMap { $0.isEmpty ? nil : $0 } ?? "shell", status: .none, group: tabIndex)
@@ -303,8 +304,17 @@ extension SessionManager {
         }
     }
 
+    /// A new terminal tab on a host: a one-pane workspace in the home folder. Without
+    /// rtach (no persistent sessions), a plain tab.
+    @discardableResult
+    func openTerminal(on config: SavedConnection) async -> Session? {
+        guard useRtach else { return createSession(for: config) }
+        return await newWorkspace(on: config, folder: "~")
+    }
+
     /// Start a workspace on a host, in `folder` (its git root, if any), and show it
-    func newWorkspace(on config: SavedConnection, folder: String) async {
+    @discardableResult
+    func newWorkspace(on config: SavedConnection, folder: String) async -> Session? {
         let folder = folder.trimmingCharacters(in: .whitespaces)
         do {
             let created = try await withHost(config) { connection in
@@ -312,19 +322,38 @@ extension SessionManager {
                     .workspaceCommand(["new", "--quiet"], in: folder.isEmpty ? "~" : folder, as: WorkspaceCreated.self)
             }
             await refreshWorkspaces(for: config)
-            showWorkspace(created.workspace, config: config)
+            return showWorkspace(created.workspace)
         } catch {
             workspaceMessage = error.localizedDescription
+            return nil
         }
+    }
+
+    /// Sessions on a host that aren't in a workspace (started by an older app, or by
+    /// hand) become one-pane workspaces, so every tab is one
+    func adoptSessions(_ sessionIds: [String], on config: SavedConnection) async {
+        guard !sessionIds.isEmpty else { return }
+        do {
+            _ = try await withHost(config) { connection in
+                try await RtachDeployer(connection: connection)
+                    .workspaceCommand(["add"] + sessionIds + ["--quiet"], as: [WorkspaceCreated].self)
+            }
+            await refreshWorkspaces(for: config)
+        } catch {
+            Logger.clauntty.warning("SessionManager: can't adopt \(sessionIds.count) sessions on \(config.displayName): \(error.localizedDescription)")
+        }
+    }
+
+    private func showWorkspace(_ workspaceId: String) -> Session? {
+        guard let group = sessionGroups.first(where: { $0.workspaceId == workspaceId }),
+              let session = currentSession(of: group) else { return nil }
+        switchTo(session)
+        return session
     }
 
     /// `rtach ws` changed a host's workspaces (from a terminal, or an agent): refresh, and
     /// show the pane it made
     func workspaceChanged(on config: SavedConnection, workspaceId: String?, paneId: String?) async {
-        // Asked to show it: a workspace closed on this phone comes back
-        if let workspaceId {
-            hiddenWorkspaces.remove(Self.workspaceKey(config.id, workspaceId))
-        }
         await refreshWorkspaces(for: config)
         guard let paneId,
               let groupId = sessionGroups.first(where: { $0.panes.contains { $0.id == paneId } })?.id else { return }
@@ -335,19 +364,6 @@ extension SessionManager {
            let session = currentSession(of: group), activeSessionId != session.id {
             switchTo(session)
         }
-    }
-
-    /// Show a workspace closed on this phone again
-    func openWorkspace(_ workspaceId: String, config: SavedConnection) async {
-        hiddenWorkspaces.remove(Self.workspaceKey(config.id, workspaceId))
-        await refreshWorkspaces(for: config)
-        showWorkspace(workspaceId, config: config)
-    }
-
-    private func showWorkspace(_ workspaceId: String, config: SavedConnection) {
-        guard let group = sessionGroups.first(where: { $0.connectionId == config.id && $0.workspaceId == workspaceId }),
-              let session = currentSession(of: group) else { return }
-        switchTo(session)
     }
 
     // MARK: Persistence

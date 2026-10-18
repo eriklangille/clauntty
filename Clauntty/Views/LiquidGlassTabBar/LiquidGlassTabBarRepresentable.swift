@@ -83,8 +83,8 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
             switch tab {
             case .terminal(let session):
                 if let groupId = session.groupId {
-                    // Detaches the group's panes; they keep running on the machine
-                    context.coordinator.sessionManager?.closeSessionGroup(groupId)
+                    // Ends the workspace (asks first when it has several panes)
+                    context.coordinator.sessionManager?.requestCloseGroup(groupId)
                 } else {
                     context.coordinator.sessionManager?.closeSession(session)
                 }

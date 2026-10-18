@@ -157,15 +157,13 @@ class SessionManager: ObservableObject {
     var workspacePaneIds: [UUID: Set<String>] = [:]
     /// A workspace action that failed, to show the user
     @Published var workspaceMessage: String?
+    /// A workspace tab with several panes the user closed: asked before ending them
+    @Published var workspaceToEnd: SessionGroup?
 
     /// UserDefaults key for persisted tabs
-    private let persistedTabsKey = "clauntty_persisted_tabs"
     private let persistedWebTabsKey = "clauntty_persisted_web_tabs"
     private let activeTabIdKey = "clauntty_active_tab_id"
     private let tabOrderKey = "clauntty_tab_order"
-
-    /// Cached persisted tabs (loaded once on startup)
-    private var persistedTabs: [PersistedTab] = []
 
     /// Connect SSH and list existing rtach sessions
     /// Returns sessions and deployer, or nil if rtach is disabled or deployment fails
@@ -253,6 +251,11 @@ class SessionManager: ObservableObject {
             }
             if case .connected = session.state { return }
         }
+        // Already connected (the other caller finished first)
+        if case .connected = session.state, session.hasAttachedChannel {
+            Logger.clauntty.debugOnly("SessionManager.connect: session \(session.id.uuidString.prefix(8)) already connected")
+            return
+        }
         session.state = .connecting
 
         let config = session.connectionConfig
@@ -290,7 +293,7 @@ class SessionManager: ObservableObject {
                     rtachDeployers[poolKey] = newDeployer
                     deployer = newDeployer
                     offerSpawndIfNeeded(newDeployer, config: config)
-                    Task { await refreshWorkspaces(for: config) }
+                    Task { await syncSessionsWithServer(config: config, deployer: newDeployer) }
                     Logger.clauntty.debugOnly("SessionManager: rtach deployed successfully")
                 } catch {
                     Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
@@ -455,7 +458,7 @@ class SessionManager: ObservableObject {
             try await deployer.ensureDeployed()
             rtachDeployers[poolKey] = deployer
             offerSpawndIfNeeded(deployer, config: config)
-            Task { await refreshWorkspaces(for: config) }
+            Task { await syncSessionsWithServer(config: config, deployer: deployer) }
         }
 
         // Reconnect using existing rtach session ID
@@ -1519,100 +1522,31 @@ class SessionManager: ObservableObject {
 
     // MARK: - Tab Persistence
 
-    /// Save current tabs to UserDefaults
+    /// Save the tabs: workspace tabs (plain tabs only exist without rtach, and don't
+    /// persist) and which one is active
     func savePersistence() {
         saveGroups()
-        var tabs: [PersistedTab] = []
-
-        for (index, session) in sessions.enumerated() {
-            guard let rtachId = session.rtachSessionId, session.groupId == nil else { continue }
-
-            let tab = PersistedTab(
-                id: session.id,
-                connectionId: session.connectionConfig.id,
-                rtachSessionId: rtachId,
-                createdAt: session.createdAt,
-                lastActiveAt: Date(),
-                cachedTitle: session.title,
-                cachedDynamicTitle: session.dynamicTitle,
-                orderIndex: index,
-                fontSize: session.fontSize
-            )
-            tabs.append(tab)
-        }
-
-        do {
-            let data = try JSONEncoder().encode(tabs)
-            UserDefaults.standard.set(data, forKey: persistedTabsKey)
-
-            // Also persist the active tab ID
-            if case .terminal(let id) = activeTab {
-                UserDefaults.standard.set(id.uuidString, forKey: activeTabIdKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: activeTabIdKey)
-            }
-
-            Logger.clauntty.debugOnly("SessionManager: persisted \(tabs.count) tabs")
-        } catch {
-            Logger.clauntty.error("SessionManager: failed to persist tabs: \(error.localizedDescription)")
+        if case .terminal(let id) = activeTab {
+            UserDefaults.standard.set(id.uuidString, forKey: activeTabIdKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: activeTabIdKey)
         }
     }
 
-    /// Load persisted tabs (call on app launch)
-    /// Creates Session objects in disconnected state
+    /// Bring back the last run's workspace tabs, disconnected (call on app launch)
     func loadPersistedTabs(connectionStore: ConnectionStore) {
         loadPersistedGroups(connectionStore: connectionStore)
-        guard let data = UserDefaults.standard.data(forKey: persistedTabsKey) else {
-            Logger.clauntty.debugOnly("SessionManager: no persisted tabs found")
-            return
+        if let activeIdString = UserDefaults.standard.string(forKey: activeTabIdKey),
+           let activeId = UUID(uuidString: activeIdString),
+           sessions.contains(where: { $0.id == activeId }) {
+            activeTab = .terminal(activeId)
+        } else if let first = sessions.first {
+            activeTab = .terminal(first.id)
         }
-
-        do {
-            persistedTabs = try JSONDecoder().decode([PersistedTab].self, from: data)
-
-            // Sort by order index to preserve tab order
-            persistedTabs.sort { $0.orderIndex < $1.orderIndex }
-
-            // Create Session objects in disconnected state
-            for persisted in persistedTabs {
-                guard let config = connectionStore.connections.first(where: { $0.id == persisted.connectionId }) else {
-                    Logger.clauntty.warning("SessionManager: connection not found for persisted tab \(persisted.id.uuidString.prefix(8))")
-                    continue
-                }
-
-                let session = Session(connectionConfig: config, id: persisted.id, createdAt: persisted.createdAt)
-                session.rtachSessionId = persisted.rtachSessionId
-                session.dynamicTitle = persisted.cachedDynamicTitle
-                session.fontSize = persisted.fontSize
-                // Note: state is already .disconnected by default
-
-                // Set up state change callback
-                session.onStateChange = { [weak self] in
-                    self?.sessionStateVersion += 1
-                }
-
-                self.sessions.append(session)
-            }
-
-            // Restore the previously active tab, or fall back to first session
-            if let activeIdString = UserDefaults.standard.string(forKey: activeTabIdKey),
-               let activeId = UUID(uuidString: activeIdString),
-               self.sessions.contains(where: { $0.id == activeId }) {
-                self.activeTab = .terminal(activeId)
-                Logger.clauntty.debugOnly("SessionManager: restored active tab \(activeIdString.prefix(8))")
-            } else if let first = self.sessions.first {
-                self.activeTab = .terminal(first.id)
-            }
-
-            Logger.clauntty.debugOnly("SessionManager: loaded \(self.sessions.count) persisted tabs")
-        } catch {
-            Logger.clauntty.error("SessionManager: failed to load persisted tabs: \(error.localizedDescription)")
-        }
+        Logger.clauntty.debugOnly("SessionManager: loaded \(sessionGroups.count) workspace tabs")
     }
 
-    /// Remove a single tab from persistence
     private func removePersistedTab(_ id: UUID) {
-        persistedTabs.removeAll { $0.id == id }
         savePersistence()
     }
 
@@ -1700,60 +1634,16 @@ class SessionManager: ObservableObject {
 
     // MARK: - Session Sync with Server
 
-    /// Sync local tabs with server sessions
-    /// - Marks missing sessions as remotely deleted
-    /// - Auto-creates tabs for sessions not in local persistence
+    /// Bring a host's tabs in line with it: its workspaces become tabs, and sessions in
+    /// no workspace (from an older app, or started by hand) become one-pane workspaces
     func syncSessionsWithServer(config: SavedConnection, deployer: RtachDeployer) async {
         await refreshWorkspaces(for: config)
         do {
-            // Workspace panes come and go with their workspace's tab, not as plain tabs
-            // Every host's: another saved connection to this machine may know the
+            // Every host's panes: another saved connection to this machine may know the
             // workspace already (pane ids are unique)
-            let paneIds = Set(sessions.filter { $0.groupId != nil }.compactMap(\.rtachSessionId))
-                .union(workspacePaneIds.values.joined())
-            let serverSessions = try await deployer.listSessions().filter { !paneIds.contains($0.id) }
-            let serverSessionIds = Set(serverSessions.map { $0.id })
-
-            // Get local rtach IDs for this connection
-            let localSessions = sessions.filter { $0.connectionConfig.id == config.id && $0.groupId == nil }
-            let localRtachIds = Set(localSessions.compactMap { $0.rtachSessionId })
-
-            // 1. Mark missing sessions as remotely deleted
-            for session in localSessions {
-                if let rtachId = session.rtachSessionId, !serverSessionIds.contains(rtachId) {
-                    session.state = .remotelyDeleted
-                    session.remoteClosureReason = "Session no longer exists on server"
-                    Logger.clauntty.debugOnly("SessionManager: marked session \(session.id.uuidString.prefix(8)) as remotely deleted")
-                }
-            }
-
-            // 2. Auto-create tabs for sessions not in local persistence
-            for serverSession in serverSessions where !localRtachIds.contains(serverSession.id) {
-                // Check if this rtach session exists under a DIFFERENT connection (e.g., IP vs DNS for same host)
-                if let existingSession = sessionForRtach(serverSession.id) {
-                    // Update existing session to use the new connection
-                    existingSession.connectionConfig = config
-                    Logger.clauntty.debugOnly("SessionManager: updated connection for existing rtach session \(serverSession.id.prefix(8)) from different host")
-                    continue
-                }
-
-                let session = Session(connectionConfig: config)
-                session.rtachSessionId = serverSession.id
-                session.dynamicTitle = serverSession.title
-                session.state = .disconnected
-
-                // Set up state change callback
-                session.onStateChange = { [weak self] in
-                    self?.sessionStateVersion += 1
-                }
-
-                sessions.append(session)
-                tabOrder.append(session.id)  // Add to global tab order
-                Logger.clauntty.debugOnly("SessionManager: auto-created tab for remote session \(serverSession.id.prefix(8))")
-            }
-
-            savePersistence()
-            saveTabOrder()
+            let paneIds = Set(workspacePaneIds.values.joined())
+            let loose = try await deployer.listSessions().map(\.id).filter { !paneIds.contains($0) }
+            await adoptSessions(loose, on: config)
         } catch {
             Logger.clauntty.error("SessionManager: failed to sync sessions with server: \(error.localizedDescription)")
         }

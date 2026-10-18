@@ -192,6 +192,21 @@ struct ContentView: View {
       Text("Sessions started from Clauntty can't use this Mac's login keychain, so code signing (Xcode builds) fails in them. Install a small helper so new sessions start in the desktop session? Remove it anytime with `rtach spawnd uninstall`.")
     }
     .alert(
+      "End \(sessionManager.workspaceToEnd?.title ?? "Workspace")?",
+      isPresented: Binding(
+        get: { sessionManager.workspaceToEnd != nil },
+        set: { if !$0 { sessionManager.workspaceToEnd = nil } }
+      ),
+      presenting: sessionManager.workspaceToEnd
+    ) { group in
+      Button("End \(group.panes.count) Panes", role: .destructive) {
+        Task { await sessionManager.endWorkspace(group.id) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { group in
+      Text("This ends the programs running in its \(group.panes.count) panes.")
+    }
+    .alert(
       "Workspace",
       isPresented: Binding(
         get: { sessionManager.workspaceMessage != nil },
@@ -293,15 +308,17 @@ struct ContentView: View {
                 Logger.clauntty.warning(
                   "Auto-connect: tab index \(index) out of range (have \(serverTabs.count) tabs), creating new"
                 )
-                let session = sessionManager.createSession(for: connection)
-                sessionsToConnect.append(session)
+                if let session = await sessionManager.openTerminal(on: connection) {
+                  sessionsToConnect.append(session)
+                }
               }
 
             case .newSession:
               // Create a new session
               Logger.clauntty.debugOnly("Auto-connect: creating new session")
-              let session = sessionManager.createSession(for: connection)
-              sessionsToConnect.append(session)
+              if let session = await sessionManager.openTerminal(on: connection) {
+                sessionsToConnect.append(session)
+              }
 
             case .port(let portNum):
               // Port forward - create web tab
@@ -319,8 +336,9 @@ struct ContentView: View {
             sessionsToConnect.append(existingTab)
           } else {
             Logger.clauntty.debugOnly("Auto-connect: no existing tabs, creating new session")
-            let session = sessionManager.createSession(for: connection)
-            sessionsToConnect.append(session)
+            if let session = await sessionManager.openTerminal(on: connection) {
+              sessionsToConnect.append(session)
+            }
           }
         }
 

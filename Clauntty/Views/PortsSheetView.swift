@@ -259,10 +259,12 @@ struct PortsSheetView: View {
     }
 
     private func openNewTerminal() {
-        // Becomes the active tab; its TerminalView connects when the surface is ready
-        _ = sessionManager.createSession(for: config)
-        sessionManager.savePersistence()
-        (onOpenedTab ?? onDismiss)()
+        // A one-pane workspace that becomes the active tab; its TerminalView connects it
+        Task {
+            await sessionManager.openTerminal(on: config)
+            sessionManager.savePersistence()
+            (onOpenedTab ?? onDismiss)()
+        }
     }
 
     private func scanPorts() async {
