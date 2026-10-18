@@ -351,6 +351,7 @@ struct TerminalView: View {
             let middle = CGPoint(x: surface.bounds.midX, y: surface.bounds.midY)
             if let dy { surface.scroll(by: dy, at: middle) } else { surface.beginScroll(at: middle) }
         }
+        session.terminalTakesMouse = { [weak surface] in surface?.isMouseCaptured ?? false }
         session.scheduleCursorUpdate()
         session.readTerminalText = { [weak surface] wholeScreen in
             surface?.captureVisibleText(wholeScreen: wholeScreen, styled: true)

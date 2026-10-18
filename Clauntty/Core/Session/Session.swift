@@ -344,6 +344,8 @@ class Session: ObservableObject, Identifiable {
     /// call is the finger's move in points (down: back through the history). Set by the
     /// terminal view; agent mode's windows don't take touches themselves.
     var scrollTerminal: ((CGFloat?) -> Void)?
+    /// A TUI has taken the mouse (scrolls go to it as wheel events); set by the terminal view
+    var terminalTakesMouse: (() -> Bool)?
     private var cursorUpdatePending = false
 
     /// Refresh cursorBottom soon (output arrived), at most a few times a second

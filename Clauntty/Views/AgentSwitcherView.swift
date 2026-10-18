@@ -55,6 +55,9 @@ struct AgentSwitcherView: View {
     @State private var dragStart = Date()
     /// The fastest the finger went in this drag
     @State private var peakSpeed: CGFloat = 0
+    /// Over a TUI the scroll waits until the drag can't be a flick: it's mouse wheel
+    /// events, which a flick's undo wouldn't take back cleanly
+    @State private var holdScroll = false
 
     enum DragMode {
         /// A quick swipe: the next or previous window
@@ -455,11 +458,17 @@ struct AgentSwitcherView: View {
                     scrolledY = 0
                     dragStart = value.time
                     peakSpeed = 0
-                    if dragMode == .scroll { scrollFocused(nil, items: items, loose: loose) }
+                    holdScroll = dragMode == .scroll && focusedTakesMouse(items: items, loose: loose)
+                    if dragMode == .scroll && !holdScroll { scrollFocused(nil, items: items, loose: loose) }
                 }
                 switch dragMode {
                 case .scroll:
                     peakSpeed = max(peakSpeed, abs(value.velocity.height))
+                    if holdScroll {
+                        guard value.time.timeIntervalSince(dragStart) >= Self.flickTime else { break }
+                        holdScroll = false
+                        scrollFocused(nil, items: items, loose: loose)
+                    }
                     scrollFocused(dy - scrolledY, items: items, loose: loose)
                     scrolledY = dy
                 default:
@@ -478,7 +487,16 @@ struct AgentSwitcherView: View {
                     let average = abs(dy) / max(0.05, duration)
                     let peak = max(peakSpeed, abs(value.velocity.height))
                     let flick = duration < Self.flickTime && (peak > Self.flickPeakSpeed || average > Self.flickAverageSpeed)
-                    guard flick else { return }
+                    let held = holdScroll
+                    holdScroll = false
+                    guard flick else {
+                        // A short slow drag over a TUI: its scroll, now
+                        if held {
+                            scrollFocused(nil, items: items, loose: loose)
+                            scrollFocused(dy, items: items, loose: loose)
+                        }
+                        return
+                    }
                     // A flick after all: put back what it scrolled, then page its way
                     scrollFocused(-scrolledY, items: items, loose: loose)
                     let current = min(index, count)
@@ -577,6 +595,12 @@ struct AgentSwitcherView: View {
             return
         }
         items.first { $0.id == focused }?.session.scrollTerminal?(dy)
+    }
+
+    /// The typed-into window shows a TUI that takes the mouse (scrolls are wheel events)
+    private func focusedTakesMouse(items: [(id: UUID, session: Session)], loose: [WebTab]) -> Bool {
+        guard let focused, webShown(in: focused) == nil, !loose.contains(where: { $0.id == focused }) else { return false }
+        return items.first { $0.id == focused }?.session.terminalTakesMouse?() ?? false
     }
 
     /// The rail tapped or scrubbed: show that window (focus follows when the finger lifts)

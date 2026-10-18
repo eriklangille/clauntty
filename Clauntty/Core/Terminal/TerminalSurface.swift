@@ -199,7 +199,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Returns true if a TUI app has enabled mouse tracking (DECSET 1000/1002/1003)
     /// When true, touch events should be forwarded to the app instead of handled locally
-    private var isMouseCaptured: Bool {
+    var isMouseCaptured: Bool {
         guard let surface = self.surface else { return false }
         return ghostty_surface_mouse_captured(surface)
     }
