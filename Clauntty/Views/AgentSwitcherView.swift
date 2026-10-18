@@ -61,6 +61,15 @@ struct AgentSwitcherView: View {
     /// Over a TUI the scroll waits until the drag can't be a flick: it's mouse wheel
     /// events, which a flick's undo wouldn't take back cleanly
     @State private var holdScroll = false
+    /// Fullscreen, another window just finished or needs you: every window's dot comes
+    /// out of the screen's edge for `edgeTime`
+    @State private var edgeOut = false
+    /// Bumped each time the edge comes out: only the latest timer puts it back
+    @State private var edgeShows = 0
+    /// A finger on the edge keeps it out
+    @State private var edgeHeld = false
+    /// The windows whose news brought it out
+    @State private var edgeNews: Set<UUID> = []
 
     enum DragMode {
         /// A quick swipe: the next or previous window
@@ -80,6 +89,8 @@ struct AgentSwitcherView: View {
     static let flickPeakSpeed: CGFloat = 900
     static let flickAverageSpeed: CGFloat = 450
     static let flickTime: TimeInterval = 0.5
+    /// How long the edge's dots stay out
+    static let edgeTime: TimeInterval = 5
 
     /// Above the first window, below the status bar
     static let topPad: CGFloat = 8
@@ -239,6 +250,31 @@ struct AgentSwitcherView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .trailing) {
+                if fullscreen {
+                    EdgeDots(statuses: items.map { attentionStatus($0.session) },
+                             current: items.firstIndex { $0.id == focused },
+                             news: Set(items.indices.filter { edgeNews.contains(items[$0].id) }),
+                             pulse: edgeShows, isOut: edgeOut) { held in
+                        edgeHeld = held
+                    } onSelect: { target in
+                        hideEdge()
+                        if items[target].id != focused { commitFocus(target, items: items, loose: loose) }
+                    }
+                    // Where the rail is outside fullscreen
+                    .frame(height: barTop(size), alignment: .center)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                }
+            }
+            // Fullscreen, another window finished or needs you: out of the edge
+            .onChange(of: Dictionary(uniqueKeysWithValues: items.map { ($0.id, attentionStatus($0.session)) })) { old, new in
+                guard fullscreen else { return }
+                let news = new.filter { id, status in
+                    id != focused && (status == .done || status == .blocked) && old[id] != nil && old[id] != status
+                }
+                if !news.isEmpty { showEdge(news: Set(news.keys)) }
+            }
+            .onChange(of: fullscreen) { _, on in if !on { hideEdge() } }
             .onChange(of: focused) { old, new in
                 menuWindow = nil
                 // Back to the overview: keep the window where it was on screen
@@ -804,6 +840,31 @@ struct AgentSwitcherView: View {
 
     private func setFullscreen(_ on: Bool) {
         withAnimation(.spring(duration: 0.42, bounce: 0.1)) { fullscreen = on }
+    }
+
+    /// The edge's dots out, with a tap, then back in after `edgeTime` (once let go)
+    private func showEdge(news: Set<UUID>) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        edgeShows &+= 1
+        let shows = edgeShows
+        withAnimation(.spring(duration: 0.45, bounce: 0.3)) {
+            edgeNews = edgeOut ? edgeNews.union(news) : news
+            edgeOut = true
+        }
+        func later() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.edgeTime) {
+                guard edgeShows == shows, edgeOut else { return }
+                if edgeHeld { return later() }
+                hideEdge()
+            }
+        }
+        later()
+    }
+
+    private func hideEdge() {
+        edgeHeld = false
+        guard edgeOut else { return }
+        withAnimation(.spring(duration: 0.35, bounce: 0)) { edgeOut = false }
     }
 
     /// Show the workspace's next or previous pane in this window: its terminals, then its
@@ -1552,6 +1613,112 @@ private struct StatusRail: View {
 
     private func slot(at y: CGFloat) -> Int {
         min(max(0, Int((y - 8) / Self.pitch)), statuses.count + webSlots)
+    }
+}
+
+/// Fullscreen: every window's dot, in order, on a black bump out of the screen's edge, as
+/// the volume's comes out of the side. Out for a moment when another window finishes or
+/// needs you. Tap a dot or slide to one to go there.
+private struct EdgeDots: View {
+    let statuses: [PaneStatus]
+    let current: Int?
+    /// The dots that brought it out: they pulse
+    let news: Set<Int>
+    let pulse: Int
+    let isOut: Bool
+    let onHold: (Bool) -> Void
+    let onSelect: (Int) -> Void
+
+    /// The dot under the finger
+    @State private var highlighted: Int?
+
+    private static let reach: CGFloat = 22
+    private static let pitch: CGFloat = 16
+    /// The curve from the screen's edge out to the bump, at each end
+    private static let neck: CGFloat = 18
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(statuses.enumerated()), id: \.offset) { i, status in
+                ZStack {
+                    if i == (highlighted ?? current) {
+                        Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
+                            .frame(width: 13, height: 13)
+                    }
+                    Group {
+                        if status == .none || status == .idle {
+                            Circle().fill(Color.white.opacity(0.35)).frame(width: 6, height: 6)
+                        } else {
+                            StatusGlyph(status: status).frame(width: 8, height: 8)
+                        }
+                    }
+                    .phaseAnimator([1, news.contains(i) ? 1.8 : 1, 1], trigger: pulse) { dot, scale in
+                        dot.scaleEffect(scale)
+                    }
+                }
+                .frame(width: Self.reach, height: Self.pitch)
+            }
+        }
+        .padding(.vertical, 4)
+        .opacity(isOut ? 1 : 0)
+        .offset(x: isOut ? 0 : Self.reach)
+        .padding(.vertical, Self.neck)
+        .background {
+            BezelBump(reach: isOut ? Self.reach : 0, neck: Self.neck).fill(Color.black)
+        }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if highlighted == nil { onHold(true) }
+                    let dot = slot(at: value.location.y)
+                    if dot != highlighted {
+                        if highlighted != nil { UISelectionFeedbackGenerator().selectionChanged() }
+                        highlighted = dot
+                    }
+                }
+                .onEnded { value in
+                    highlighted = nil
+                    onHold(false)
+                    onSelect(slot(at: value.location.y))
+                }
+        )
+        .allowsHitTesting(isOut)
+    }
+
+    private func slot(at y: CGFloat) -> Int {
+        min(max(0, Int((y - Self.neck - 4) / Self.pitch)), max(0, statuses.count - 1))
+    }
+}
+
+/// Black out of the screen's right edge, `reach` wide, meeting the edge in a curve at
+/// each end, so it reads as the phone's bezel bulging in
+private struct BezelBump: Shape {
+    var reach: CGFloat
+    let neck: CGFloat
+
+    var animatableData: CGFloat {
+        get { reach }
+        set { reach = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let edge = rect.maxX
+        let side = edge - reach
+        var path = Path()
+        // Past the edge a little, so nothing shows between it and the bezel
+        path.move(to: CGPoint(x: edge + 2, y: rect.minY))
+        path.addLine(to: CGPoint(x: edge, y: rect.minY))
+        path.addCurve(to: CGPoint(x: side, y: rect.minY + neck),
+                      control1: CGPoint(x: edge, y: rect.minY + neck * 0.6),
+                      control2: CGPoint(x: side, y: rect.minY + neck * 0.35))
+        path.addLine(to: CGPoint(x: side, y: rect.maxY - neck))
+        path.addCurve(to: CGPoint(x: edge, y: rect.maxY),
+                      control1: CGPoint(x: side, y: rect.maxY - neck * 0.35),
+                      control2: CGPoint(x: edge, y: rect.maxY - neck * 0.6))
+        path.addLine(to: CGPoint(x: edge + 2, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
