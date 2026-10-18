@@ -229,9 +229,21 @@ struct AgentSwitcherView: View {
         // (The keyboard is measured from the screen's bottom; the layout stops above the
         // home indicator.)
         let keyboardTop = UIScreen.main.bounds.height - originY - keyboardHeight
-        let terminalSize = isFull
-            ? CGSize(width: size.width, height: (keyboardVisible ? keyboardTop : size.height) - Self.pillStrip)
-            : CGSize(width: size.width, height: size.height - Self.pillStrip)
+        // Typing into a window resizes its terminal to fill the window, so the whole screen
+        // shows (a TUI too). Fullscreen fits the room above the keyboard. The overview
+        // keeps every terminal at full height, cropped.
+        let width = isFull ? size.width : size.width - 10 - (focused != nil ? Self.railColumn : 10)
+        let terminalSize: CGSize = {
+            if isFull {
+                return CGSize(width: size.width, height: (keyboardVisible ? keyboardTop : size.height) - Self.pillStrip)
+            }
+            if isFocused {
+                let content = barTop(size) - Self.anchor(for: i) - 10 - Self.pillStrip - SwitcherWindow.bottomPad
+                let scale = width / size.width
+                return CGSize(width: size.width, height: content / scale + SwitcherWindow.keyBarReserve)
+            }
+            return CGSize(width: size.width, height: size.height - Self.pillStrip)
+        }()
         let mode: SwitcherWindow.Mode = {
             if isFull {
                 // Down to the key bar: above the keyboard when it's up
@@ -243,7 +255,6 @@ struct AgentSwitcherView: View {
             if isFocused { return .focused(maxHeight: max(160, barTop(size) - Self.anchor(for: i) - 10)) }
             return status == .blocked ? .blocked : .collapsed
         }()
-        let width = isFull ? size.width : size.width - 10 - (focused != nil ? Self.railColumn : 10)
         let height = SwitcherWindow.height(cursor: session.cursorRow, mode: mode, isAgent: isAgent,
                                            terminalSize: terminalSize, windowWidth: width)
         return WindowSpec(mode: mode, isAgent: isAgent, status: status, terminalSize: terminalSize, width: width, height: height)
@@ -542,6 +553,8 @@ struct SwitcherWindow: View {
     @State private var pullDown: CGFloat = 0
 
     static let bottomPad: CGFloat = 8
+    /// What the terminal keeps at its bottom for the key bar while the keyboard is up
+    static let keyBarReserve: CGFloat = 74
 
     private var isFocused: Bool {
         switch mode {
@@ -604,12 +617,25 @@ struct SwitcherWindow: View {
 
     var body: some View {
         let c = crop
-        // Where the terminal's top row goes: the crop's bottom at the window's bottom pad,
-        // or right under the pill when everything fits (a short session)
         let height = windowHeight
-        // Fullscreen: the whole terminal, right under the pill
-        let top = isFullscreen ? AgentSwitcherView.pillStrip : min(height - Self.bottomPad - c.bottom * scale, AgentSwitcherView.pillStrip)
-        let shift = top - (height - terminalSize.height * scale)
+        // Where the scaled terminal's top-left corner goes
+        let placement: (scale: CGFloat, x: CGFloat, y: CGFloat) = {
+            switch mode {
+            case .fullscreen:
+                return (1, 0, AgentSwitcherView.pillStrip)
+            case .focused:
+                // The whole terminal (above the strip it keeps for the key bar), fit into
+                // the window under the pill and centered
+                let rows = terminalSize.height - Self.keyBarReserve
+                let s = min(windowWidth / terminalSize.width,
+                            (height - AgentSwitcherView.pillStrip - Self.bottomPad) / rows)
+                return (s, (windowWidth - terminalSize.width * s) / 2, AgentSwitcherView.pillStrip)
+            default:
+                // The crop's bottom at the window's bottom pad, or right under the pill
+                // when everything fits (a short session)
+                return (scale, 0, min(height - Self.bottomPad - c.bottom * scale, AgentSwitcherView.pillStrip))
+            }
+        }()
         ZStack(alignment: .top) {
             // Clipped by UIKit: the terminal draws with Metal, which SwiftUI's clipping
             // doesn't reach
@@ -617,9 +643,9 @@ struct SwitcherWindow: View {
                 TerminalView(session: session, isTabSelectorPresented: !isFocused, isVisible: true)
                     .id(session.id)
                     .frame(width: terminalSize.width, height: terminalSize.height)
-                    .scaleEffect(scale, anchor: .bottom)
-                    .offset(y: shift)
-                    .frame(width: windowWidth, height: windowHeight, alignment: .bottom)
+                    .scaleEffect(placement.scale, anchor: .topLeading)
+                    .offset(x: placement.x, y: placement.y)
+                    .frame(width: windowWidth, height: windowHeight, alignment: .topLeading)
                     .environmentObject(ghosttyApp)
                     .environmentObject(sessionManager)
                     .environmentObject(appState)
