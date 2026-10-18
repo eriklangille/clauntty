@@ -15,6 +15,10 @@ class WebTab: ObservableObject, Identifiable {
     /// Connection config for reconnection
     let connectionConfig: SavedConnection
 
+    /// The workspace tab it belongs to (a session group id): the one it was opened from.
+    /// Agent mode shows it as that window's last pane.
+    var workspaceId: UUID?
+
     // MARK: - State
 
     enum State: Equatable {
@@ -159,8 +163,10 @@ class WebTab: ObservableObject, Identifiable {
     }
 
     /// Initialize from persisted state (for restoring after app restart)
-    init(id: UUID, remotePort: RemotePort, connectionConfig: SavedConnection, createdAt: Date, lastPath: String?, cachedPageTitle: String?) {
+    init(id: UUID, remotePort: RemotePort, connectionConfig: SavedConnection, createdAt: Date, lastPath: String?,
+         cachedPageTitle: String?, workspaceId: UUID? = nil) {
         self.id = id
+        self.workspaceId = workspaceId
         self.remotePort = remotePort
         self.connectionConfig = connectionConfig
         self.localPort = remotePort.port

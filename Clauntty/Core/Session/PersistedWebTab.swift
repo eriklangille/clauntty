@@ -32,4 +32,7 @@ struct PersistedWebTab: Codable, Identifiable {
 
     /// Order index for tab ordering
     var orderIndex: Int
+
+    /// The workspace tab it belongs to (a session group id), if any
+    var workspaceId: UUID?
 }

@@ -9,9 +9,10 @@ import UIKit
 /// view; collapse or drag its pill down to come back. The typed-into window's pill opens
 /// the tab's session menu (new pane, new tab, ports, close, its panes).
 ///
-/// Web tabs are windows after the terminals, showing the top of the live page. Tap one, or
-/// open a port from a terminal (`clauntty open`), and it goes fullscreen; coming back
-/// returns to the terminal you were typing into.
+/// A web tab is its workspace's last pane (the one it was opened from): swipe the window
+/// to it, tap the page to go fullscreen. Opening a port from a terminal (`clauntty tab`)
+/// goes straight to fullscreen; coming back returns to the terminal you were typing into.
+/// A web tab with no workspace open is a window of its own, after the terminals.
 ///
 /// Every terminal keeps the phone's full size and is only scaled and cropped into its
 /// window, so opening the switcher, focusing or going fullscreen never resizes a pane.
@@ -44,6 +45,8 @@ struct AgentSwitcherView: View {
     @State private var keyboardShows = 0
     /// The terminal typed into when a web tab went fullscreen: back to it after
     @State private var webReturn: UUID?
+    /// The web tab a window shows instead of its terminal (window id → web tab id)
+    @State private var shownWeb: [UUID: UUID] = [:]
 
     /// The overview's status line above the windows
     static let headerHeight: CGFloat = 30
@@ -82,21 +85,26 @@ struct AgentSwitcherView: View {
             }
             let specs = items.enumerated().map { i, item in spec(for: item.session, tabId: item.id, index: i, size: size) }
             let webs = webTabs
+            // Web tabs without a workspace window: windows of their own
+            let loose = webs.filter { web in !items.contains { $0.id == web.workspaceId } }
             let webWidth = size.width - 10 - (focused != nil && !fullscreen ? Self.railColumn : 10)
-            // Every window's id, terminals then web tabs, in layout order
-            let ids = items.map(\.id) + webs.map(\.id)
+            // Every window's id, terminals then loose web tabs, in layout order: the pager's
+            // stops
+            let ids = items.map(\.id) + loose.map(\.id)
             // Fullscreen lays the other windows out at zero height: position with that
             let laidOut = zip(items, specs).map { item, spec in fullscreen && focused != item.id ? 0 : spec.height }
-                + webs.map { web in
-                    fullscreen ? (focused == web.id ? size.height : 0) : Self.webHeight(width: webWidth, size: size)
+                + loose.map { web in
+                    if fullscreen { return focused == web.id ? size.height : 0 }
+                    if focused == web.id { return max(160, barTop(size) - Self.peek - 10) }
+                    return Self.webHeight(width: webWidth, size: size)
                 }
             let spacing = fullscreen ? 0 : Self.spacing
             let lead = fullscreen ? 0 : Self.headerHeight + spacing
             let tops = Self.tops(laidOut, spacing: spacing).map { $0 + lead }
             let focusedIndex = ids.firstIndex { $0 == focused }
-            let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, items.count - 1))
+            let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, ids.count - 1))
             // Typing, paged past the last window: on the controls
-            let atControls = focused != nil && !fullscreen && index >= items.count
+            let atControls = focused != nil && !fullscreen && index >= ids.count
             let controlsTop = lead + laidOut.reduce(0, +) + spacing * CGFloat(ids.count)
             let contentHeight = controlsTop + (fullscreen ? 0 : Self.controlsHeight)
             // The controls stop above the key bar
@@ -131,19 +139,20 @@ struct AgentSwitcherView: View {
                         .opacity(hidden ? 0 : 1)
                         .allowsHitTesting(!hidden)
                 }
-                ForEach(Array(webs.enumerated()), id: \.element.id) { i, web in
+                ForEach(Array(loose.enumerated()), id: \.element.id) { i, web in
                     let isFull = fullscreen && focused == web.id
                     let hidden = fullscreen && !isFull
                     WebWindow(
                         webTab: web,
                         isFullscreen: isFull,
+                        isFocused: focused == web.id,
                         background: background,
-                        contentSize: CGSize(width: size.width, height: size.height - Self.pillStrip),
+                        contentSize: Self.webSize(size),
                         windowWidth: isFull ? size.width : webWidth,
                         windowHeight: laidOut[items.count + i],
-                        menu: isFull ? webMenu(web) : nil,
+                        menu: focused == web.id ? webMenu(web) : nil,
                         onOpen: { openWeb(web) },
-                        onExit: { exitWeb(items: items) }
+                        onExit: { exitWeb() }
                     )
                     .frame(height: hidden ? 0 : laidOut[items.count + i], alignment: .top)
                     .clipped()
@@ -176,14 +185,15 @@ struct AgentSwitcherView: View {
                 .offset(y: typing ? 0 : -200)
             }
             .contentShape(Rectangle())
-            .simultaneousGesture(fullscreen ? nil : pager(count: items.count, heights: specs.map(\.height), items: items, maxScroll: maxScroll))
+            .simultaneousGesture(fullscreen ? nil : pager(count: ids.count, heights: laidOut, items: items, loose: loose, maxScroll: maxScroll))
             .overlay(alignment: .trailing) {
                 if focused != nil && !fullscreen {
                     // A last slot, a plus, for the controls
-                    StatusRail(statuses: items.map { attentionStatus($0.session) }, current: atControls ? items.count : current) { target in
-                        jump(to: target, items: items)
+                    StatusRail(statuses: items.map { attentionStatus($0.session) }, webSlots: loose.count,
+                               current: atControls ? ids.count : current) { target in
+                        jump(to: target, count: ids.count)
                     } onScrubEnd: { target in
-                        commitFocus(target, items: items)
+                        commitFocus(target, items: items, loose: loose)
                     }
                     .frame(width: Self.railColumn)
                     // Centered beside the focused window, in the room above the key bar
@@ -209,7 +219,7 @@ struct AgentSwitcherView: View {
             // the terminal typed into before)
             .onChange(of: ids) { _, ids in
                 if let focused, !ids.contains(focused) {
-                    if webReturn != nil { return exitWeb(items: items) }
+                    if webReturn != nil { return exitWeb() }
                     withAnimation(snap) {
                         self.focused = nil
                         fullscreen = false
@@ -221,6 +231,12 @@ struct AgentSwitcherView: View {
             // an agent opened with `rtach ws`
             // A new web tab (`clauntty tab`, which opens it in the background): show it
             .onChange(of: webs.map(\.id)) { old, new in
+                // A web tab closed: its window shows its terminal again (and a fullscreen
+                // one comes back)
+                for (window, web) in shownWeb where !new.contains(web) {
+                    if fullscreen && focused == window { exitWeb() }
+                    shownWeb[window] = nil
+                }
                 if let id = new.first(where: { !old.contains($0) }), let web = webs.first(where: { $0.id == id }) {
                     openWeb(web)
                 }
@@ -288,7 +304,8 @@ struct AgentSwitcherView: View {
                 guard keyboardShows == shows else { return }
                 withAnimation(.easeOut(duration: 0.25)) {
                     keyboardVisible = false
-                    if focused != nil && !fullscreen {
+                    // (A web page in front puts the keyboard away itself)
+                    if focused != nil && !fullscreen && !focusShowsWeb {
                         focused = nil
                         frozenOrder = nil
                     }
@@ -343,8 +360,10 @@ struct AgentSwitcherView: View {
             if isFocused { return .focused(maxHeight: max(160, barTop(size) - Self.anchor(for: i) - 10)) }
             return status == .blocked ? .blocked : .collapsed
         }()
-        let height = SwitcherWindow.height(cursor: session.cursorRow, mode: mode, isAgent: isAgent,
+        var height = SwitcherWindow.height(cursor: session.cursorRow, mode: mode, isAgent: isAgent,
                                            terminalSize: terminalSize, windowWidth: width)
+        // Showing its web tab, a collapsed window is a web window's height
+        if !isFocused, webShown(in: tabId) != nil { height = Self.webHeight(width: width, size: size) }
         return WindowSpec(mode: mode, isAgent: isAgent, status: status, terminalSize: terminalSize, width: width, height: height)
     }
 
@@ -389,7 +408,8 @@ struct AgentSwitcherView: View {
 
     /// Overview: scrolls freely with momentum. Typing: one swipe, one window, through the
     /// attention order; the keyboard goes with it.
-    private func pager(count: Int, heights: [CGFloat], items: [(id: UUID, session: Session)], maxScroll: CGFloat) -> some Gesture {
+    private func pager(count: Int, heights: [CGFloat], items: [(id: UUID, session: Session)], loose: [WebTab],
+                       maxScroll: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
                 let dx = value.translation.width
@@ -425,20 +445,31 @@ struct AgentSwitcherView: View {
                     withAnimation(snap) { drag = 0 }
                     return
                 }
-                commitFocus(target, items: items)
+                commitFocus(target, items: items, loose: loose)
             }
     }
 
     /// Type into the window at `target`, then put the queue back in attention order
-    /// (the focused window stays put on screen; the others settle around it)
-    private func commitFocus(_ target: Int, items: [(id: UUID, session: Session)]) {
+    /// (the focused window stays put on screen; the others settle around it). A window
+    /// showing a page, or a web tab's own window, puts the keyboard away instead.
+    private func commitFocus(_ target: Int, items: [(id: UUID, session: Session)], loose: [WebTab]) {
         // Past the last window: the controls (the keyboard stays with the window)
-        if target == items.count {
+        if target == items.count + loose.count {
             if index != target { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
             withAnimation(snap) {
                 index = target
                 drag = 0
             }
+            return
+        }
+        if target >= items.count, loose.indices.contains(target - items.count) {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(snap) {
+                focused = loose[target - items.count].id
+                index = target
+                drag = 0
+            }
+            hideKeyboard()
             return
         }
         guard items.indices.contains(target) else { return }
@@ -451,7 +482,11 @@ struct AgentSwitcherView: View {
         }
         sessionManager.switchTo(items[target].session)
         let session = items[target].session
-        DispatchQueue.main.async { session.showKeyboard?() }
+        if webShown(in: id) != nil {
+            hideKeyboard()
+        } else {
+            DispatchQueue.main.async { session.showKeyboard?() }
+        }
         // Answered agents drop down the queue; the next one needing you comes next
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             let order = attentionOrder()
@@ -464,8 +499,8 @@ struct AgentSwitcherView: View {
     }
 
     /// The rail tapped or scrubbed: show that window (focus follows when the finger lifts)
-    private func jump(to target: Int, items: [(id: UUID, session: Session)]) {
-        guard target >= 0, target <= items.count, target != index else { return }
+    private func jump(to target: Int, count: Int) {
+        guard target >= 0, target <= count, target != index else { return }
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(snap) { index = target }
     }
@@ -499,6 +534,32 @@ struct AgentSwitcherView: View {
         pillStrip + 200 * (width / size.width) + SwitcherWindow.bottomPad
     }
 
+    /// A page's size: the screen below the pill, in every mode (so fullscreen is a zoom)
+    static func webSize(_ size: CGSize) -> CGSize {
+        CGSize(width: size.width, height: size.height - pillStrip)
+    }
+
+    /// A workspace's web tabs, its last panes
+    private func webPanes(of windowId: UUID) -> [WebTab] {
+        webTabs.filter { $0.workspaceId == windowId }
+    }
+
+    /// The web tab a window shows instead of its terminal
+    private func webShown(in windowId: UUID) -> WebTab? {
+        guard let id = shownWeb[windowId] else { return nil }
+        return webPanes(of: windowId).first { $0.id == id }
+    }
+
+    /// The focused window is a page, not a terminal: no keyboard
+    private var focusShowsWeb: Bool {
+        guard let focused else { return false }
+        return webShown(in: focused) != nil || webTabs.contains { $0.id == focused }
+    }
+
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
     /// Needs you, then finished and unseen, then the rest in tab order
     private func attentionOrder() -> [UUID] {
         terminalTabs.enumerated().sorted { a, b in
@@ -529,6 +590,8 @@ struct AgentSwitcherView: View {
         let info = sessionManager.panes(for: session)
         let panes = info?.panes ?? []
         let activeIndex = info?.activeIndex ?? 0
+        let webPanes = webPanes(of: tabId)
+        let web = webShown(in: tabId)
         return SwitcherWindow(
             session: session,
             title: panes.indices.contains(activeIndex) ? panes[activeIndex].title : session.title,
@@ -542,19 +605,28 @@ struct AgentSwitcherView: View {
             terminalSize: spec.terminalSize,
             windowWidth: spec.width,
             windowHeight: spec.height,
-            menu: focused == tabId ? menu(for: session, panes: panes, activeIndex: activeIndex) : nil,
+            web: web,
+            webPanes: webPanes.count,
+            activeWeb: web.flatMap { web in webPanes.firstIndex { $0.id == web.id } },
+            webSize: Self.webSize(size),
+            menu: focused != tabId ? nil : web.map(webMenu) ?? menu(for: session, panes: panes, activeIndex: activeIndex),
             onTap: { tapped(tabId, index: i, session: session) },
-            onSwipe: { step in swipe(session, step: step) },
-            onFullscreen: { setFullscreen(!fullscreen) },
+            onSwipe: { step in swipe(tabId, session: session, step: step) },
+            onFullscreen: {
+                if let web { fullscreen ? exitWeb() : openWeb(web) } else { setFullscreen(!fullscreen) }
+            },
             onMenuWillOpen: { Task { await sessionManager.refreshWorkspaces(for: session.connectionConfig) } }
         )
     }
 
     // MARK: Actions
 
-    /// Tap a window to type into it (the focused one's pill opens its menu instead)
+    /// Tap a window to type into it (the focused one's pill opens its menu instead). A
+    /// window showing a page opens it fullscreen.
     private func tapped(_ tabId: UUID, index i: Int, session: Session) {
-        if fullscreen || focused == tabId { return }
+        if fullscreen { return }
+        if let web = webShown(in: tabId) { return openWeb(web) }
+        if focused == tabId { return }
         withAnimation(snap) {
             frozenOrder = frozenOrder ?? windows.map(\.id)
             focused = tabId
@@ -566,15 +638,21 @@ struct AgentSwitcherView: View {
         DispatchQueue.main.async { session.showKeyboard?() }
     }
 
-    /// Show a web tab fullscreen, remembering the terminal typed into
+    /// Show a web tab fullscreen: in its workspace's window, or its own. Remembers the
+    /// terminal typed into, to come back to.
     private func openWeb(_ web: WebTab) {
-        if !(fullscreen && focused == web.id) {
-            if let focused, focused != web.id, !webTabs.contains(where: { $0.id == focused }) {
+        let owner = web.workspaceId.flatMap { id in terminalTabs.contains { $0.id == id } ? id : nil }
+        let window = owner ?? web.id
+        let showing = fullscreen && focused == window && (owner == nil || shownWeb[window] == web.id)
+        if !showing {
+            // Typing into a terminal: come back to it
+            if let focused, terminalTabs.contains(where: { $0.id == focused }), webShown(in: focused) == nil {
                 webReturn = focused
             }
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             withAnimation(.spring(duration: 0.42, bounce: 0.1)) {
-                focused = web.id
+                if let owner { shownWeb[owner] = web.id }
+                focused = window
                 fullscreen = true
                 drag = 0
             }
@@ -584,29 +662,30 @@ struct AgentSwitcherView: View {
         }
     }
 
-    /// Leave a fullscreen web tab: back to the terminal typed into before, keyboard up,
-    /// or to the overview
-    private func exitWeb(items: [(id: UUID, session: Session)]) {
-        let back = webReturn.flatMap { id in items.firstIndex { $0.id == id } }
+    /// Leave a fullscreen web tab: back to the terminal typed into before (its terminal
+    /// pane, keyboard up), or to the overview
+    private func exitWeb() {
+        let terminals = windows
+        let back = webReturn.flatMap { id in terminals.firstIndex { $0.id == id } }
         webReturn = nil
         withAnimation(.spring(duration: 0.42, bounce: 0.1)) {
             fullscreen = false
             if let back {
-                focused = items[back].id
+                shownWeb[terminals[back].id] = nil
+                focused = terminals[back].id
                 index = back
             } else {
                 focused = nil
                 frozenOrder = nil
             }
         }
-        if let back {
-            let session = items[back].session
+        if let back, case .terminal(let session) = terminals[back] {
             sessionManager.switchTo(session)
             DispatchQueue.main.async { session.showKeyboard?() }
         }
     }
 
-    /// A fullscreen web tab's pill: navigation, and close
+    /// A web tab's pill, typed into or fullscreen: navigation, and close
     private func webMenu(_ web: WebTab) -> UIMenu {
         let row: [UIMenuElement] = [
             UIAction(title: "Back", image: UIImage(systemName: "chevron.backward"),
@@ -627,13 +706,30 @@ struct AgentSwitcherView: View {
         withAnimation(.spring(duration: 0.42, bounce: 0.1)) { fullscreen = on }
     }
 
-    /// Show the workspace's next or previous pane in this window
-    private func swipe(_ session: Session, step: Int) {
-        guard let groupId = session.groupId, let info = sessionManager.panes(for: session) else { return }
-        let target = info.activeIndex + step
-        guard info.panes.indices.contains(target) else { return }
+    /// Show the workspace's next or previous pane in this window: its terminals, then its
+    /// web tabs
+    private func swipe(_ windowId: UUID, session: Session, step: Int) {
+        let info = sessionManager.panes(for: session)
+        let terminals = max(1, info?.panes.count ?? 0)
+        let webs = webPanes(of: windowId)
+        let shown = webShown(in: windowId).flatMap { web in webs.firstIndex { $0.id == web.id } }
+        let position = shown.map { terminals + $0 } ?? (info?.activeIndex ?? 0)
+        let target = position + step
+        guard target >= 0, target < terminals + webs.count else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        sessionManager.selectPane(groupId: groupId, paneId: info.panes[target].id)
+        if target >= terminals {
+            withAnimation(snap) { shownWeb[windowId] = webs[target - terminals].id }
+            if focused == windowId { hideKeyboard() }
+            return
+        }
+        withAnimation(snap) { shownWeb[windowId] = nil }
+        if let groupId = session.groupId, let info, info.panes.indices.contains(target), target != info.activeIndex {
+            // The new pane is the active tab: focus follows with the keyboard
+            sessionManager.selectPane(groupId: groupId, paneId: info.panes[target].id)
+        } else if focused == windowId {
+            // Back from a page to the terminal it was over
+            DispatchQueue.main.async { session.showKeyboard?() }
+        }
     }
 
     // MARK: Header and controls
@@ -719,7 +815,14 @@ struct SwitcherWindow: View {
     let windowWidth: CGFloat
     /// From the switcher, which lays the windows out with the same math
     let windowHeight: CGFloat
-    /// The session menu, opened from the pill while typing into the window
+    /// The web tab shown instead of the terminal (swiped to: the workspace's last panes)
+    let web: WebTab?
+    /// How many web tabs the workspace has, after its terminal panes
+    let webPanes: Int
+    let activeWeb: Int?
+    /// The page's size (it keeps one, so fullscreen is a zoom)
+    let webSize: CGSize
+    /// The session menu (or the page's), opened from the pill while typing into the window
     let menu: UIMenu?
     let onTap: () -> Void
     let onSwipe: (Int) -> Void
@@ -837,6 +940,19 @@ struct SwitcherWindow: View {
                     .environmentObject(sessionManager)
                     .environmentObject(appState)
             }
+            // Showing a page, the terminal stays (live, keeping its place) under it
+            .opacity(web == nil ? 1 : 0)
+            if let web {
+                ClipHost(passesTouches: !isFullscreen, contentSize: webSize,
+                         scale: isFullscreen ? 1 : windowWidth / webSize.width,
+                         origin: CGPoint(x: 0, y: AgentSwitcherView.pillStrip)) {
+                    WebTabView(webTab: web)
+                        .id(web.id)
+                        .frame(width: webSize.width, height: webSize.height)
+                        .environmentObject(sessionManager)
+                }
+                .transition(.opacity)
+            }
             // Outside fullscreen touches pass through the terminal (in UIKit: SwiftUI's
             // allowsHitTesting, toggled on the view holding the keyboard, made it drop the
             // keyboard for a moment), so the overlay takes them and a swipe anywhere pages
@@ -858,8 +974,8 @@ struct SwitcherWindow: View {
                 // drags page the switcher
                 Color.clear
                     .contentShape(Rectangle())
-                    // Typing into it, a tap pastes, as in a tab
-                    .onTapGesture { if isFocused { session.presentPasteMenu?() } else { onTap() } }
+                    // Typing into it, a tap pastes, as in a tab (a page goes fullscreen)
+                    .onTapGesture { if isFocused && web == nil { session.presentPasteMenu?() } else { onTap() } }
                     .simultaneousGesture(swipeGesture)
             }
         }
@@ -876,7 +992,8 @@ struct SwitcherWindow: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex)
+            PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex,
+                     web: web, webPanes: webPanes, activeWeb: activeWeb)
                 .background(MenuAnchor(menu: menu, requests: menuRequests))
                 .contentShape(Capsule())
                 .onTapGesture {
@@ -948,6 +1065,8 @@ struct WebWindow: View {
     @EnvironmentObject var sessionManager: SessionManager
     @ObservedObject var webTab: WebTab
     let isFullscreen: Bool
+    /// Paged to while typing: the pill opens its menu
+    let isFocused: Bool
     let background: Color
     /// The page's size: the screen below the pill
     let contentSize: CGSize
@@ -998,23 +1117,7 @@ struct WebWindow: View {
     private var header: some View {
         HStack(spacing: 8) {
             HStack(spacing: 7) {
-                if webTab.isLoading {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: "globe")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                // The page's title, then its port (the title is the port until it loads)
-                Text(webTab.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                if webTab.pageTitle?.isEmpty == false {
-                    Text(":\(String(webTab.remotePort.port))")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                WebPillLabel(webTab: webTab)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -1022,7 +1125,7 @@ struct WebWindow: View {
             .background(MenuAnchor(menu: menu, requests: menuRequests))
             .contentShape(Capsule())
             .onTapGesture {
-                if isFullscreen { menuRequests &+= 1 } else { onOpen() }
+                if isFocused { menuRequests &+= 1 } else { onOpen() }
             }
             .gesture(isFullscreen ? pullGesture : nil)
             Spacer(minLength: 0)
@@ -1121,6 +1224,31 @@ private struct ClipHost<Content: View>: UIViewRepresentable {
     }
 }
 
+/// A page's glyph (loading, or a globe), its title, then its port (the title is the port
+/// until the page loads)
+private struct WebPillLabel: View {
+    @ObservedObject var webTab: WebTab
+
+    var body: some View {
+        if webTab.isLoading {
+            ProgressView().controlSize(.mini)
+        } else {
+            Image(systemName: "globe")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        Text(webTab.title)
+            .font(.system(size: 14, weight: .semibold))
+            .lineLimit(1)
+        if webTab.pageTitle?.isEmpty == false {
+            Text(":\(String(webTab.remotePort.port))")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
 /// Presents a native menu from the view it backs (as the tab bubble does) each time
 /// `requests` goes up
 private struct MenuAnchor: UIViewRepresentable {
@@ -1151,32 +1279,51 @@ private struct MenuAnchor: UIViewRepresentable {
 }
 
 /// The collapsed tab bubble: the pane's glyph and title, the workspace, the pane dots
+/// (its web tabs last, as globes). Showing a web tab, the page's title.
 private struct PanePill: View {
     let title: String
     let workspace: String
     let status: PaneStatus
     let panes: [TabPane]
     let activeIndex: Int
+    var web: WebTab? = nil
+    var webPanes = 0
+    var activeWeb: Int? = nil
 
     var body: some View {
         HStack(spacing: 7) {
-            StatusGlyph(status: status)
-                .frame(width: 9, height: 9)
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .lineLimit(1)
-            if workspace != title {
-                Text(workspace)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+            if let web {
+                WebPillLabel(webTab: web)
+            } else {
+                StatusGlyph(status: status)
+                    .frame(width: 9, height: 9)
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
+                if workspace != title {
+                    Text(workspace)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
-            if panes.count > 1 {
+            if max(1, panes.count) + webPanes > 1 {
                 HStack(spacing: 3) {
                     ForEach(Array(panes.enumerated()), id: \.offset) { index, pane in
+                        let active = activeWeb == nil && index == activeIndex
                         Capsule()
-                            .fill(dotColor(pane, active: index == activeIndex))
-                            .frame(width: index == activeIndex ? 8 : 4, height: 4)
+                            .fill(dotColor(pane, active: active))
+                            .frame(width: active ? 8 : 4, height: 4)
+                    }
+                    if panes.isEmpty {
+                        Capsule()
+                            .fill(Color.white.opacity(activeWeb == nil ? 0.9 : 0.3))
+                            .frame(width: activeWeb == nil ? 8 : 4, height: 4)
+                    }
+                    ForEach(0..<webPanes, id: \.self) { index in
+                        Image(systemName: "globe")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(activeWeb == index ? 0.9 : 0.4))
                     }
                 }
                 .padding(.leading, 2)
@@ -1201,6 +1348,8 @@ private struct PanePill: View {
 /// plus for the controls after them. Tap a dot to go there; drag along the rail to scrub.
 private struct StatusRail: View {
     let statuses: [PaneStatus]
+    /// Web tabs with windows of their own, after the terminals
+    var webSlots = 0
     let current: Int
     let onSelect: (Int) -> Void
     let onScrubEnd: (Int) -> Void
@@ -1223,8 +1372,20 @@ private struct StatusRail: View {
                 }
                 .frame(width: 24, height: Self.pitch)
             }
+            ForEach(0..<webSlots, id: \.self) { i in
+                ZStack {
+                    if current == statuses.count + i {
+                        Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
+                            .frame(width: 14, height: 14)
+                    }
+                    Image(systemName: "globe")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                }
+                .frame(width: 24, height: Self.pitch)
+            }
             ZStack {
-                if current == statuses.count {
+                if current == statuses.count + webSlots {
                     Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
                         .frame(width: 14, height: 14)
                 }
@@ -1245,7 +1406,7 @@ private struct StatusRail: View {
     }
 
     private func slot(at y: CGFloat) -> Int {
-        min(max(0, Int((y - 8) / Self.pitch)), statuses.count)
+        min(max(0, Int((y - 8) / Self.pitch)), statuses.count + webSlots)
     }
 }
 

@@ -796,10 +796,14 @@ class SessionManager: ObservableObject {
     ///   - port: The remote port to forward
     ///   - config: Connection configuration
     ///   - makeActive: Whether to switch to this tab (default true)
-    func createWebTab(for port: RemotePort, config: SavedConnection, makeActive: Bool = true) async throws -> WebTab {
+    ///   - workspace: The workspace tab it belongs to; by default the one shown
+    func createWebTab(for port: RemotePort, config: SavedConnection, makeActive: Bool = true,
+                      workspace: UUID?? = nil) async throws -> WebTab {
+        let owner = workspace ?? activeSession?.groupId
         let connection = try await pooledConnection(for: config)
 
         let webTab = WebTab(remotePort: port, connectionConfig: config, sshConnection: connection)
+        webTab.workspaceId = owner
         webTabs.append(webTab)
 
         // Add to global tab order
@@ -1163,7 +1167,8 @@ class SessionManager: ObservableObject {
                 }
 
                 // Create new web tab in background (don't switch to it)
-                _ = try await createWebTab(for: remotePort, config: config, makeActive: false)
+                _ = try await createWebTab(for: remotePort, config: config, makeActive: false,
+                                           workspace: .some(session.groupId))
                 Logger.clauntty.debugOnly("SessionManager: opened web tab for port \(port) via OSC 777 (background)")
             } catch {
                 Logger.clauntty.error("SessionManager: failed to open tab for port \(port): \(error)")
@@ -1578,7 +1583,8 @@ class SessionManager: ObservableObject {
                 lastActiveAt: Date(),
                 cachedPageTitle: webTab.pageTitle,
                 lastPath: webTab.lastPath,
-                orderIndex: index
+                orderIndex: index,
+                workspaceId: webTab.workspaceId
             )
             tabs.append(tab)
         }
@@ -1628,7 +1634,8 @@ class SessionManager: ObservableObject {
                     connectionConfig: config,
                     createdAt: persisted.createdAt,
                     lastPath: persisted.lastPath,
-                    cachedPageTitle: persisted.cachedPageTitle
+                    cachedPageTitle: persisted.cachedPageTitle,
+                    workspaceId: persisted.workspaceId
                 )
 
                 self.webTabs.append(webTab)
