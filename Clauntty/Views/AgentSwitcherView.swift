@@ -90,7 +90,7 @@ struct AgentSwitcherView: View {
     static let flickAverageSpeed: CGFloat = 450
     static let flickTime: TimeInterval = 0.5
     /// How long the edge's dots stay out
-    static let edgeTime: TimeInterval = 5
+    static let edgeTime: TimeInterval = 10
 
     /// Above the first window, below the status bar
     static let topPad: CGFloat = 8
@@ -1632,24 +1632,24 @@ private struct EdgeDots: View {
     /// The dot under the finger
     @State private var highlighted: Int?
 
-    private static let reach: CGFloat = 22
-    private static let pitch: CGFloat = 16
+    private static let reach: CGFloat = 14
+    private static let pitch: CGFloat = 14
     /// The curve from the screen's edge out to the bump, at each end
-    private static let neck: CGFloat = 18
+    private static let neck: CGFloat = 14
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(statuses.enumerated()), id: \.offset) { i, status in
                 ZStack {
                     if i == (highlighted ?? current) {
-                        Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
-                            .frame(width: 13, height: 13)
+                        Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.25)
+                            .frame(width: 11, height: 11)
                     }
                     Group {
                         if status == .none || status == .idle {
-                            Circle().fill(Color.white.opacity(0.35)).frame(width: 6, height: 6)
+                            Circle().fill(Color.white.opacity(0.35)).frame(width: 5, height: 5)
                         } else {
-                            StatusGlyph(status: status).frame(width: 8, height: 8)
+                            StatusGlyph(status: status).frame(width: 7, height: 7)
                         }
                     }
                     .phaseAnimator([1, news.contains(i) ? 1.8 : 1, 1], trigger: pulse) { dot, scale in
