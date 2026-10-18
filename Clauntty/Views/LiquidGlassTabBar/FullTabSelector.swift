@@ -177,7 +177,7 @@ struct FullTabSelector: View {
     private func closeTab(_ tab: TabItem) {
         switch tab {
         case .terminal(let session):
-            sessionManager.closeSession(session)
+            sessionManager.closeTab(session)
         case .web(let webTab):
             sessionManager.closeWebTab(webTab)
         }

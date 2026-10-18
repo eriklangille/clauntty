@@ -82,12 +82,7 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         bar.onDisconnect = { tab in
             switch tab {
             case .terminal(let session):
-                if let groupId = session.groupId {
-                    // Ends the workspace (asks first when it has several panes)
-                    context.coordinator.sessionManager?.requestCloseGroup(groupId)
-                } else {
-                    context.coordinator.sessionManager?.closeSession(session)
-                }
+                context.coordinator.sessionManager?.closeTab(session)
             case .web(let webTab):
                 context.coordinator.sessionManager?.closeWebTab(webTab)
             }

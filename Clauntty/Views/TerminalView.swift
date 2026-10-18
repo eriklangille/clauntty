@@ -169,7 +169,7 @@ struct TerminalView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
                         Button("Close Tab") {
-                            sessionManager.closeSession(session)
+                            sessionManager.closeTab(session)
                         }
                         .buttonStyle(.borderedProminent)
                         .padding(.top)

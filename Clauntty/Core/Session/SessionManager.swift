@@ -157,8 +157,6 @@ class SessionManager: ObservableObject {
     var workspacePaneIds: [UUID: Set<String>] = [:]
     /// A workspace action that failed, to show the user
     @Published var workspaceMessage: String?
-    /// A workspace tab with several panes the user closed: asked before ending them
-    @Published var workspaceToEnd: SessionGroup?
 
     /// UserDefaults key for persisted tabs
     private let persistedWebTabsKey = "clauntty_persisted_web_tabs"

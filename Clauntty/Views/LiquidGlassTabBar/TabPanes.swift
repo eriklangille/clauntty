@@ -29,13 +29,13 @@ struct TabPane: Equatable {
     var group: Int
 }
 
-/// Session menu actions on the pane a workspace tab shows
+/// Session menu actions on a workspace tab
 enum PaneAction {
-    /// A new pane next to it (a split on the desktop)
+    /// A new pane next to the one shown (a split on the desktop)
     case split
-    /// A new tab in the workspace, with one pane
-    case newTab
-    /// End the pane
+    /// A new workspace (tab) on the same host
+    case newWorkspace
+    /// End the pane shown; the last one takes its workspace along
     case close
 }
 
@@ -235,36 +235,32 @@ extension PaneStatus {
     }
 }
 
-/// Native menu for the active session tab: the tab's actions as an icon row, then
-/// its panes, one section per tab in the group
+/// Native menu for the active session tab: its actions as an icon row, then its panes,
+/// one section per tab in the workspace
 enum SessionTabMenu {
     static func make(
         title: String,
         panes: [TabPane],
         activeIndex: Int,
         onSelectPane: @escaping (Int) -> Void,
-        onTabs: @escaping () -> Void,
+        onPaneAction: ((PaneAction) -> Void)?,
         onNewTab: @escaping () -> Void,
         onPorts: @escaping () -> Void,
-        onClose: @escaping () -> Void,
-        onPaneAction: ((PaneAction) -> Void)? = nil
+        onClose: @escaping () -> Void
     ) -> UIMenu {
-        let actions = UIMenu(options: .displayInline, preferredElementSize: .small, children: [
-            UIAction(title: "All Tabs", image: UIImage(systemName: "square.on.square")) { _ in onTabs() },
-            UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { _ in onNewTab() },
-            UIAction(title: "Ports", image: UIImage(systemName: "globe")) { _ in onPorts() },
-            UIAction(title: "Close", image: UIImage(systemName: "xmark"), attributes: .destructive) { _ in onClose() },
-        ])
-
-        var sections: [UIMenuElement] = [actions]
-        // Workspace tabs: actions on the pane shown
-        if let onPaneAction, !panes.isEmpty {
-            sections.append(UIMenu(options: .displayInline, children: [
-                UIAction(title: "New Pane", image: UIImage(systemName: "rectangle.split.2x1")) { _ in onPaneAction(.split) },
-                UIAction(title: "New Workspace Tab", image: UIImage(systemName: "plus.rectangle.on.rectangle")) { _ in onPaneAction(.newTab) },
-                UIAction(title: "End Pane", image: UIImage(systemName: "xmark.rectangle"), attributes: .destructive) { _ in onPaneAction(.close) },
-            ]))
+        var row: [UIMenuElement] = []
+        if let onPaneAction {
+            row.append(UIAction(title: "New Pane", image: UIImage(systemName: "rectangle.split.2x1")) { _ in onPaneAction(.split) })
+            row.append(UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { _ in onPaneAction(.newWorkspace) })
+        } else {
+            row.append(UIAction(title: "New Tab", image: UIImage(systemName: "plus")) { _ in onNewTab() })
         }
+        row.append(UIAction(title: "Ports", image: UIImage(systemName: "globe")) { _ in onPorts() })
+        row.append(UIAction(title: "Close", image: UIImage(systemName: "xmark"), attributes: .destructive) { _ in
+            if let onPaneAction { onPaneAction(.close) } else { onClose() }
+        })
+
+        var sections: [UIMenuElement] = [UIMenu(options: .displayInline, preferredElementSize: .small, children: row)]
         var groupStart = 0
         for index in panes.indices where index == panes.count - 1 || panes[index + 1].group != panes[index].group {
             let children = (groupStart...index).map { paneIndex -> UIAction in

@@ -33,6 +33,9 @@ class TabBubble: UIView {
         didSet { syncURLTextFieldIfNeeded() }
     }
     /// Connection string like "ubuntu@devbox.example.com"
+    /// The session menu's title: the connection's name
+    var hostName: String = ""
+
     var connectionInfo: String = "" {
         didSet { connectionLabel.text = connectionInfo }
     }
@@ -1101,6 +1104,7 @@ class TabBubble: UIView {
         tabType = .terminal(session.state)
         title = session.title
         connectionInfo = session.connectionString
+        hostName = session.connectionConfig.displayName
         isWaitingForInput = session.isWaitingForInput
 
         statusView.isHidden = false
@@ -1160,15 +1164,15 @@ class TabBubble: UIView {
             return
         }
         menuButton.menu = SessionTabMenu.make(
-            title: connectionInfo,
+            title: hostName,
             panes: panes,
             activeIndex: activePaneIndex,
             onSelectPane: { [weak self] index in self?.onPaneSelected?(index) },
-            onTabs: { [weak self] in self?.onTabs?() },
+            // Workspace tabs (they have panes); plain tabs only exist without rtach
+            onPaneAction: onPaneAction == nil || panes.isEmpty ? nil : { [weak self] action in self?.onPaneAction?(action) },
             onNewTab: { [weak self] in self?.onNewTab?() },
             onPorts: { [weak self] in self?.onPorts?() },
-            onClose: { [weak self] in self?.onDisconnect?() },
-            onPaneAction: onPaneAction == nil ? nil : { [weak self] action in self?.onPaneAction?(action) }
+            onClose: { [weak self] in self?.onDisconnect?() }
         )
     }
 

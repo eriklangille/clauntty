@@ -108,31 +108,13 @@ extension SessionManager {
 
     // MARK: Closing
 
-    /// The user closed a group's tab: end the workspace and its panes. With more than
-    /// one pane, ask first (ContentView shows `workspaceToEnd`).
-    func requestCloseGroup(_ groupId: UUID) {
-        guard let group = sessionGroups.first(where: { $0.id == groupId }) else { return }
-        if group.panes.count > 1 {
-            workspaceToEnd = group
+    /// Close what a tab shows: in a workspace, end the pane shown (the last one takes
+    /// the workspace and its tab along); a plain tab (no rtach) closes its session
+    func closeTab(_ session: Session) {
+        if let groupId = session.groupId {
+            Task { await performPaneAction(.close, groupId: groupId) }
         } else {
-            Task { await endWorkspace(groupId) }
-        }
-    }
-
-    /// End a workspace on its host and take its tab away
-    func endWorkspace(_ groupId: UUID) async {
-        guard let group = sessionGroups.first(where: { $0.id == groupId }),
-              let config = sessions.first(where: { $0.groupId == groupId })?.connectionConfig else { return }
-        removeSessionGroup(groupId)
-        do {
-            _ = try await withHost(config) { connection in
-                try await RtachDeployer(connection: connection)
-                    .workspaceCommand(["end", group.workspaceId, "--quiet"], as: WorkspaceEnded.self)
-            }
-        } catch {
-            workspaceMessage = error.localizedDescription
-            // It's still there: bring the tab back
-            await refreshWorkspaces(for: config)
+            closeSession(session)
         }
     }
 
@@ -285,13 +267,8 @@ extension SessionManager {
                 }
                 await refreshWorkspaces(for: config)
                 selectPane(groupId: groupId, paneId: created.pane)
-            case .newTab:
-                let created = try await withHost(config) { connection in
-                    try await RtachDeployer(connection: connection)
-                        .workspaceCommand(["tab", group.workspaceId, "--quiet"], as: WorkspaceCreated.self)
-                }
-                await refreshWorkspaces(for: config)
-                selectPane(groupId: groupId, paneId: created.pane)
+            case .newWorkspace:
+                await newWorkspace(on: config, folder: "~")
             case .close:
                 _ = try await withHost(config) { connection in
                     try await RtachDeployer(connection: connection)
