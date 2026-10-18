@@ -319,22 +319,26 @@ class Session: ObservableObject, Identifiable {
     /// it has a surface.
     var readTerminalText: ((Bool) -> String?)?
 
-    /// The bottom of the cursor in the terminal, in points from its top: agent mode's
-    /// windows crop the terminal to end there (a shell's prompt, Claude's input box)
-    @Published private(set) var cursorBottom: CGFloat?
+    /// The cursor's row in the terminal (points from its top) and the row height: agent
+    /// mode's windows crop the terminal to whole rows around it
+    struct CursorRow: Equatable {
+        let top: CGFloat
+        let height: CGFloat
+    }
+    @Published private(set) var cursorRow: CursorRow?
     /// Set by the terminal view
-    var readCursorBottom: (() -> CGFloat?)?
+    var readCursorRow: (() -> CursorRow?)?
     private var cursorUpdatePending = false
 
     /// Refresh cursorBottom soon (output arrived), at most a few times a second
     func scheduleCursorUpdate() {
-        guard !cursorUpdatePending, readCursorBottom != nil else { return }
+        guard !cursorUpdatePending, readCursorRow != nil else { return }
         cursorUpdatePending = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self else { return }
             self.cursorUpdatePending = false
-            let value = self.readCursorBottom?()
-            if value != self.cursorBottom { self.cursorBottom = value }
+            let value = self.readCursorRow?()
+            if value != self.cursorRow { self.cursorRow = value }
         }
     }
 

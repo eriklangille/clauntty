@@ -25,6 +25,15 @@ struct AgentSwitcherView: View {
     /// What the terminal keeps at its bottom for the key bar
     static let barReserve: CGFloat = 78
 
+    @EnvironmentObject private var ghosttyApp: GhosttyApp
+    @ObservedObject private var themeManager = ThemeManager.shared
+
+    /// The terminal's background, behind and around the windows
+    private var background: Color {
+        themeManager.theme(withId: ghosttyApp.currentThemeId)?.backgroundColor
+            ?? Color(red: 40 / 255, green: 44 / 255, blue: 52 / 255)
+    }
+
     var body: some View {
         GeometryReader { outer in
             let fullHeight = outer.size.height
@@ -36,26 +45,36 @@ struct AgentSwitcherView: View {
                 GeometryReader { geo in
                     ScrollViewReader { scroller in
                         ScrollView {
-                            VStack(spacing: fullscreen ? 0 : 12) {
+                            // One list in every mode: a window keeps its live terminal view.
+                            // Fullscreen shrinks the others away rather than showing the
+                            // window somewhere else, which would make a new, empty terminal.
+                            VStack(spacing: fullscreen ? 0 : 10) {
                                 ForEach(windows, id: \.id) { tab in
                                     if case .terminal(let session) = tab {
+                                        let hidden = fullscreen && focused != tab.id
                                         window(for: session, tabId: tab.id, viewport: geo.size, fullHeight: fullHeight, scroller: scroller)
+                                            .frame(height: hidden ? 0 : nil, alignment: .top)
+                                            .clipped()
+                                            .opacity(hidden ? 0 : 1)
+                                            .allowsHitTesting(!hidden)
                                             .id(tab.id)
                                     }
                                 }
                             }
                             .padding(.horizontal, fullscreen ? 0 : 10)
                             .padding(.top, fullscreen ? 0 : 4)
-                            // Room to scroll the focused window to the top
-                            .padding(.bottom, focused == nil ? 12 : geo.size.height)
+                            .padding(.bottom, fullscreen ? 0 : 12)
                         }
                         .scrollDisabled(fullscreen)
                         .scrollDismissesKeyboard(.never)
+                        .onChange(of: fullscreen) { _, on in
+                            if on, let id = focused { scroller.scrollTo(id, anchor: .top) }
+                        }
                     }
                 }
             }
         }
-        .background(Color.agentBackground.ignoresSafeArea())
+        .background(background.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
 
@@ -82,19 +101,21 @@ struct AgentSwitcherView: View {
         return info.panes.contains { $0.status == .blocked }
     }
 
-    private func window(for session: Session, tabId: UUID, viewport: CGSize, fullHeight: CGFloat, scroller: ScrollViewProxy) -> some View {
+    private func window(for session: Session, tabId: UUID, viewport: CGSize, fullHeight: CGFloat, scroller: ScrollViewProxy?) -> some View {
         let isFocused = focused == tabId
         let isFull = fullscreen && isFocused
         let info = sessionManager.panes(for: session)
         let panes = info?.panes ?? []
         let activeIndex = info?.activeIndex ?? 0
         let status = panes.indices.contains(activeIndex) ? panes[activeIndex].status : .none
+        let isAgent = session.pane.flatMap { sessionManager.paneStates[$0.paneId] }?.hasAgent ?? false
         // The focused terminal avoids the keyboard like a tab; the others keep full height
         let terminalHeight = (isFocused ? viewport.height : fullHeight) - Self.pillStrip
-        let windowHeight: CGFloat = {
-            if isFull { return viewport.height }
-            if isFocused { return min(340, viewport.height - 16) }
-            return status == .blocked ? 150 : 92
+        let mode: SwitcherWindow.Mode = {
+            if isFull { return .fullscreen(height: viewport.height) }
+            // About half the room, so the other windows stay in view while you type
+            if isFocused { return .focused(maxHeight: max(200, viewport.height * 0.55)) }
+            return status == .blocked ? .blocked : .collapsed
         }()
         return SwitcherWindow(
             session: session,
@@ -103,19 +124,20 @@ struct AgentSwitcherView: View {
             panes: panes,
             activeIndex: activeIndex,
             status: status,
-            isFocused: isFocused,
-            isFullscreen: isFull,
+            isAgent: isAgent,
+            mode: mode,
+            background: background,
             terminalSize: CGSize(width: viewport.width, height: terminalHeight),
-            windowHeight: windowHeight,
+            windowWidth: isFull ? viewport.width : viewport.width - 20,
             onTap: { toggleFocus(tabId, session: session, scroller: scroller) },
             onSwipe: { step in swipe(session, step: step) },
-            onFullscreen: { setFullscreen(!fullscreen, tabId: tabId, scroller: scroller) }
+            onFullscreen: { setFullscreen(!fullscreen) }
         )
     }
 
     // MARK: Actions
 
-    private func toggleFocus(_ tabId: UUID, session: Session, scroller: ScrollViewProxy) {
+    private func toggleFocus(_ tabId: UUID, session: Session, scroller: ScrollViewProxy?) {
         if fullscreen { return }
         withAnimation(.spring(duration: 0.35, bounce: 0.12)) {
             if focused == tabId {
@@ -129,16 +151,13 @@ struct AgentSwitcherView: View {
         }
         if focused == tabId {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                withAnimation(.spring(duration: 0.35)) { scroller.scrollTo(tabId, anchor: .top) }
+                withAnimation(.spring(duration: 0.35)) { scroller?.scrollTo(tabId, anchor: .top) }
             }
         }
     }
 
-    private func setFullscreen(_ on: Bool, tabId: UUID, scroller: ScrollViewProxy) {
-        withAnimation(.spring(duration: 0.42, bounce: 0.1)) {
-            fullscreen = on
-            scroller.scrollTo(tabId, anchor: .top)
-        }
+    private func setFullscreen(_ on: Bool) {
+        withAnimation(.spring(duration: 0.42, bounce: 0.1)) { fullscreen = on }
     }
 
     /// Show the workspace's next or previous pane in this window
@@ -179,8 +198,8 @@ struct AgentSwitcherView: View {
 
 // MARK: - Window
 
-/// One workspace's live terminal, scaled and cropped to its last lines, under the
-/// tab bar's glass pill
+/// One workspace's live terminal, scaled and cropped to whole rows, under the tab bar's
+/// glass pill
 private struct SwitcherWindow: View {
     @EnvironmentObject var ghosttyApp: GhosttyApp
     @EnvironmentObject var sessionManager: SessionManager
@@ -191,59 +210,124 @@ private struct SwitcherWindow: View {
     let panes: [TabPane]
     let activeIndex: Int
     let status: PaneStatus
-    let isFocused: Bool
-    let isFullscreen: Bool
+    /// An agent (Claude) runs in the pane: crops skip its input box
+    let isAgent: Bool
+    let mode: Mode
+    let background: Color
     let terminalSize: CGSize
-    let windowHeight: CGFloat
+    let windowWidth: CGFloat
     let onTap: () -> Void
     let onSwipe: (Int) -> Void
     let onFullscreen: () -> Void
 
+    enum Mode: Equatable {
+        /// The last couple of lines: what the agent said, or the shell's prompt
+        case collapsed
+        /// More lines, for a prompt that needs an answer
+        case blocked
+        /// Typed into: as many lines as fit
+        case focused(maxHeight: CGFloat)
+        /// The session view
+        case fullscreen(height: CGFloat)
+    }
+
     @State private var pullDown: CGFloat = 0
 
+    private static let bottomPad: CGFloat = 8
+
+    private var isFocused: Bool {
+        switch mode {
+        case .focused, .fullscreen: return true
+        default: return false
+        }
+    }
+
+    private var isFullscreen: Bool {
+        if case .fullscreen = mode { return true }
+        return false
+    }
+
+    private var scale: CGFloat { windowWidth / terminalSize.width }
+
+    /// Where the window's terminal ends (in the terminal's points) and how many rows it
+    /// shows, always whole rows from the cursor's
+    private var crop: (bottom: CGFloat, rows: Int, cell: CGFloat) {
+        let usable = terminalSize.height - AgentSwitcherView.barReserve
+        guard let cursor = session.cursorRow else {
+            let cell: CGFloat = 17
+            return (usable, mode == .blocked ? 7 : 2, cell)
+        }
+        let cell = cursor.height
+        // The last whole row above the key bar's strip
+        let lastRow = cursor.top + max(1, floor((usable - cursor.top) / cell)) * cell
+        // Claude draws inline: its input row, the box's bottom edge and a footer line,
+        // wherever the box is
+        let agentBottom = min(lastRow, cursor.top + 3 * cell)
+        let promptLine = cursor.top + cell
+        switch mode {
+        case .collapsed:
+            // An agent: the lines above its input box and the blank row Claude leaves
+            // before it. A shell: up to its prompt.
+            return (isAgent ? cursor.top - 2 * cell : promptLine, 2, cell)
+        case .blocked:
+            return (isAgent ? agentBottom : lastRow, 7, cell)
+        case .focused(let maxHeight):
+            let bottom = isAgent ? agentBottom : promptLine
+            let fit = Int((maxHeight - AgentSwitcherView.pillStrip - Self.bottomPad) / (cell * scale))
+            return (bottom, max(2, min(fit, Int(bottom / cell))), cell)
+        case .fullscreen:
+            return (terminalSize.height, 0, cell)
+        }
+    }
+
+    private var windowHeight: CGFloat {
+        if case .fullscreen(let height) = mode { return height }
+        let c = crop
+        return AgentSwitcherView.pillStrip + CGFloat(c.rows) * c.cell * scale + Self.bottomPad
+    }
+
     var body: some View {
-        GeometryReader { geo in
-            let scale = geo.size.width / terminalSize.width
-            // Fullscreen shows the whole terminal. Otherwise the window ends just below the
-            // cursor (a shell's prompt, Claude's input box), or above the key bar's strip.
-            let contentBottom = min(session.cursorBottom.map { $0 + 8 } ?? terminalSize.height,
-                                    terminalSize.height - AgentSwitcherView.barReserve)
-            let maxShift = max(0, terminalSize.height * scale - (geo.size.height - AgentSwitcherView.pillStrip))
-            let hiddenBottom = isFullscreen ? 0 : min(max(0, (terminalSize.height - contentBottom) * scale), maxShift)
-            ZStack(alignment: .top) {
-                // Clipped by UIKit: the terminal draws with Metal, which SwiftUI's clipping
-                // doesn't reach
-                ClipHost {
-                    TerminalView(session: session, isTabSelectorPresented: !isFocused, isVisible: true)
-                        .id(session.id)
-                        .frame(width: terminalSize.width, height: terminalSize.height)
-                        .scaleEffect(scale, anchor: .bottom)
-                        .offset(y: hiddenBottom)
-                        .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
-                        .environmentObject(ghosttyApp)
-                        .environmentObject(sessionManager)
-                        .environmentObject(appState)
-                }
-                .allowsHitTesting(isFocused)
+        let c = crop
+        // Moves the terminal down so its crop bottom sits at the window's bottom pad
+        let shift = isFullscreen ? 0 : max(0, (terminalSize.height - c.bottom) * scale - Self.bottomPad)
+        ZStack(alignment: .top) {
+            // Clipped by UIKit: the terminal draws with Metal, which SwiftUI's clipping
+            // doesn't reach
+            ClipHost {
+                TerminalView(session: session, isTabSelectorPresented: !isFocused, isVisible: true)
+                    .id(session.id)
+                    .frame(width: terminalSize.width, height: terminalSize.height)
+                    .scaleEffect(scale, anchor: .bottom)
+                    .offset(y: shift)
+                    .frame(width: windowWidth, height: windowHeight, alignment: .bottom)
+                    .environmentObject(ghosttyApp)
+                    .environmentObject(sessionManager)
+                    .environmentObject(appState)
+            }
+            .allowsHitTesting(isFocused)
 
-                // The pill's strip, over the terminal's top rows
-                if !isFullscreen {
-                    Color.agentBackground
-                        .frame(height: AgentSwitcherView.pillStrip)
-                        .allowsHitTesting(false)
-                }
+            // The pill's strip over the rows above the crop, and the bottom pad over the
+            // rows below it
+            if !isFullscreen {
+                background
+                    .frame(height: AgentSwitcherView.pillStrip)
+                    .allowsHitTesting(false)
+                background
+                    .frame(height: Self.bottomPad)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .allowsHitTesting(false)
+            }
 
-                if !isFocused {
-                    // Taps and swipes go to the window, not the terminal
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture(perform: onTap)
-                        .gesture(swipeGesture)
-                }
+            if !isFocused {
+                // Taps and swipes go to the window, not the terminal
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onTap)
+                    .gesture(swipeGesture)
             }
         }
-        .frame(height: windowHeight)
-        .background(Color.agentBackground)
+        .frame(width: windowWidth, height: windowHeight)
+        .background(background)
         .clipShape(RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous)
@@ -251,20 +335,30 @@ private struct SwitcherWindow: View {
         )
         .overlay(alignment: .top) { header }
         .offset(y: pullDown)
+        .animation(.spring(duration: 0.35, bounce: 0.12), value: mode)
     }
 
     private var header: some View {
         HStack(spacing: 8) {
             PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex)
                 .contentShape(Capsule())
-                .onTapGesture(perform: onTap)
+                .onTapGesture { if !isFullscreen { onTap() } }
                 .gesture(isFullscreen ? pullGesture : nil)
                 .simultaneousGesture(swipeGesture)
             Spacer(minLength: 0)
             if isFocused {
-                GlassCircle(systemName: isFullscreen ? "chevron.down" : "arrow.up.left.and.arrow.down.right",
-                            size: 36, action: onFullscreen)
-                    .transition(.scale.combined(with: .opacity))
+                Button(action: onFullscreen) {
+                    Image(systemName: isFullscreen ? "chevron.down" : "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .glass(in: Circle())
+                        // A bigger target than it looks
+                        .padding(6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(-6)
+                .transition(.scale.combined(with: .opacity))
             }
         }
         .padding(.horizontal, 8)
@@ -404,11 +498,6 @@ private struct GlassCircle: View {
 }
 
 // MARK: - Style
-
-private extension Color {
-    /// Behind the windows: the terminal's default background
-    static let agentBackground = Color(red: 40 / 255, green: 44 / 255, blue: 52 / 255)
-}
 
 private extension View {
     /// Liquid glass where the system has it, a material otherwise

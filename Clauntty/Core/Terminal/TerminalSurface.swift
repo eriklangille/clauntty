@@ -2211,13 +2211,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// - Returns: The visible terminal text as a string, or nil if capture failed
     /// - Parameter wholeScreen: include the scrollback, not just the viewport
     /// - Parameter styled: keep the styling as VT (SGR) sequences, lines unwrapped
-    /// The bottom edge of the cursor, in points from the top of this view
-    func cursorBottom() -> CGFloat? {
+    /// The cursor's row: its top, in points from the top of this view, and its height
+    func cursorRow() -> Session.CursorRow? {
         guard let surface = self.surface else { return nil }
         var x: Double = 0, y: Double = 0, w: Double = 0, h: Double = 0
         ghostty_surface_ime_point(surface, &x, &y, &w, &h)
-        Logger.clauntty.debugOnly("cursorBottom[\(self.sessionId)]: ime=(\(Int(x)),\(Int(y)),\(Int(w)),\(Int(h))) bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height))")
-        return CGFloat(y + h)
+        guard h > 0 else { return nil }
+        // The IME point is the cursor's bottom-left
+        return Session.CursorRow(top: CGFloat(y - h), height: CGFloat(h))
     }
 
     func captureVisibleText(wholeScreen: Bool = false, styled: Bool = false) -> String? {

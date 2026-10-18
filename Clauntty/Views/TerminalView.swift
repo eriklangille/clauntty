@@ -342,7 +342,7 @@ struct TerminalView: View {
 
         // Let the voice agent read this tab's text, styling included (to tell
         // dim suggestions from typed text)
-        session.readCursorBottom = { [weak surface] in surface?.cursorBottom() }
+        session.readCursorRow = { [weak surface] in surface?.cursorRow() }
         session.scheduleCursorUpdate()
         session.readTerminalText = { [weak surface] wholeScreen in
             surface?.captureVisibleText(wholeScreen: wholeScreen, styled: true)
