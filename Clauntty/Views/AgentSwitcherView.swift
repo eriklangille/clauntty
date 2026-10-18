@@ -32,6 +32,8 @@ struct AgentSwitcherView: View {
     @State private var cursorTick = 0
     /// The overview's scroll position (nothing focused): it scrolls freely
     @State private var scrollOffset: CGFloat = 0
+    /// Where the layout's top is on screen: the key bar is measured from the screen bottom
+    @State private var originY: CGFloat = 0
 
     /// The overview's status line above the windows
     static let headerHeight: CGFloat = 30
@@ -45,8 +47,10 @@ struct AgentSwitcherView: View {
     /// What the terminal keeps at its bottom for the key bar
     static let barReserve: CGFloat = 78
     /// The key bar above the keyboard
-    static let keyBarAboveKeyboard: CGFloat = 74
+    static let keyBarAboveKeyboard: CGFloat = 66
     static let spacing: CGFloat = 10
+    /// The status rail's column, beside the windows while typing
+    static let railColumn: CGFloat = 32
 
     @EnvironmentObject private var ghosttyApp: GhosttyApp
     @ObservedObject private var themeManager = ThemeManager.shared
@@ -109,10 +113,19 @@ struct AgentSwitcherView: View {
                         .frame(height: Self.controlsHeight)
                 }
             }
-            .padding(.horizontal, fullscreen ? 0 : 10)
+            .padding(.leading, fullscreen ? 0 : 10)
+            .padding(.trailing, fullscreen ? 0 : (focused != nil ? Self.railColumn : 10))
             .frame(width: size.width, alignment: .top)
             .offset(y: offset)
             .frame(width: size.width, height: size.height, alignment: .top)
+            // Typing: nothing shows below the key bar's top (the next window would show
+            // through the glass)
+            .mask(alignment: .top) {
+                Rectangle()
+                    .frame(height: focused != nil && !fullscreen ? barTop(size) - 6 : size.height + 400)
+                    .frame(maxWidth: .infinity)
+                    .offset(y: -200 * (focused != nil && !fullscreen ? 0 : 1))
+            }
             .contentShape(Rectangle())
             .simultaneousGesture(fullscreen ? nil : pager(count: items.count, heights: specs.map(\.height), items: items, maxScroll: maxScroll))
             .overlay(alignment: .trailing) {
@@ -122,9 +135,9 @@ struct AgentSwitcherView: View {
                     } onScrubEnd: { target in
                         commitFocus(target, items: items)
                     }
-                    .padding(.trailing, 2)
-                    // Centered in the room above the keyboard
-                    .frame(height: size.height - keyboardHeight - Self.keyBarAboveKeyboard, alignment: .center)
+                    .frame(width: Self.railColumn)
+                    // Centered beside the focused window, in the room above the key bar
+                    .frame(height: barTop(size), alignment: .center)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
@@ -137,6 +150,8 @@ struct AgentSwitcherView: View {
                 }
             }
             .onReceive(cursorChanges(items.map(\.session))) { _ in cursorTick &+= 1 }
+            .onAppear { originY = geo.frame(in: .global).minY }
+            .onChange(of: geo.frame(in: .global).minY) { _, y in originY = y }
         }
         .ignoresSafeArea(.keyboard)
         // The window above slides under the status bar: fade it there, so only its last
@@ -157,21 +172,21 @@ struct AgentSwitcherView: View {
         }
         .background(background.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
-            if let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect, frame.height > 100 {
-                keyboardHeight = frame.height
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            // How far the keyboard reaches up from the bottom of the screen
+            let height = UIScreen.main.bounds.height - frame.minY
+            guard height > 100 else { return }
+            // With the keyboard, so the window follows the key bar up
+            withAnimation(.easeOut(duration: 0.25)) {
+                keyboardHeight = height
+                keyboardVisible = true
             }
-            keyboardVisible = true
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            keyboardVisible = false
-            // The keyboard put away: back to the overview
-            if focused != nil && !fullscreen {
-                withAnimation(snap) {
-                    focused = nil
-                    frozenOrder = nil
-                }
-            }
+            // The keyboard collapsed: the window grows down to the key bar at the bottom.
+            // Tap the pill for the overview.
+            withAnimation(.easeOut(duration: 0.25)) { keyboardVisible = false }
         }
     }
 
@@ -187,7 +202,6 @@ struct AgentSwitcherView: View {
         let isAgent = session.pane.flatMap { sessionManager.paneStates[$0.paneId] }?.hasAgent ?? false
         // One size in every mode, so focusing or the keyboard never resizes the pane (and
         // Claude never redraws): windows only crop it
-        let keyboardSpace = keyboardHeight + Self.keyBarAboveKeyboard
         // Fullscreen is the session view: like a tab, the terminal fits the screen below
         // the pill and above the keyboard (it reserves the key bar itself), so a TUI
         // shows top to bottom. That resizes it once, as switching tabs does.
@@ -199,15 +213,24 @@ struct AgentSwitcherView: View {
                 // Down to the key bar: above the keyboard when it's up
                 return .fullscreen(height: size.height)
             }
-            // The room above the keyboard, below the window above's peek
-            if isFocused { return .focused(maxHeight: max(160, size.height - Self.peek - keyboardSpace - 8)) }
+            // Down to the key bar, below the window above's peek
+            if isFocused { return .focused(maxHeight: max(160, barTop(size) - Self.peek - 8)) }
             return status == .blocked ? .blocked : .collapsed
         }()
-        let width = isFull ? size.width : size.width - 20
+        let width = isFull ? size.width : size.width - 10 - (focused != nil ? Self.railColumn : 10)
         let height = SwitcherWindow.height(cursor: session.cursorRow, mode: mode, isAgent: isAgent,
                                            terminalSize: terminalSize, windowWidth: width)
         return WindowSpec(mode: mode, isAgent: isAgent, status: status, terminalSize: terminalSize, width: width, height: height)
     }
+
+    /// Where the key bar starts: above the keyboard, or at the bottom with it collapsed
+    private func barTop(_ size: CGSize) -> CGFloat {
+        let screen = UIScreen.main.bounds.height - originY
+        return keyboardVisible ? screen - keyboardHeight - Self.keyBarAboveKeyboard : screen - Self.collapsedBar
+    }
+
+    /// The collapsed key bar at the bottom of the screen, home indicator included
+    static let collapsedBar: CGFloat = 104
 
     struct WindowSpec {
         let mode: SwitcherWindow.Mode
@@ -538,6 +561,8 @@ struct SwitcherWindow: View {
 
     static func height(cursor: Session.CursorRow?, mode: Mode, isAgent: Bool, terminalSize: CGSize, windowWidth: CGFloat) -> CGFloat {
         if case .fullscreen(let height) = mode { return height }
+        // Typing: exactly down to the key bar, the terminal's crop anchored at its bottom
+        if case .focused(let maxHeight) = mode { return maxHeight }
         let c = crop(cursor: cursor, mode: mode, isAgent: isAgent, terminalSize: terminalSize, windowWidth: windowWidth)
         let scale = windowWidth / terminalSize.width
         return AgentSwitcherView.pillStrip + CGFloat(c.rows) * c.cell * scale + bottomPad
