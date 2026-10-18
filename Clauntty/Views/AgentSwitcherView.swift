@@ -51,6 +51,10 @@ struct AgentSwitcherView: View {
     @State private var dragMode: DragMode?
     /// How far the finger had moved at the last scroll step
     @State private var scrolledY: CGFloat = 0
+    /// When the drag chose (a flick is over quickly)
+    @State private var dragStart = Date()
+    /// The fastest the finger went in this drag
+    @State private var peakSpeed: CGFloat = 0
 
     enum DragMode {
         /// A quick swipe: the next or previous window
@@ -60,8 +64,16 @@ struct AgentSwitcherView: View {
     }
 
     /// Starting faster than this (points a second), a drag in the typed-into window
-    /// pages; slower, it scrolls back through the terminal
-    static let flickSpeed: CGFloat = 700
+    /// pages right away; slower, it scrolls back through the terminal...
+    static let flickSpeed: CGFloat = 800
+    /// ...unless it turns out a flick: over within `flickTime`, at its fastest quicker
+    /// than `flickPeakSpeed` or on average quicker than `flickAverageSpeed`. Then the
+    /// lines it scrolled go back and it pages. (A flick is still speeding up when it
+    /// starts, so its start alone reads as a scroll; reading drags are slow throughout,
+    /// or longer.)
+    static let flickPeakSpeed: CGFloat = 900
+    static let flickAverageSpeed: CGFloat = 450
+    static let flickTime: TimeInterval = 0.5
 
     /// The overview's status line above the windows
     static let headerHeight: CGFloat = 30
@@ -441,10 +453,13 @@ struct AgentSwitcherView: View {
                     let quick = abs(value.velocity.height) > Self.flickSpeed
                     dragMode = quick || index >= count ? .page : .scroll
                     scrolledY = 0
+                    dragStart = value.time
+                    peakSpeed = 0
                     if dragMode == .scroll { scrollFocused(nil, items: items, loose: loose) }
                 }
                 switch dragMode {
                 case .scroll:
+                    peakSpeed = max(peakSpeed, abs(value.velocity.height))
                     scrollFocused(dy - scrolledY, items: items, loose: loose)
                     scrolledY = dy
                 default:
@@ -458,8 +473,21 @@ struct AgentSwitcherView: View {
                 let projected = value.predictedEndTranslation.height
                 let mode = dragMode
                 dragMode = nil
-                if focused != nil && mode != .page {
-                    // A scroll (or a tap-like drag that never chose) doesn't page
+                if focused != nil && mode == .scroll {
+                    let duration = value.time.timeIntervalSince(dragStart)
+                    let average = abs(dy) / max(0.05, duration)
+                    let peak = max(peakSpeed, abs(value.velocity.height))
+                    let flick = duration < Self.flickTime && (peak > Self.flickPeakSpeed || average > Self.flickAverageSpeed)
+                    guard flick else { return }
+                    // A flick after all: put back what it scrolled, then page its way
+                    scrollFocused(-scrolledY, items: items, loose: loose)
+                    let current = min(index, count)
+                    let target = min(max(0, current + (dy < 0 ? 1 : -1)), count)
+                    if target != current { commitFocus(target, items: items, loose: loose) }
+                    return
+                }
+                if focused != nil && mode == nil {
+                    // A tap-like drag that never chose doesn't page
                     withAnimation(snap) { drag = 0 }
                     return
                 }
