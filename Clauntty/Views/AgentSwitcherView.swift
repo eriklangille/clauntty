@@ -68,6 +68,13 @@ struct AgentSwitcherView: View {
     @State private var edgeShows = 0
     /// A finger on the edge keeps it out
     @State private var edgeHeld = false
+    /// Landscape: typing is fullscreen, with no room for the windows around it
+    @State private var landscape = false
+    /// Fullscreen because typing in landscape: back to the window in portrait
+    @State private var landscapeFull = false
+    /// When the screen last rotated: the keyboard hides and shows again as it does, which
+    /// isn't putting it away
+    @State private var rotatedAt = Date.distantPast
 
     enum DragMode {
         /// A quick swipe: the next or previous window
@@ -100,9 +107,13 @@ struct AgentSwitcherView: View {
     /// Room at the top of each window for its pill
     static let pillStrip: CGFloat = 52
     /// What the terminal keeps at its bottom for the key bar
-    static let barReserve: CGFloat = 78
+    static var barReserve: CGFloat { 78 - keyBarSaving }
     /// The key bar above the keyboard
-    static let keyBarAboveKeyboard: CGFloat = 66
+    static var keyBarAboveKeyboard: CGFloat { 66 - keyBarSaving }
+    /// The key bar is shorter in landscape
+    static var keyBarSaving: CGFloat {
+        KeyboardAccessoryView.screenIsCompact ? KeyboardAccessoryView.regularHeight - KeyboardAccessoryView.compactHeight : 0
+    }
     static let spacing: CGFloat = 10
     /// The status rail's column, beside the windows while typing
     static let railColumn: CGFloat = 32
@@ -227,7 +238,9 @@ struct AgentSwitcherView: View {
                         .frame(height: typing ? 28 : 0)
                     Spacer(minLength: 0)
                 }
-                .frame(maxWidth: .infinity)
+                // Past the sides too: in landscape a menu's dimming reaches past the
+                // safe area
+                .frame(width: size.width + 400)
                 .offset(y: typing ? 0 : -200)
             }
             .contentShape(Rectangle())
@@ -248,11 +261,11 @@ struct AgentSwitcherView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .overlay(alignment: .trailing) {
+            .overlay(alignment: edgeOnLeft ? .leading : .trailing) {
                 if fullscreen {
                     EdgeDots(statuses: items.map { attentionStatus($0.session) },
                              current: items.firstIndex { $0.id == focused },
-                             isOut: edgeOut) { held in
+                             isOut: edgeOut, onLeft: edgeOnLeft) { held in
                         edgeHeld = held
                     } onSelect: { target in
                         hideEdge()
@@ -261,6 +274,8 @@ struct AgentSwitcherView: View {
                     // Where the rail is outside fullscreen
                     .frame(height: barTop(size), alignment: .center)
                     .frame(maxHeight: .infinity, alignment: .top)
+                    // On the screen's edge, past the safe area in landscape
+                    .offset(x: edgeOnLeft ? -geo.safeAreaInsets.leading : geo.safeAreaInsets.trailing)
                 }
             }
             // Fullscreen, another window finished or needs you: out of the edge
@@ -271,8 +286,28 @@ struct AgentSwitcherView: View {
                 }
                 if news { showEdge() }
             }
-            .onChange(of: fullscreen) { _, on in if !on { hideEdge() } }
+            .onChange(of: fullscreen) { _, on in
+                if !on {
+                    hideEdge()
+                    landscapeFull = false
+                }
+            }
+            // Typing in landscape is fullscreen; back in portrait, the window
+            .onChange(of: size.width > size.height) { _, wide in
+                landscape = wide
+                rotatedAt = Date()
+                if wide, focused != nil, !fullscreen {
+                    landscapeFull = true
+                    setFullscreen(true)
+                } else if !wide, landscapeFull {
+                    setFullscreen(false)
+                }
+            }
             .onChange(of: focused) { old, new in
+                if landscape, new != nil, !fullscreen {
+                    landscapeFull = true
+                    setFullscreen(true)
+                }
                 menuWindow = nil
                 // Back to the overview: keep the window where it was on screen
                 if new == nil, old != nil, atControls {
@@ -331,7 +366,10 @@ struct AgentSwitcherView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { session.showKeyboard?() }
             }
             .onReceive(cursorChanges(items.map(\.session))) { _ in cursorTick &+= 1 }
-            .onAppear { originY = geo.frame(in: .global).minY }
+            .onAppear {
+                originY = geo.frame(in: .global).minY
+                landscape = size.width > size.height
+            }
             .onChange(of: geo.frame(in: .global).minY) { _, y in originY = y }
         }
         .ignoresSafeArea(.keyboard)
@@ -375,7 +413,7 @@ struct AgentSwitcherView: View {
                 withAnimation(.easeOut(duration: 0.25)) {
                     keyboardVisible = false
                     // (A web page in front puts the keyboard away itself)
-                    if focused != nil && !fullscreen && !focusShowsWeb {
+                    if focused != nil && !fullscreen && !focusShowsWeb && Date().timeIntervalSince(rotatedAt) > 1 {
                         focused = nil
                     }
                 }
@@ -412,6 +450,11 @@ struct AgentSwitcherView: View {
         let focusedHeight = focusedContent / (focusedWidth / size.width) + SwitcherWindow.keyBarReserve
         let terminalSize: CGSize = {
             if isFull {
+                // Landscape: the whole height (the pill floats over it), down to the
+                // keyboard when it's up
+                if landscape, webShown(in: tabId) == nil {
+                    return CGSize(width: size.width, height: keyboardVisible ? keyboardTop : size.height)
+                }
                 if !keyboardVisible { return CGSize(width: size.width, height: size.height - Self.pillStrip) }
                 return CGSize(width: size.width, height: min(focusedHeight, keyboardTop - Self.pillStrip))
             }
@@ -447,7 +490,7 @@ struct AgentSwitcherView: View {
     }
 
     /// The collapsed key bar at the bottom of the screen, home indicator included
-    static let collapsedBar: CGFloat = 104
+    static var collapsedBar: CGFloat { 104 - keyBarSaving }
 
     struct WindowSpec {
         let mode: SwitcherWindow.Mode
@@ -720,6 +763,7 @@ struct AgentSwitcherView: View {
             terminalSize: spec.terminalSize,
             windowWidth: spec.width,
             windowHeight: spec.height,
+            floatsPill: fullscreen && landscape && focused == tabId && web == nil,
             web: web,
             webPanes: webPanes.count,
             activeWeb: web.flatMap { web in webPanes.firstIndex { $0.id == web.id } },
@@ -829,14 +873,30 @@ struct AgentSwitcherView: View {
     private var menuLifted: UUID? { menuWindow ?? closingMenu }
 
     /// How far a window's open menu can reach down from its top: to the key bar while
-    /// typing, else the screen's bottom
+    /// typing (fullscreen, while the keyboard's up), else the screen's bottom
     private func menuRoom(top: CGFloat, size: CGSize) -> CGFloat {
-        let bottom = focused != nil && !fullscreen ? barTop(size) - 28 : size.height - 12
+        let bottom: CGFloat = {
+            guard focused != nil else { return size.height - 12 }
+            if !fullscreen { return barTop(size) - 28 }
+            return keyboardVisible ? barTop(size) - 8 : size.height - 12
+        }()
         return bottom - top
     }
 
     private func setFullscreen(_ on: Bool) {
-        withAnimation(.spring(duration: 0.42, bounce: 0.1)) { fullscreen = on }
+        // Landscape has no room to type into a window: out of fullscreen is the overview
+        let toOverview = !on && landscape
+        withAnimation(.spring(duration: 0.42, bounce: 0.1)) {
+            fullscreen = on
+            if toOverview { focused = nil }
+        }
+        if toOverview { hideKeyboard() }
+    }
+
+    /// In landscape with the Dynamic Island on the right, the edge's dots come out of the
+    /// left
+    private var edgeOnLeft: Bool {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.interfaceOrientation == .landscapeLeft
     }
 
     /// The edge's dots out, with a tap, then back in after `edgeTime` (once let go)
@@ -987,6 +1047,9 @@ struct SwitcherWindow: View {
     let windowWidth: CGFloat
     /// From the switcher, which lays the windows out with the same math
     let windowHeight: CGFloat
+    /// Fullscreen in landscape: the terminal has the whole height, the pill and the
+    /// button float over its top right
+    var floatsPill = false
     /// The web tab shown instead of the terminal (swiped to: the workspace's last panes)
     let web: WebTab?
     /// How many web tabs the workspace has, after its terminal panes
@@ -1019,7 +1082,7 @@ struct SwitcherWindow: View {
 
     static let bottomPad: CGFloat = 8
     /// What the terminal keeps at its bottom for the key bar while the keyboard is up
-    static let keyBarReserve: CGFloat = 74
+    static var keyBarReserve: CGFloat { 74 - AgentSwitcherView.keyBarSaving }
 
     private var isFocused: Bool {
         switch mode {
@@ -1087,7 +1150,7 @@ struct SwitcherWindow: View {
         let placement: (scale: CGFloat, x: CGFloat, y: CGFloat) = {
             switch mode {
             case .fullscreen:
-                return (1, 0, AgentSwitcherView.pillStrip)
+                return (1, 0, floatsPill ? 0 : AgentSwitcherView.pillStrip)
             case .focused:
                 // The whole terminal (above the strip it keeps for the key bar), fit into
                 // the window under the pill and centered
@@ -1197,35 +1260,50 @@ struct SwitcherWindow: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            // Typing into it, the pill is the tab: a tap opens its menu. Any window's opens
-            // when held.
-            PillMenu(isOpen: isMenuOpen, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
-                     room: menuRoom - 8, onOpen: { onMenu(true) }, onClose: { onMenu(false) },
-                     onTap: { if !isFullscreen { onTap() } }) {
-                PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex,
-                         web: web, webPanes: webPanes, activeWeb: activeWeb, glass: false)
-            }
-            .gesture(isFullscreen ? pullGesture : nil)
-            .simultaneousGesture(isFullscreen ? nil : swipeGesture)
-            Spacer(minLength: 0)
-            if isFocused && !isMenuOpen {
-                Button(action: onFullscreen) {
-                    Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 36, height: 36)
-                        .glass(in: Circle())
-                        // A bigger target than it looks
-                        .padding(6)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(-6)
-                .transition(.scale.combined(with: .opacity))
+            // Floating, both at the right, the pill in the corner (its menu grows left)
+            if floatsPill {
+                Spacer(minLength: 0)
+                fullscreenButton
+                pill
+            } else {
+                pill
+                Spacer(minLength: 0)
+                fullscreenButton
             }
         }
         .padding(.horizontal, 8)
         .padding(.top, 8)
         .frame(height: AgentSwitcherView.pillStrip, alignment: .top)
+    }
+
+    private var pill: some View {
+        // Typing into it, the pill is the tab: a tap opens its menu. Any window's opens
+        // when held.
+        PillMenu(isOpen: isMenuOpen, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
+                 room: menuRoom - 8, trailing: floatsPill, onOpen: { onMenu(true) }, onClose: { onMenu(false) },
+                 onTap: { if !isFullscreen { onTap() } }) {
+            PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex,
+                     web: web, webPanes: webPanes, activeWeb: activeWeb, glass: false)
+        }
+        .gesture(isFullscreen ? pullGesture : nil)
+        .simultaneousGesture(isFullscreen ? nil : swipeGesture)
+    }
+
+    @ViewBuilder private var fullscreenButton: some View {
+        if isFocused && !isMenuOpen {
+            Button(action: onFullscreen) {
+                Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 36, height: 36)
+                    .glass(in: Circle())
+                    // A bigger target than it looks
+                    .padding(6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(-6)
+            .transition(.scale.combined(with: .opacity))
+        }
     }
 
     private var swipeGesture: some Gesture {
@@ -1617,6 +1695,8 @@ private struct EdgeDots: View {
     let statuses: [PaneStatus]
     let current: Int?
     let isOut: Bool
+    /// Out of the left edge instead (mirrored)
+    var onLeft = false
     let onHold: (Bool) -> Void
     let onSelect: (Int) -> Void
 
@@ -1664,6 +1744,7 @@ private struct EdgeDots: View {
                 }
         )
         .allowsHitTesting(isOut)
+        .scaleEffect(x: onLeft ? -1 : 1)
     }
 
     private func color(_ status: PaneStatus, isCurrent: Bool) -> Color {
@@ -1691,9 +1772,12 @@ private struct BezelBump: Shape {
     }
 
     func path(in rect: CGRect) -> Path {
+        var path = Path()
+        // In: nothing (not even the sliver past the edge, which shows inside a
+        // landscape safe area)
+        guard reach > 0.5 else { return path }
         let edge = rect.maxX
         let side = edge - reach
-        var path = Path()
         // Past the edge a little, so nothing shows between it and the bezel
         path.move(to: CGPoint(x: edge + 2, y: rect.minY))
         path.addLine(to: CGPoint(x: edge, y: rect.minY))

@@ -275,6 +275,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Constraint for positioning accessory bar above keyboard
     private var accessoryBarBottomConstraint: NSLayoutConstraint?
+    private lazy var accessoryBarHeightConstraint = accessoryBar.heightAnchor.constraint(equalToConstant: accessoryBar.height)
 
     /// Override inputView to control software keyboard visibility
     override var inputView: UIView? {
@@ -356,12 +357,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         window.addSubview(accessoryBar)
 
         accessoryBarBottomConstraint = accessoryBar.bottomAnchor.constraint(equalTo: window.bottomAnchor, constant: -8)
+        // topPadding + barHeight + bottomPadding; shorter in landscape
+        accessoryBarHeightConstraint.constant = accessoryBar.height
 
         NSLayoutConstraint.activate([
             // Full width spanning the window (minus safe area handled inside the view)
             accessoryBar.leadingAnchor.constraint(equalTo: window.leadingAnchor),
             accessoryBar.trailingAnchor.constraint(equalTo: window.trailingAnchor),
-            accessoryBar.heightAnchor.constraint(equalToConstant: 74),  // topPadding(8) + barHeight(60) + bottomPadding(6)
+            accessoryBarHeightConstraint,
             accessoryBarBottomConstraint!
         ])
         Logger.clauntty.debugOnly("[KB] Added accessory bar to window")
@@ -417,6 +420,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
         accessoryBar.onShowKeyboard = { [weak self] in
             self?.showSoftwareKeyboard()
+        }
+        // Rotated: the bar is shorter in landscape, and the terminal keeps that much less
+        accessoryBar.onHeightChange = { [weak self] in
+            guard let self else { return }
+            self.accessoryBarHeightConstraint.constant = self.accessoryBar.height
+            // After the layout pass that noticed
+            DispatchQueue.main.async { self.updateSizeForKeyboard() }
         }
 
         // Wire up voice input - send transcribed text to terminal
@@ -755,11 +765,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Height to reserve for accessory bar when keyboard is visible (expanded bar)
     /// The bar is positioned above the keyboard but still within our view bounds
-    private let expandedAccessoryBarHeight: CGFloat = 74  // topPadding(8) + barHeight(60) + bottomPadding(6)
+    private var expandedAccessoryBarHeight: CGFloat { accessoryBar.height }  // topPadding + barHeight + bottomPadding
 
     /// Height to reserve for accessory bar when keyboard is hidden (collapsed bar)
     /// Includes safe area margin since bar is at bottom of screen
-    private let collapsedAccessoryBarHeight: CGFloat = 82  // 74pt bar + 8pt margin for safe area
+    private var collapsedAccessoryBarHeight: CGFloat { accessoryBar.height + 8 }  // the bar + 8pt margin for safe area
 
     private func updateSizeForKeyboard() {
         // Recalculate size accounting for accessory bar position

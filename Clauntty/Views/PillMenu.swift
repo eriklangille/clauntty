@@ -35,6 +35,8 @@ struct PillMenu<Label: View>: View {
     let maxWidth: CGFloat
     /// How far the panel can reach down from the pill's top
     let room: CGFloat
+    /// The pill is at the right: the panel grows left from it
+    var trailing = false
     let onOpen: () -> Void
     let onClose: () -> Void
     let onTap: () -> Void
@@ -63,7 +65,9 @@ struct PillMenu<Label: View>: View {
                 // The pill's glass, which is the panel's: one shape that grows
                 GeometryReader { g in
                     // Short of the screen's edge
-                    panel(pill: g.size, lead: min(Self.margin, max(0, g.frame(in: .global).minX - 6)))
+                    let frame = g.frame(in: .global)
+                    let room = trailing ? UIScreen.main.bounds.width - frame.maxX : frame.minX
+                    panel(pill: g.size, lead: min(Self.margin, max(0, room - 6)))
                 }
             }
             .background {
@@ -98,7 +102,7 @@ struct PillMenu<Label: View>: View {
         // The rows stay inside the glass as it grows
         .clipShape(shape)
         .glass(in: shape)
-        .offset(x: -lead, y: -lift)
+        .offset(x: trailing && isOpen ? pill.width + lead - width : -lead, y: -lift)
     }
 
     private func content(_ menu: WindowMenu, pill: CGSize, lead: CGFloat) -> some View {
@@ -131,7 +135,9 @@ struct PillMenu<Label: View>: View {
                     sections(menu.sections, lead: lead).padding(.top, 4)
                 } else {
                     ScrollView { sections(menu.sections, lead: lead).padding(.top, 4) }
-                        .frame(height: max(Self.rowHeight * 2, room - fixed))
+                        // At least a row (landscape above the keyboard has room for
+                        // about that)
+                        .frame(height: max(Self.rowHeight, room - fixed))
                 }
             }
         }

@@ -268,6 +268,7 @@ struct ClaunttyApp: App {
 
     /// Handle custom URL schemes for testing/debugging
     /// - clauntty://dump-text - Dump visible terminal text to /tmp/clauntty_dump.txt
+    /// - clauntty://orient?to=left|right|portrait - Rotate (debug builds)
     private func handleURL(_ url: URL) {
         Logger.clauntty.debugOnly("Received URL: \(url.absoluteString)")
 
@@ -282,6 +283,16 @@ struct ClaunttyApp: App {
             let scope = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first(where: { $0.name == "scope" })?.value
             dumpTerminalText(wholeScreen: scope == "screen")
+        #if DEBUG
+        case "orient":
+            // clauntty://orient?to=left|right|portrait: rotate (the simulator has no
+            // window to rotate from when it runs headless)
+            let to = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "to" })?.value
+            let mask: UIInterfaceOrientationMask = to == "left" ? .landscapeLeft : to == "right" ? .landscapeRight : .portrait
+            (UIApplication.shared.connectedScenes.first as? UIWindowScene)?
+                .requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+        #endif
         default:
             Logger.clauntty.warning("Unknown URL command: \(url.host ?? "nil")")
         }

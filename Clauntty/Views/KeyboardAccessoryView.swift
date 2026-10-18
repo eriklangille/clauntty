@@ -191,20 +191,40 @@ class KeyboardAccessoryView: UIView {
     private var containerTrailingConstraint: NSLayoutConstraint!
     private var containerWidthConstraint: NSLayoutConstraint!
     private var containerCenterXConstraint: NSLayoutConstraint!
+    /// What changes in landscape (compact)
+    private var compactConstraints: (shadowTop: NSLayoutConstraint, shadowHeight: NSLayoutConstraint,
+                                     containerTop: NSLayoutConstraint, containerHeight: NSLayoutConstraint,
+                                     handleTop: NSLayoutConstraint, nippleBottom: NSLayoutConstraint)!
+
+    /// Landscape: a shorter bar, so the terminal keeps more rows above the keyboard
+    private(set) var isCompact = false
+    /// The compact bar's height changed: the terminal's reserve follows
+    var onHeightChange: (() -> Void)?
+
+    /// The bar's whole height: padding above, the bar, padding below
+    static let regularHeight: CGFloat = 74
+    static let compactHeight: CGFloat = 56
+    var height: CGFloat { isCompact ? Self.compactHeight : Self.regularHeight }
+    /// Landscape (by the screen, which follows the interface's orientation)
+    static var screenIsCompact: Bool {
+        let bounds = UIScreen.main.bounds
+        return bounds.width > bounds.height
+    }
 
     // MARK: - Constants
 
-    private let barHeight: CGFloat = 60  // Taller to fit drag handle above nipple with spacing
+    private var barHeight: CGFloat { isCompact ? 48 : 60 }  // Taller to fit drag handle above nipple with spacing
     private let nippleSize: CGFloat = 36
     private let horizontalPadding: CGFloat = 12
     private let iconSize: CGFloat = 12
     private let textSize: CGFloat = 14
-    private let topPadding: CGFloat = 8
-    private let bottomPadding: CGFloat = 6  // Minimal space between bar and keyboard
+    private var topPadding: CGFloat { isCompact ? 4 : 8 }
+    private var bottomPadding: CGFloat { isCompact ? 4 : 6 }  // Minimal space between bar and keyboard
     private let collapsedWidth: CGFloat = 110  // keyboard button + nipple + padding
     private let dragHandleWidth: CGFloat = 48  // Longer handle
     private let dragHandleHeight: CGFloat = 4
-    private let dragHandleTopOffset: CGFloat = 6  // Space from top of container
+    private var dragHandleTopOffset: CGFloat { isCompact ? 3 : 6 }  // Space from top of container
+    private var nippleBottomOffset: CGFloat { isCompact ? 2 : 6 }
 
     // MARK: - Initialization
 
@@ -445,28 +465,38 @@ class KeyboardAccessoryView: UIView {
         containerCenterXConstraint.isActive = false
         containerWidthConstraint.isActive = false
 
+        compactConstraints = (
+            shadowTop: shadowHostView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
+            shadowHeight: shadowHostView.heightAnchor.constraint(equalToConstant: barHeight),
+            containerTop: containerEffectView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
+            containerHeight: containerEffectView.heightAnchor.constraint(equalToConstant: barHeight),
+            handleTop: dragHandle.topAnchor.constraint(equalTo: containerEffectView.contentView.topAnchor, constant: dragHandleTopOffset),
+            nippleBottom: nippleContainerView.bottomAnchor.constraint(equalTo: containerEffectView.contentView.bottomAnchor,
+                                                                      constant: -nippleBottomOffset)
+        )
+
         NSLayoutConstraint.activate([
             // Shadow host view - same position as container
-            shadowHostView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
-            shadowHostView.heightAnchor.constraint(equalToConstant: barHeight),
+            compactConstraints.shadowTop,
+            compactConstraints.shadowHeight,
             shadowHostView.leadingAnchor.constraint(equalTo: containerEffectView.leadingAnchor),
             shadowHostView.trailingAnchor.constraint(equalTo: containerEffectView.trailingAnchor),
 
             // Container view
             containerLeadingConstraint,
             containerTrailingConstraint,
-            containerEffectView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
-            containerEffectView.heightAnchor.constraint(equalToConstant: barHeight),
+            compactConstraints.containerTop,
+            compactConstraints.containerHeight,
 
             // Drag handle - INSIDE container at top center (like Find My)
             dragHandle.centerXAnchor.constraint(equalTo: containerEffectView.contentView.centerXAnchor),
-            dragHandle.topAnchor.constraint(equalTo: containerEffectView.contentView.topAnchor, constant: dragHandleTopOffset),
+            compactConstraints.handleTop,
             dragHandle.widthAnchor.constraint(equalToConstant: dragHandleWidth),
             dragHandle.heightAnchor.constraint(equalToConstant: dragHandleHeight),
 
             // Nipple container - centered horizontally within container, positioned toward bottom (leaving room for drag handle)
             nippleContainerView.centerXAnchor.constraint(equalTo: containerEffectView.contentView.centerXAnchor),
-            nippleContainerView.bottomAnchor.constraint(equalTo: containerEffectView.contentView.bottomAnchor, constant: -6),
+            compactConstraints.nippleBottom,
             nippleContainerView.widthAnchor.constraint(equalToConstant: nippleSize),
             nippleContainerView.heightAnchor.constraint(equalToConstant: nippleSize),
 
@@ -505,12 +535,32 @@ class KeyboardAccessoryView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         updateConstraintsForSafeArea()
+        updateCompact()
 
         // Update glow layer frame to match shadow host
         glowLayer.frame = shadowHostView.bounds
 
         // Ensure proper z-ordering
         sendSubviewToBack(shadowHostView)
+    }
+
+    /// Compact in landscape: a shorter bar, the handle and keys closer
+    private func updateCompact() {
+        let compact = Self.screenIsCompact
+        guard compact != isCompact else { return }
+        isCompact = compact
+        let c = compactConstraints!
+        c.shadowTop.constant = topPadding
+        c.containerTop.constant = topPadding
+        c.shadowHeight.constant = barHeight
+        c.containerHeight.constant = barHeight
+        c.handleTop.constant = dragHandleTopOffset
+        c.nippleBottom.constant = -nippleBottomOffset
+        glowLayer.cornerRadius = barHeight / 2
+        shadowHostView.layer.cornerRadius = barHeight / 2
+        containerEffectView.layer.cornerRadius = barHeight / 2
+        invalidateIntrinsicContentSize()
+        onHeightChange?()
     }
 
     override func safeAreaInsetsDidChange() {
