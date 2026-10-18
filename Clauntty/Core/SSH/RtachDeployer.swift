@@ -111,7 +111,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.18.0"
+    static let expectedVersion = "2.19.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -288,6 +288,10 @@ class RtachDeployer {
         Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: deploying Claude Code hook...")
         try await deployClaudeHook()
 
+        // Running sessions move to this rtach without ending (first, so the binaries
+        // they leave are cleaned up below)
+        await upgradeSessions()
+
         // Clean up old unused binaries
         Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: cleaning up old binaries...")
         await cleanupOldBinaries()
@@ -298,6 +302,26 @@ class RtachDeployer {
 
         Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: done")
     }
+
+    /// Ask the host's sessions on an older rtach to replace it with this one, keeping
+    /// their shells and scrollback (rtach's upgrade.zig; masters from 2.19.0 can). Their
+    /// clients, ours included, are dropped and reconnect. Does nothing when all are
+    /// current.
+    private func upgradeSessions() async {
+        // Once per host per launch: each window's connection deploys, all at once
+        let host = "\(connection.username)@\(connection.host):\(connection.port)"
+        let first = Self.upgradeLock.withLock { Self.upgradedHosts.insert(host).inserted }
+        guard first else { return }
+        do {
+            let output = try await connection.executeCommand("\(Self.remoteBinPath) upgrade --json 2>/dev/null")
+            Logger.clauntty.debugOnly("rtach upgrade on \(self.connection.host): \(output.trimmingCharacters(in: .whitespacesAndNewlines))")
+        } catch {
+            Logger.clauntty.warning("rtach upgrade on \(self.connection.host) failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static let upgradeLock = NSLock()
+    nonisolated(unsafe) private static var upgradedHosts = Set<String>()
 
     /// This phone's line in the host's push file (PushNotifications), or none when
     /// notifications are off
