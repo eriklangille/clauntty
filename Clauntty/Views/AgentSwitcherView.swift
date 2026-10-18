@@ -187,12 +187,17 @@ struct AgentSwitcherView: View {
         let isAgent = session.pane.flatMap { sessionManager.paneStates[$0.paneId] }?.hasAgent ?? false
         // One size in every mode, so focusing or the keyboard never resizes the pane (and
         // Claude never redraws): windows only crop it
-        let terminalSize = CGSize(width: size.width, height: size.height - Self.pillStrip)
         let keyboardSpace = keyboardHeight + Self.keyBarAboveKeyboard
+        // Fullscreen is the session view: like a tab, the terminal fits the screen below
+        // the pill and above the keyboard (it reserves the key bar itself), so a TUI
+        // shows top to bottom. That resizes it once, as switching tabs does.
+        let terminalSize = isFull
+            ? CGSize(width: size.width, height: size.height - Self.pillStrip - (keyboardVisible ? keyboardHeight : 0))
+            : CGSize(width: size.width, height: size.height - Self.pillStrip)
         let mode: SwitcherWindow.Mode = {
             if isFull {
                 // Down to the key bar: above the keyboard when it's up
-                return .fullscreen(height: size.height - (keyboardVisible ? keyboardSpace : Self.barReserve))
+                return .fullscreen(height: size.height)
             }
             // The room above the keyboard, below the window above's peek
             if isFocused { return .focused(maxHeight: max(160, size.height - Self.peek - keyboardSpace - 8)) }
@@ -317,8 +322,7 @@ struct AgentSwitcherView: View {
         }
     }
 
-    /// Needs you, then finished and unseen, then working, then the rest; ties keep the
-    /// tab order
+    /// Needs you, then finished and unseen, then the rest in tab order
     private func attentionOrder() -> [UUID] {
         terminalTabs.enumerated().sorted { a, b in
             let ra = rank(a.element), rb = rank(b.element)
@@ -328,11 +332,12 @@ struct AgentSwitcherView: View {
 
     private func rank(_ tab: TabItem) -> Int {
         guard case .terminal(let session) = tab else { return 4 }
+        // Only what needs you moves up. A window that starts or stops working (the one
+        // you just typed into, say) keeps its place.
         switch attentionStatus(session) {
         case .blocked: return 0
         case .done: return 1
-        case .working: return 2
-        default: return 3
+        default: return 2
         }
     }
 
@@ -543,7 +548,8 @@ struct SwitcherWindow: View {
         // Where the terminal's top row goes: the crop's bottom at the window's bottom pad,
         // or right under the pill when everything fits (a short session)
         let height = windowHeight
-        let top = min(height - Self.bottomPad - c.bottom * scale, AgentSwitcherView.pillStrip)
+        // Fullscreen: the whole terminal, right under the pill
+        let top = isFullscreen ? AgentSwitcherView.pillStrip : min(height - Self.bottomPad - c.bottom * scale, AgentSwitcherView.pillStrip)
         let shift = top - (height - terminalSize.height * scale)
         ZStack(alignment: .top) {
             // Clipped by UIKit: the terminal draws with Metal, which SwiftUI's clipping
@@ -579,7 +585,8 @@ struct SwitcherWindow: View {
                 // drags page the switcher
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture { if !isFocused { onTap() } }
+                    // Typing into it, a tap pastes, as in a tab
+                    .onTapGesture { if isFocused { session.presentPasteMenu?() } else { onTap() } }
                     .simultaneousGesture(swipeGesture)
             }
         }
@@ -661,6 +668,9 @@ private struct ClipHost<Content: View>: UIViewRepresentable {
         container.clipsToBounds = true
         container.backgroundColor = .clear
         let host = UIHostingController(rootView: content())
+        // Laid out by the switcher: no keyboard avoidance or safe area insets, which
+        // would shift the terminal when the window reaches under the keyboard
+        host.safeAreaRegions = []
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(host.view)

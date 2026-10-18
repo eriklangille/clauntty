@@ -328,6 +328,8 @@ class Session: ObservableObject, Identifiable {
     @Published private(set) var cursorRow: CursorRow?
     /// Set by the terminal view
     var readCursorRow: (() -> CursorRow?)?
+    /// Shows the terminal's paste menu at the cursor; set by the terminal view
+    var presentPasteMenu: (() -> Void)?
     private var cursorUpdatePending = false
 
     /// Refresh cursorBottom soon (output arrived), at most a few times a second

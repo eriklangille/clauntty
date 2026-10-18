@@ -1435,6 +1435,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
     }
 
+    /// The paste menu at the cursor (agent mode: a tap on the focused window)
+    func showPasteMenuAtCursor() {
+        guard UIPasteboard.general.hasStrings || UIPasteboard.general.hasImages,
+              let row = cursorRow() else { return }
+        var x: Double = 0, y: Double = 0, w: Double = 0, h: Double = 0
+        if let surface { ghostty_surface_ime_point(surface, &x, &y, &w, &h) }
+        showEditMenu(at: CGPoint(x: x, y: row.top))
+    }
+
     private func showEditMenu(at location: CGPoint) {
         // Use UIEditMenuInteraction (iOS 16+)
         let menuConfig = UIEditMenuConfiguration(identifier: nil, sourcePoint: location)
