@@ -500,6 +500,19 @@ class SessionManager: ObservableObject {
         }
     }
 
+    /// Push notifications were turned on or off, or the phone got its key: tell each
+    /// connected host (new connections get it when rtach is deployed)
+    func updatePushFiles() {
+        var connections: [ObjectIdentifier: SSHConnection] = [:]
+        for connection in sessions.compactMap(\.sshConnection) + Array(connectionPool.values)
+        where connection.isConnected {
+            connections[ObjectIdentifier(connection)] = connection
+        }
+        for connection in connections.values {
+            Task { await RtachDeployer(connection: connection).updatePushFile() }
+        }
+    }
+
     private func runConnectionCheck(reason: String) async {
         // Each tab has its own connection; the pool holds the ones for listing and deploys
         var connections: [ObjectIdentifier: SSHConnection] = [:]

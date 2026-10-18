@@ -224,6 +224,7 @@ struct ClaunttyApp: App {
     @StateObject private var appState: AppState
     @StateObject private var ghosttyApp: GhosttyApp
     @StateObject private var sessionManager = SessionManager()
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
 
     static let previewMode = PreviewMode.fromArgs()
 
@@ -352,6 +353,9 @@ struct AppContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .switchToSession)) { notification in
                 handleSwitchToSession(notification)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .pushHostsChanged)) { _ in
+                sessionManager.updatePushFiles()
             }
     }
 

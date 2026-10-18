@@ -111,7 +111,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.17.0"
+    static let expectedVersion = "2.18.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -294,7 +294,20 @@ class RtachDeployer {
 
         await checkSpawnd()
 
+        await updatePushFile()
+
         Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: done")
+    }
+
+    /// This phone's line in the host's push file (PushNotifications), or none when
+    /// notifications are off
+    func updatePushFile() async {
+        guard let command = await PushNotifications.shared.hostCommand() else { return }
+        do {
+            _ = try await connection.executeCommand(command)
+        } catch {
+            Logger.clauntty.warning("Push: couldn't update \(self.connection.host)'s push file: \(error.localizedDescription)")
+        }
     }
 
     /// On macOS hosts, check whether spawnd is installed. spawnd runs its own copy of
@@ -839,6 +852,8 @@ struct RemotePaneState: Decodable, Equatable {
     let note: String?
     /// The last prompt the user sent the agent (its first line, tidied)
     let task: String?
+    /// Its master sends push notifications (rtach 2.18.0)
+    let pushes: Bool?
 
     var hasAgent: Bool { agent != nil && agent != "none" }
 }

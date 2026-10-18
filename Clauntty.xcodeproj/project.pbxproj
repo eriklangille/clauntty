@@ -69,6 +69,7 @@
 		C0000022 /* rtach in Resources */ = {isa = PBXBuildFile; fileRef = C1000022 /* rtach */; };
 		C0000023 /* WordList.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000023 /* WordList.swift */; };
 		C0000024 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000024 /* NotificationManager.swift */; };
+		35AA25C947A293E6B7A37873 /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17ABDF7A3C1051588C00A52 /* PushNotifications.swift */; };
 		C0000025 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000025 /* SettingsView.swift */; };
 		C0000026 /* PowerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000026 /* PowerManager.swift */; };
 		C0000027 /* SpeechManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000027 /* SpeechManager.swift */; };
@@ -180,6 +181,7 @@
 		C1000022 /* rtach */ = {isa = PBXFileReference; lastKnownFileType = folder; path = rtach; sourceTree = "<group>"; };
 		C1000023 /* WordList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordList.swift; sourceTree = "<group>"; };
 		C1000024 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		E17ABDF7A3C1051588C00A52 /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
 		C1000025 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C1000026 /* PowerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerManager.swift; sourceTree = "<group>"; };
 		C1000027 /* SpeechManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechManager.swift; sourceTree = "<group>"; };
@@ -438,6 +440,7 @@
 			isa = PBXGroup;
 			children = (
 				C1000024 /* NotificationManager.swift */,
+				E17ABDF7A3C1051588C00A52 /* PushNotifications.swift */,
 			);
 			path = Notifications;
 			sourceTree = "<group>";
@@ -663,6 +666,7 @@
 				733936A7CBE2B60407C98651 /* WebTab.swift in Sources */,
 				7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */,
 				C0000024 /* NotificationManager.swift in Sources */,
+				35AA25C947A293E6B7A37873 /* PushNotifications.swift in Sources */,
 				C0000025 /* SettingsView.swift in Sources */,
 				F0A00001 /* VoiceText.swift in Sources */,
 				F0A00002 /* VoiceAudio.swift in Sources */,
@@ -879,6 +883,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Clauntty/Clauntty.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 65533RB4LC;
@@ -909,6 +914,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Clauntty/Clauntty.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 65533RB4LC;

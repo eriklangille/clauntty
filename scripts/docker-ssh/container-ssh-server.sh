@@ -34,7 +34,7 @@ case "${1:-}" in
 
         if [ -z "$(container_ip)" ]; then
             container rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
-            container run -d --name "$CONTAINER_NAME" "$IMAGE_NAME" >/dev/null
+            container run -d --dns 1.1.1.1 --name "$CONTAINER_NAME" "$IMAGE_NAME" >/dev/null
             if [ -f "$KEY_DIR/test_key.pub" ]; then
                 container exec -i "$CONTAINER_NAME" sh -c 'cat > /home/testuser/.ssh/authorized_keys &&
                     chown testuser:testuser /home/testuser/.ssh/authorized_keys &&

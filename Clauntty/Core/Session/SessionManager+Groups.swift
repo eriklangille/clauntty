@@ -189,7 +189,8 @@ extension SessionManager {
         case "done": body = "Finished"
         default: body = nil
         }
-        if let body {
+        // A master that pushes tells the phone itself, even once iOS has suspended the app
+        if let body, !(state.pushes == true && PushNotifications.shared.isActive) {
             Task { await NotificationManager.shared.schedulePaneAttention(workspace: group.title, pane: paneName, body: body, paneId: paneId) }
         }
     }

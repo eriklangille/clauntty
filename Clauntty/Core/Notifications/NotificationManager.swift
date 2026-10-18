@@ -17,7 +17,13 @@ class NotificationManager: NSObject, ObservableObject {
 
     // MARK: - Published State
 
-    @Published var isAuthorized = false
+    @Published var isAuthorized = false {
+        didSet {
+            guard isAuthorized != oldValue else { return }
+            if isAuthorized { PushNotifications.shared.register() }
+            PushNotifications.shared.hostsChanged()
+        }
+    }
     @Published private(set) var hasPromptedForPermission: Bool {
         didSet {
             UserDefaults.standard.set(hasPromptedForPermission, forKey: Keys.hasPromptedForPermission)
@@ -26,6 +32,7 @@ class NotificationManager: NSObject, ObservableObject {
     @Published var notificationMode: NotificationMode {
         didSet {
             UserDefaults.standard.set(notificationMode.rawValue, forKey: Keys.notificationMode)
+            PushNotifications.shared.hostsChanged()
         }
     }
 
@@ -174,9 +181,14 @@ class NotificationManager: NSObject, ObservableObject {
     /// A workspace pane's agent needs the user, or finished, while the app is in the
     /// background. Tapping it shows the pane.
     func schedulePaneAttention(workspace: String, pane: String, body: String, paneId: String) async {
+        await schedulePaneAttention(title: workspace == pane ? workspace : "\(workspace) · \(pane)", body: body, paneId: paneId)
+    }
+
+    /// The same, titled by rtach (a push notice an older master passed on, see Session)
+    func schedulePaneAttention(title: String, body: String, paneId: String) async {
         guard appIsBackgrounded, isAuthorized, notificationMode != .none else { return }
         let content = UNMutableNotificationContent()
-        content.title = workspace == pane ? workspace : "\(workspace) · \(pane)"
+        content.title = title
         content.body = body
         content.sound = .default
         content.userInfo = ["paneId": paneId]
@@ -289,8 +301,8 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     ) {
         let userInfo = response.notification.request.content.userInfo
 
-        // A workspace pane (schedulePaneAttention)
-        if let paneId = userInfo["paneId"] as? String {
+        // A workspace pane (schedulePaneAttention, or a push from rtach)
+        if let paneId = (userInfo["paneId"] ?? userInfo["pane"]) as? String {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 NotificationCenter.default.post(name: .switchToPane, object: nil, userInfo: ["paneId": paneId])
             }

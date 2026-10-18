@@ -721,6 +721,13 @@ class Session: ObservableObject, Identifiable {
             if target.count == 2 {
                 onPaneStateChanged?(String(target[0]), String(target[1]))
             }
+        case "push":
+            // A pane's push notice (`<pane>;<kind>;<title>;<body>`), passed on by an older
+            // master that doesn't send pushes: the app is here, so it notifies itself
+            let notice = parts.count > 1 ? parts[1].split(separator: ";", maxSplits: 3, omittingEmptySubsequences: false) : []
+            if notice.count == 4 {
+                Task { await NotificationManager.shared.schedulePaneAttention(title: String(notice[2]), body: String(notice[3]), paneId: String(notice[0])) }
+            }
         case "workspace":
             // "workspace;<ws>/<pane>" shows a new pane, "workspace;" only refreshes
             let target = parts.count > 1 ? parts[1].split(separator: "/", maxSplits: 1) : []
