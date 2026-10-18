@@ -613,7 +613,9 @@ struct AgentSwitcherView: View {
             onTap: { tapped(tabId, index: i, session: session) },
             onSwipe: { step in swipe(tabId, session: session, step: step) },
             onFullscreen: {
-                if let web { fullscreen ? exitWeb() : openWeb(web) } else { setFullscreen(!fullscreen) }
+                // A page opened from elsewhere goes back there; one swiped to in this
+                // window stays in it
+                if let web, !fullscreen { openWeb(web) } else if web != nil, webReturn != nil { exitWeb() } else { setFullscreen(!fullscreen) }
             },
             onMenuWillOpen: { Task { await sessionManager.refreshWorkspaces(for: session.connectionConfig) } }
         )
@@ -952,6 +954,7 @@ struct SwitcherWindow: View {
                         .environmentObject(sessionManager)
                 }
                 .transition(.opacity)
+                .task(id: web.id) { await sessionManager.reconnectIfClosed(web) }
             }
             // Outside fullscreen touches pass through the terminal (in UIKit: SwiftUI's
             // allowsHitTesting, toggled on the view holding the keyboard, made it drop the
@@ -1039,14 +1042,23 @@ struct SwitcherWindow: View {
             }
     }
 
-    /// Fullscreen: drag the pill down to go back to the switcher
+    /// Fullscreen: drag the pill down to go back to the switcher, or sideways to switch
+    /// panes
     private var pullGesture: some Gesture {
         DragGesture(minimumDistance: 8)
-            .onChanged { value in pullDown = max(0, value.translation.height) * 0.6 }
+            .onChanged { value in
+                let sideways = abs(value.translation.width) > abs(value.translation.height)
+                pullDown = sideways ? 0 : max(0, value.translation.height) * 0.6
+            }
             .onEnded { value in
-                let exit = value.translation.height > 80
+                let dx = value.translation.width
+                let dy = value.translation.height
                 withAnimation(.spring(duration: 0.35)) { pullDown = 0 }
-                if exit { onFullscreen() }
+                if abs(dx) > abs(dy) {
+                    if abs(dx) > 40 { onSwipe(dx < 0 ? 1 : -1) }
+                } else if dy > 80 {
+                    onFullscreen()
+                }
             }
     }
 
@@ -1107,11 +1119,7 @@ struct WebWindow: View {
         .offset(y: pullDown)
         // A restored tab reconnects when it's shown (in tabs, when switched to): here
         // it's on screen
-        .task(id: webTab.id) {
-            if webTab.state == .closed {
-                try? await sessionManager.reconnectWebTab(webTab)
-            }
-        }
+        .task(id: webTab.id) { await sessionManager.reconnectIfClosed(webTab) }
     }
 
     private var header: some View {

@@ -903,6 +903,13 @@ class SessionManager: ObservableObject {
     }
 
     /// Reconnect a web tab (establish SSH connection and start port forwarding)
+    /// A restored web tab reconnects when it's shown (in tabs, when switched to; in agent
+    /// mode, when its window or pane is on screen)
+    func reconnectIfClosed(_ webTab: WebTab) async {
+        guard webTab.state == .closed else { return }
+        try? await reconnectWebTab(webTab)
+    }
+
     func reconnectWebTab(_ webTab: WebTab) async throws {
         let config = webTab.connectionConfig
         let poolKey = connectionKey(for: config)
