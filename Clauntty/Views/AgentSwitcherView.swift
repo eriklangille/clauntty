@@ -624,8 +624,10 @@ struct SwitcherWindow: View {
                     .environmentObject(sessionManager)
                     .environmentObject(appState)
             }
-            // Fullscreen it's the terminal; in the switcher a swipe anywhere pages
-            .allowsHitTesting(isFullscreen)
+            // The focused window's terminal keeps hit testing: turning it off (leaving
+            // fullscreen) made SwiftUI drop the keyboard for a moment. In the switcher the
+            // overlay above it takes the touches, so a swipe anywhere pages.
+            .allowsHitTesting(isFocused)
 
             // The pill's strip over the rows above the crop, and the bottom pad over the
             // rows below it
