@@ -1707,8 +1707,10 @@ class SessionManager: ObservableObject {
         await refreshWorkspaces(for: config)
         do {
             // Workspace panes come and go with their workspace's tab, not as plain tabs
+            // Every host's: another saved connection to this machine may know the
+            // workspace already (pane ids are unique)
             let paneIds = Set(sessions.filter { $0.groupId != nil }.compactMap(\.rtachSessionId))
-                .union(workspacePaneIds[config.id] ?? [])
+                .union(workspacePaneIds.values.joined())
             let serverSessions = try await deployer.listSessions().filter { !paneIds.contains($0.id) }
             let serverSessionIds = Set(serverSessions.map { $0.id })
 

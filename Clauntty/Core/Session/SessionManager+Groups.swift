@@ -231,9 +231,10 @@ extension SessionManager {
         for session in gone {
             closeSession(session, killRemote: false)
         }
-        // A plain tab on one of these panes: the workspace's tab replaces it
-        for session in sessions where session.groupId == nil && session.connectionConfig.id == config.id
-            && paneIds.contains(session.rtachSessionId ?? "") {
+        // A plain tab on one of these panes: the workspace's tab replaces it. Any
+        // connection's: pane ids are unique, and another saved connection to this
+        // machine may have adopted the pane before it knew about the workspace.
+        for session in sessions where session.groupId == nil && paneIds.contains(session.rtachSessionId ?? "") {
             closeSession(session, killRemote: false)
         }
     }

@@ -1157,7 +1157,7 @@ class LiquidGlassTabBar: UIView {
     ///   - orderedTabs: All tabs in display order (supports intersplicing terminal and web tabs)
     ///   - activeTab: The currently active tab
     ///   - forwardedPortCount: Number of forwarded ports, shown as a badge on the plus button
-    func update(orderedTabs: [TabItem], activeTab: SessionManager.ActiveTab?, forwardedPortCount: Int = 0) {
+    func update(orderedTabs: [TabItem], activeTab: SessionManager.ActiveTab?, activeGroupId: UUID? = nil, forwardedPortCount: Int = 0) {
         // Use the pre-ordered tabs directly
         allTabs = orderedTabs
 
@@ -1171,11 +1171,13 @@ class LiquidGlassTabBar: UIView {
         // Update active tab ID
         switch activeTab {
         case .terminal(let id):
-            // A group's bubble is keyed on the id its panes' sessions share
+            // A group's bubble is keyed on the group's id: match the session the tab
+            // shows, else the active session's group. Without a match the bar centered
+            // the first tab.
             activeTabId = orderedTabs.first(where: {
                 if case .terminal(let session) = $0 { return session.id == id }
                 return false
-            })?.id ?? id
+            })?.id ?? activeGroupId.flatMap { group in orderedTabs.first { $0.id == group }?.id } ?? id
         case .web(let id):
             activeTabId = id
         case .none:

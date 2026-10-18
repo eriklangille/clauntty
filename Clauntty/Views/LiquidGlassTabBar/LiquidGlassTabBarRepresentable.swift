@@ -170,6 +170,7 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
         bar.update(
             orderedTabs: sessionManager.orderedTabs(),
             activeTab: sessionManager.activeTab,
+            activeGroupId: sessionManager.activeSession?.groupId,
             forwardedPortCount: sessionManager.forwardedPorts.count
         )
     }
