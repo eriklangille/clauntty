@@ -19,6 +19,11 @@ struct AgentSwitcherView: View {
     @State private var fullscreen = false
     /// Window order, kept while one is focused so windows don't move under your finger
     @State private var frozenOrder: [UUID]?
+    /// The window the list is settled on (it pages one window at a time)
+    @State private var position: UUID?
+
+    /// How much of the window above stays in view, below the status bar, to tap
+    static let peek: CGFloat = 44
 
     /// Room at the top of each window for its pill
     static let pillStrip: CGFloat = 52
@@ -60,15 +65,35 @@ struct AgentSwitcherView: View {
                                     controls
                                 }
                             }
+                            // Pages a window at a time, like short videos
+                            .scrollTargetLayout()
                             .padding(.horizontal, fullscreen ? 0 : 10)
                             .padding(.top, fullscreen ? 0 : 2)
                             // Room to scroll a focused window to the top, clear of the key bar
                             .padding(.bottom, fullscreen ? 0 : (focused == nil ? 12 : geo.size.height))
                         }
+                        .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                        .scrollPosition(id: $position, anchor: .top)
+                        // Windows settle below the status bar with the one above peeking out
+                        .contentMargins(.top, fullscreen ? 0 : Self.peek, for: .scrollContent)
                         .scrollDisabled(fullscreen)
                         .scrollDismissesKeyboard(.never)
                         .onChange(of: fullscreen) { _, on in
-                            if on, let id = focused { scroller.scrollTo(id, anchor: .top) }
+                            if on, let id = focused { position = id }
+                        }
+                        // The keyboard coming up re-snaps the list to the nearest window:
+                        // bring the focused one back to the top once it's in place
+                        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                            guard let id = focused else { return }
+                            withAnimation(.spring(duration: 0.3, bounce: 0.05)) { scroller.scrollTo(id, anchor: .top) }
+                        }
+                        .onChange(of: position) { _, settled in
+                            // Typing, a swipe moves the focus (and keyboard) to the window it
+                            // settles on
+                            guard let settled, let current = focused, settled != current,
+                                  case .terminal(let session)? = windows.first(where: { $0.id == settled }) else { return }
+                            withAnimation(.spring(duration: 0.38, bounce: 0.1)) { focused = settled }
+                            sessionManager.switchTo(session)
                         }
                     }
                 }
@@ -133,6 +158,7 @@ struct AgentSwitcherView: View {
             windowWidth: isFull ? viewport.width : viewport.width - 20,
             onTap: { toggleFocus(tabId, session: session, scroller: scroller) },
             onSwipe: { step in swipe(session, step: step) },
+            onPage: { step in page(from: tabId, step: step, scroller: scroller) },
             onFullscreen: { setFullscreen(!fullscreen) }
         )
     }
@@ -148,13 +174,23 @@ struct AgentSwitcherView: View {
             } else {
                 frozenOrder = frozenOrder ?? windows.map(\.id)
                 focused = tabId
-                // Grow and move to the top in one motion
-                scroller?.scrollTo(tabId, anchor: .top)
             }
         }
         if focused == tabId {
             sessionManager.switchTo(session)
+            // Right after the window grows: a scroll in the same update goes nowhere
+            DispatchQueue.main.async {
+                withAnimation(.spring(duration: 0.38, bounce: 0.1)) { position = tabId }
+            }
         }
+    }
+
+    /// The focused window's pill swiped up or down: type into the next or previous window
+    private func page(from tabId: UUID, step: Int, scroller: ScrollViewProxy?) {
+        let ids = windows.map(\.id)
+        guard let index = ids.firstIndex(of: tabId), ids.indices.contains(index + step),
+              case .terminal(let session) = windows[index + step] else { return }
+        toggleFocus(ids[index + step], session: session, scroller: scroller)
     }
 
     private func setFullscreen(_ on: Bool) {
@@ -219,6 +255,8 @@ private struct SwitcherWindow: View {
     let windowWidth: CGFloat
     let onTap: () -> Void
     let onSwipe: (Int) -> Void
+    /// Vertical swipe on the pill: the next (1) or previous (-1) window
+    let onPage: (Int) -> Void
     let onFullscreen: () -> Void
 
     enum Mode: Equatable {
@@ -323,11 +361,12 @@ private struct SwitcherWindow: View {
             }
 
             if !isFocused {
-                // Taps and swipes go to the window, not the terminal
+                // Taps and sideways swipes go to the window, not the terminal; vertical
+                // drags still scroll the list
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onTap)
-                    .gesture(swipeGesture)
+                    .simultaneousGesture(swipeGesture)
             }
         }
         .frame(width: windowWidth, height: windowHeight)
@@ -348,7 +387,8 @@ private struct SwitcherWindow: View {
                 .contentShape(Capsule())
                 .onTapGesture { if !isFullscreen { onTap() } }
                 .gesture(isFullscreen ? pullGesture : nil)
-                .simultaneousGesture(swipeGesture)
+                .simultaneousGesture(isFullscreen ? nil : (isFocused ? pillGesture : nil))
+                .simultaneousGesture(isFocused ? nil : swipeGesture)
             Spacer(minLength: 0)
             if isFocused {
                 Button(action: onFullscreen) {
@@ -374,8 +414,24 @@ private struct SwitcherWindow: View {
         DragGesture(minimumDistance: 24)
             .onEnded { value in
                 let dx = value.translation.width
-                guard abs(dx) > abs(value.translation.height), abs(dx) > 40 else { return }
-                onSwipe(dx < 0 ? 1 : -1)
+                let dy = value.translation.height
+                if abs(dx) > abs(dy), abs(dx) > 40 {
+                    onSwipe(dx < 0 ? 1 : -1)
+                }
+            }
+    }
+
+    /// On the focused window's pill, vertical swipes also move between windows
+    private var pillGesture: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onEnded { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if abs(dx) > abs(dy), abs(dx) > 40 {
+                    onSwipe(dx < 0 ? 1 : -1)
+                } else if abs(dy) > 30 {
+                    onPage(dy < 0 ? 1 : -1)
+                }
             }
     }
 
