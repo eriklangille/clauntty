@@ -70,7 +70,7 @@ struct AgentSwitcherView: View {
                 if case .terminal(let session) = tab { return (tab.id, session) }
                 return nil
             }
-            let specs = items.map { spec(for: $0.session, tabId: $0.id, size: size) }
+            let specs = items.enumerated().map { i, item in spec(for: item.session, tabId: item.id, index: i, size: size) }
             // Fullscreen lays the other windows out at zero height: position with that
             let laidOut = zip(items, specs).map { item, spec in fullscreen && focused != item.id ? 0 : spec.height }
             let spacing = fullscreen ? 0 : Self.spacing
@@ -88,7 +88,7 @@ struct AgentSwitcherView: View {
                     let banded = raw < 0 ? raw * 0.3 : (raw > maxScroll ? maxScroll + (raw - maxScroll) * 0.3 : raw)
                     return -banded
                 }
-                let anchor: CGFloat = fullscreen ? 0 : (current == 0 ? 4 : Self.peek)
+                let anchor: CGFloat = fullscreen ? 0 : Self.anchor(for: current)
                 return (tops.indices.contains(current) ? anchor - tops[current] : 0) + (focused == nil ? 0 : drag)
             }()
 
@@ -120,11 +120,18 @@ struct AgentSwitcherView: View {
             .frame(width: size.width, height: size.height, alignment: .top)
             // Typing: nothing shows below the key bar's top (the next window would show
             // through the glass)
+            // Typing: whatever reaches the key bar (a window mid-swipe) fades out under it
             .mask(alignment: .top) {
-                Rectangle()
-                    .frame(height: focused != nil && !fullscreen ? barTop(size) - 6 : size.height + 400)
-                    .frame(maxWidth: .infinity)
-                    .offset(y: -200 * (focused != nil && !fullscreen ? 0 : 1))
+                let typing = focused != nil && !fullscreen
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .frame(height: typing ? max(0, barTop(size) - 28) : size.height + 400)
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: typing ? 28 : 0)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity)
+                .offset(y: typing ? 0 : -200)
             }
             .contentShape(Rectangle())
             .simultaneousGesture(fullscreen ? nil : pager(count: items.count, heights: specs.map(\.height), items: items, maxScroll: maxScroll))
@@ -193,7 +200,7 @@ struct AgentSwitcherView: View {
     // MARK: Layout
 
     /// Each window's mode and height, from the same math the window crops with
-    private func spec(for session: Session, tabId: UUID, size: CGSize) -> WindowSpec {
+    private func spec(for session: Session, tabId: UUID, index i: Int, size: CGSize) -> WindowSpec {
         _ = cursorTick
         let isFocused = focused == tabId
         let isFull = fullscreen && isFocused
@@ -214,7 +221,9 @@ struct AgentSwitcherView: View {
                 return .fullscreen(height: size.height)
             }
             // Down to the key bar, below the window above's peek
-            if isFocused { return .focused(maxHeight: max(160, barTop(size) - Self.peek - 8)) }
+            // From where it settles (the first window has nothing above to peek) down to
+            // the key bar, so nothing is left to show between them
+            if isFocused { return .focused(maxHeight: max(160, barTop(size) - Self.anchor(for: i) - 10)) }
             return status == .blocked ? .blocked : .collapsed
         }()
         let width = isFull ? size.width : size.width - 10 - (focused != nil ? Self.railColumn : 10)
@@ -222,6 +231,10 @@ struct AgentSwitcherView: View {
                                            terminalSize: terminalSize, windowWidth: width)
         return WindowSpec(mode: mode, isAgent: isAgent, status: status, terminalSize: terminalSize, width: width, height: height)
     }
+
+    /// Where a window settles at the top: the first right under the status bar, the
+    /// others with the one above peeking out
+    static func anchor(for index: Int) -> CGFloat { index == 0 ? 4 : peek }
 
     /// Where the key bar starts: above the keyboard, or at the bottom with it collapsed
     private func barTop(_ size: CGSize) -> CGFloat {
