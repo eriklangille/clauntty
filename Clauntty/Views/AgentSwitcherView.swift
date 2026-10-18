@@ -39,8 +39,10 @@ struct AgentSwitcherView: View {
     /// Bumped whenever the keyboard shows: a pending collapse to the overview checks it
     @State private var keyboardShows = 0
 
-    /// The overview's status line above the windows, with voice and a new tab
+    /// The overview's status line above the windows
     static let headerHeight: CGFloat = 30
+    /// Voice and a new tab, after the windows: the pager's last stop while typing
+    static let controlsHeight: CGFloat = 56
 
     /// How much of the window above stays in view, below the status bar, to tap
     static let peek: CGFloat = 44
@@ -80,8 +82,11 @@ struct AgentSwitcherView: View {
             let tops = Self.tops(laidOut, spacing: spacing).map { $0 + lead }
             let focusedIndex = items.firstIndex { $0.id == focused }
             let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, items.count - 1))
-            let contentHeight = lead + laidOut.reduce(0, +) + spacing * CGFloat(max(0, items.count - 1))
-            // The last window stops above the key bar
+            // Typing, paged past the last window: on the controls
+            let atControls = focused != nil && !fullscreen && index >= items.count
+            let controlsTop = lead + laidOut.reduce(0, +) + spacing * CGFloat(items.count)
+            let contentHeight = controlsTop + (fullscreen ? 0 : Self.controlsHeight)
+            // The controls stop above the key bar
             let maxScroll = max(0, contentHeight - barTop(size) + Self.spacing)
             let offset: CGFloat = {
                 if focused == nil && !fullscreen {
@@ -90,6 +95,9 @@ struct AgentSwitcherView: View {
                     let banded = raw < 0 ? raw * 0.3 : (raw > maxScroll ? maxScroll + (raw - maxScroll) * 0.3 : raw)
                     return -banded
                 }
+                // The controls sit above the key bar (clear of its fade), the last window's
+                // end above them
+                if atControls { return barTop(size) - 28 - Self.controlsHeight - controlsTop + drag }
                 let anchor: CGFloat = fullscreen ? 0 : Self.anchor(for: current)
                 return (tops.indices.contains(current) ? anchor - tops[current] : 0) + (focused == nil ? 0 : drag)
             }()
@@ -109,6 +117,10 @@ struct AgentSwitcherView: View {
                         .clipped()
                         .opacity(hidden ? 0 : 1)
                         .allowsHitTesting(!hidden)
+                }
+                if !fullscreen {
+                    controls
+                        .frame(height: Self.controlsHeight)
                 }
             }
             .padding(.leading, fullscreen ? 0 : 10)
@@ -135,15 +147,11 @@ struct AgentSwitcherView: View {
             .simultaneousGesture(fullscreen ? nil : pager(count: items.count, heights: specs.map(\.height), items: items, maxScroll: maxScroll))
             .overlay(alignment: .trailing) {
                 if focused != nil && !fullscreen {
-                    // Voice and a new tab stay in reach while typing, around the rail
-                    VStack(spacing: 10) {
-                        GlassCircle(systemName: "waveform", size: 30, action: onVoice)
-                        StatusRail(statuses: items.map { attentionStatus($0.session) }, current: current) { target in
-                            jump(to: target, items: items)
-                        } onScrubEnd: { target in
-                            commitFocus(target, items: items)
-                        }
-                        GlassCircle(systemName: "plus", size: 30, action: onNewTab)
+                    // A last slot, a plus, for the controls
+                    StatusRail(statuses: items.map { attentionStatus($0.session) }, current: atControls ? items.count : current) { target in
+                        jump(to: target, items: items)
+                    } onScrubEnd: { target in
+                        commitFocus(target, items: items)
                     }
                     .frame(width: Self.railColumn)
                     // Centered beside the focused window, in the room above the key bar
@@ -154,7 +162,9 @@ struct AgentSwitcherView: View {
             }
             .onChange(of: focused) { old, new in
                 // Back to the overview: keep the window where it was on screen
-                if new == nil, old != nil, tops.indices.contains(current) {
+                if new == nil, old != nil, atControls {
+                    scrollOffset = maxScroll
+                } else if new == nil, old != nil, tops.indices.contains(current) {
                     let anchor: CGFloat = current == 0 ? 4 : Self.peek
                     scrollOffset = min(max(0, tops[current] - anchor), maxScroll)
                 }
@@ -344,7 +354,8 @@ struct AgentSwitcherView: View {
                 if focused == nil {
                     drag = dy
                 } else {
-                    let atEdge = (index == 0 && dy > 0) || (index >= count - 1 && dy < 0)
+                    // The controls are one stop past the last window
+                    let atEdge = (index == 0 && dy > 0) || (index >= count && dy < 0)
                     drag = atEdge ? dy * 0.3 : dy
                 }
             }
@@ -360,12 +371,12 @@ struct AgentSwitcherView: View {
                     }
                     return
                 }
-                let current = min(index, max(0, count - 1))
-                let threshold = min(120, (heights.indices.contains(current) ? heights[current] : 120) * 0.3)
+                let current = min(index, count)
+                let threshold = min(120, (heights.indices.contains(current) ? heights[current] : Self.controlsHeight) * 0.3)
                 var target = current
                 if dy < -threshold || projected < -200 { target = current + 1 }
                 if dy > threshold || projected > 200 { target = current - 1 }
-                target = min(max(0, target), max(0, count - 1))
+                target = min(max(0, target), count)
                 if target == current {
                     withAnimation(snap) { drag = 0 }
                     return
@@ -377,6 +388,15 @@ struct AgentSwitcherView: View {
     /// Type into the window at `target`, then put the queue back in attention order
     /// (the focused window stays put on screen; the others settle around it)
     private func commitFocus(_ target: Int, items: [(id: UUID, session: Session)]) {
+        // Past the last window: the controls (the keyboard stays with the window)
+        if target == items.count {
+            if index != target { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            withAnimation(snap) {
+                index = target
+                drag = 0
+            }
+            return
+        }
         guard items.indices.contains(target) else { return }
         let id = items[target].id
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -401,7 +421,7 @@ struct AgentSwitcherView: View {
 
     /// The rail tapped or scrubbed: show that window (focus follows when the finger lifts)
     private func jump(to target: Int, items: [(id: UUID, session: Session)]) {
-        guard items.indices.contains(target), target != index else { return }
+        guard target >= 0, target <= items.count, target != index else { return }
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(snap) { index = target }
     }
@@ -504,13 +524,12 @@ struct AgentSwitcherView: View {
 
     // MARK: Header and controls
 
-    /// What needs you, or that nothing does, between voice and a new tab (on the rail
-    /// while typing)
+    /// What needs you, or that nothing does
     private var header: some View {
         let panes = sessionManager.sessionGroups.flatMap(\.panes)
         let blocked = panes.filter { $0.status == .blocked }.count
         let done = panes.filter { $0.status == .done }.count
-        let status = HStack(spacing: 6) {
+        return HStack(spacing: 6) {
             if blocked == 0 && done == 0 {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Color(uiColor: PaneStatus.done.tint))
@@ -529,15 +548,16 @@ struct AgentSwitcherView: View {
         }
         .font(.system(size: 13, weight: .semibold))
         .foregroundStyle(.secondary)
-        return HStack {
-            GlassCircle(systemName: "waveform", size: Self.headerHeight, action: onVoice)
-            Spacer(minLength: 8)
-            status
-            Spacer(minLength: 8)
-            GlassCircle(systemName: "plus", size: Self.headerHeight, action: onNewTab)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Voice and a new tab, after the windows
+    private var controls: some View {
+        HStack(spacing: 14) {
+            GlassCircle(systemName: "waveform", size: 44, action: onVoice)
+            GlassCircle(systemName: "plus", size: 44, action: onNewTab)
         }
-        .opacity(focused == nil ? 1 : 0)
-        .allowsHitTesting(focused == nil)
+        .padding(.top, 6)
     }
 
     /// The tab bar's session menu, for the window typed into
@@ -932,8 +952,8 @@ private struct PanePill: View {
     }
 }
 
-/// While typing: one dot per window, in queue order, colored like the tab glyphs. Tap a
-/// dot to go there; drag along the rail to scrub.
+/// While typing: one dot per window, in queue order, colored like the tab glyphs, then a
+/// plus for the controls after them. Tap a dot to go there; drag along the rail to scrub.
 private struct StatusRail: View {
     let statuses: [PaneStatus]
     let current: Int
@@ -958,6 +978,16 @@ private struct StatusRail: View {
                 }
                 .frame(width: 24, height: Self.pitch)
             }
+            ZStack {
+                if current == statuses.count {
+                    Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
+                        .frame(width: 14, height: 14)
+                }
+                Image(systemName: "plus")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.6))
+            }
+            .frame(width: 24, height: Self.pitch)
         }
         .padding(.vertical, 8)
         .glass(in: Capsule())
@@ -970,7 +1000,7 @@ private struct StatusRail: View {
     }
 
     private func slot(at y: CGFloat) -> Int {
-        min(max(0, Int((y - 8) / Self.pitch)), statuses.count - 1)
+        min(max(0, Int((y - 8) / Self.pitch)), statuses.count)
     }
 }
 
