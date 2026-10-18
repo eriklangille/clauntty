@@ -114,13 +114,16 @@ extension SessionManager {
         let fallbackTitle = fallback.flatMap { $0.isEmpty ? nil : $0 } ?? "shell"
         guard let state = paneStates[paneId] else { return fallbackTitle }
         if state.hasAgent {
-            // Claude Code's title is its task, after a spinner or "✳". Any other title
-            // is the shell's, not the agent's.
+            // Claude Code names the conversation in its title, after a spinner or "✳"
+            // (any other title is the shell's). Until it does ("Claude Code"), the last
+            // prompt the user sent it.
+            let task = state.task.flatMap { $0.isEmpty ? nil : $0 }
             let title = state.title ?? ""
             guard let first = title.unicodeScalars.first, !first.properties.isAlphabetic, !CharacterSet.alphanumerics.contains(first),
-                  first.value >= 0x2000 else { return state.agent ?? "agent" }
-            let task = title.drop { !$0.isLetter && !$0.isNumber }
-            return task.isEmpty ? (state.agent ?? "agent") : String(task)
+                  first.value >= 0x2000 else { return task ?? state.agent ?? "agent" }
+            let topic = String(title.drop { !$0.isLetter && !$0.isNumber })
+            if topic.isEmpty || topic == "Claude Code" { return task ?? state.agent ?? "agent" }
+            return topic
         }
         let dir = Self.directoryName(state.cwd)
         if let fg = state.fg, !fg.isEmpty, !Self.shells.contains(fg) {
