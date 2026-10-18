@@ -233,15 +233,17 @@ struct AgentSwitcherView: View {
         // shows (a TUI too). Fullscreen fits the room above the keyboard. The overview
         // keeps every terminal at full height, cropped.
         let width = isFull ? size.width : size.width - 10 - (focused != nil ? Self.railColumn : 10)
+        // Fullscreen with the keyboard up keeps the focused window's size, so going
+        // fullscreen and back is a zoom: a resize mid-animation reflowed the lines.
+        let focusedWidth = size.width - 10 - Self.railColumn
+        let focusedContent = barTop(size) - Self.peek - 10 - Self.pillStrip - SwitcherWindow.bottomPad
+        let focusedHeight = focusedContent / (focusedWidth / size.width) + SwitcherWindow.keyBarReserve
         let terminalSize: CGSize = {
             if isFull {
-                return CGSize(width: size.width, height: (keyboardVisible ? keyboardTop : size.height) - Self.pillStrip)
+                if !keyboardVisible { return CGSize(width: size.width, height: size.height - Self.pillStrip) }
+                return CGSize(width: size.width, height: min(focusedHeight, keyboardTop - Self.pillStrip))
             }
-            if isFocused {
-                let content = barTop(size) - Self.anchor(for: i) - 10 - Self.pillStrip - SwitcherWindow.bottomPad
-                let scale = width / size.width
-                return CGSize(width: size.width, height: content / scale + SwitcherWindow.keyBarReserve)
-            }
+            if isFocused { return CGSize(width: size.width, height: focusedHeight) }
             return CGSize(width: size.width, height: size.height - Self.pillStrip)
         }()
         let mode: SwitcherWindow.Mode = {
@@ -260,9 +262,9 @@ struct AgentSwitcherView: View {
         return WindowSpec(mode: mode, isAgent: isAgent, status: status, terminalSize: terminalSize, width: width, height: height)
     }
 
-    /// Where a window settles at the top: the first right under the status bar, the
-    /// others with the one above peeking out
-    static func anchor(for index: Int) -> CGFloat { index == 0 ? 4 : peek }
+    /// Where a focused window settles: below the window above's peek (the first, below
+    /// the status line), so every focused window, and its terminal, has one size
+    static func anchor(for index: Int) -> CGFloat { peek }
 
     /// Where the key bar starts: above the keyboard, or at the bottom with it collapsed
     private func barTop(_ size: CGSize) -> CGFloat {
