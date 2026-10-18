@@ -1037,6 +1037,23 @@ struct SwitcherWindow: View {
                 .transition(.opacity)
                 .task(id: web.id) { await sessionManager.reconnectIfClosed(web) }
             }
+            if web == nil, !isFullscreen, let notice {
+                // Covers the empty terminal (its own overlays are centered in the whole
+                // terminal, cropped away here)
+                HStack(spacing: 8) {
+                    if let icon = notice.icon {
+                        Image(systemName: icon).foregroundStyle(notice.tint)
+                    } else {
+                        ProgressView().controlSize(.small).tint(.secondary)
+                    }
+                    Text(notice.text).foregroundStyle(.secondary)
+                }
+                .font(.system(size: 14, weight: .medium))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, AgentSwitcherView.pillStrip)
+                .background(background)
+                .allowsHitTesting(false)
+            }
             // Outside fullscreen touches pass through the terminal (in UIKit: SwiftUI's
             // allowsHitTesting, toggled on the view holding the keyboard, made it drop the
             // keyboard for a moment), so the overlay takes them and a swipe anywhere pages
@@ -1058,8 +1075,13 @@ struct SwitcherWindow: View {
                 // drags page the switcher
                 Color.clear
                     .contentShape(Rectangle())
-                    // Typing into it, a tap pastes, as in a tab (a page goes fullscreen)
-                    .onTapGesture { if isFocused && web == nil { session.presentPasteMenu?() } else { onTap() } }
+                    // Typing into it, a tap goes to the terminal as in a tab: a click for a
+                    // TUI, else paste (a page goes fullscreen)
+                    .onTapGesture { location in
+                        guard isFocused, web == nil else { return onTap() }
+                        session.tapTerminal?(CGPoint(x: (location.x - placement.x) / placement.scale,
+                                                     y: (location.y - placement.y) / placement.scale))
+                    }
                     .simultaneousGesture(swipeGesture)
             }
         }
@@ -1141,6 +1163,18 @@ struct SwitcherWindow: View {
                     onFullscreen()
                 }
             }
+    }
+
+    /// Why the terminal has nothing to show yet, or no more
+    private var notice: (icon: String?, tint: Color, text: String)? {
+        switch session.state {
+        case .error: return ("exclamationmark.triangle.fill", .red, "Couldn't connect")
+        case .remotelyDeleted: return ("xmark.circle.fill", .orange, "Session ended")
+        case .connecting: return (nil, .secondary, "Connecting")
+        case .connected, .disconnected:
+            if session.isResuming { return (nil, .secondary, "Resuming") }
+            return session.hasOutput ? nil : (nil, .secondary, "Connecting")
+        }
     }
 
     private var borderColor: Color {

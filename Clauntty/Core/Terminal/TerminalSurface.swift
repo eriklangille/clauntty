@@ -1135,10 +1135,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Clear the current selection by simulating a click
     private func clearSelection() {
         guard let surface = self.surface else { return }
-        // A click (press + release at same spot) clears selection
-        ghostty_surface_mouse_pos(surface, 0, 0, GHOSTTY_MODS_NONE)
-        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
-        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+        // A click (press + release at same spot) clears selection. Shift keeps it from a
+        // TUI that takes the mouse (it would get a click at its top-left corner).
+        let mods = isMouseCaptured ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
+        ghostty_surface_mouse_pos(surface, 0, 0, mods)
+        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
+        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, mods)
         hideSelectionHandles()
     }
 
@@ -1436,6 +1438,22 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     /// The paste menu at the cursor (agent mode: a tap on the focused window)
+    /// A tap on agent mode's window, whose terminal doesn't take touches: a click when a
+    /// TUI takes the mouse, else the paste menu at the cursor
+    func windowTap(at location: CGPoint) {
+        if isEditMenuVisible {
+            dismissEditMenu()
+            return
+        }
+        if let surface, isMouseCaptured {
+            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            return
+        }
+        showPasteMenuAtCursor()
+    }
+
     func showPasteMenuAtCursor() {
         guard UIPasteboard.general.hasStrings || UIPasteboard.general.hasImages,
               let row = cursorRow() else { return }

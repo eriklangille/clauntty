@@ -343,7 +343,7 @@ struct TerminalView: View {
         // Let the voice agent read this tab's text, styling included (to tell
         // dim suggestions from typed text)
         session.readCursorRow = { [weak surface] in surface?.cursorRow() }
-        session.presentPasteMenu = { [weak surface] in surface?.showPasteMenuAtCursor() }
+        session.tapTerminal = { [weak surface] point in surface?.windowTap(at: point) }
         session.showKeyboard = { [weak surface] in surface?.showSoftwareKeyboard() }
         session.scrollTerminal = { [weak surface] dy in
             guard let surface else { return }

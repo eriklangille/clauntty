@@ -328,8 +328,13 @@ class Session: ObservableObject, Identifiable {
     @Published private(set) var cursorRow: CursorRow?
     /// Set by the terminal view
     var readCursorRow: (() -> CursorRow?)?
-    /// Shows the terminal's paste menu at the cursor; set by the terminal view
-    var presentPasteMenu: (() -> Void)?
+    /// A tap at this point (in the terminal's points): a click when a TUI takes the
+    /// mouse, else the paste menu at the cursor. Set by the terminal view; agent mode's
+    /// windows don't take touches themselves.
+    var tapTerminal: ((CGPoint) -> Void)?
+    /// The terminal has had output since the app started (agent mode's windows say
+    /// they're connecting until then)
+    @Published private(set) var hasOutput = false
     /// Brings the soft keyboard back if it was hidden with the key bar; set by the
     /// terminal view
     var showKeyboard: (() -> Void)?
@@ -663,6 +668,7 @@ class Session: ObservableObject, Identifiable {
 
         // Forward to terminal
         onDataReceived?(data)
+        if !hasOutput { hasOutput = true }
         scheduleCursorUpdate()
 
         // If we were pre-fetching on idle, re-pause now that we have the data
