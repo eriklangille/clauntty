@@ -335,6 +335,9 @@ class Session: ObservableObject, Identifiable {
     /// inbox ID (nil from rtach before 2.10)
     var onShowImageRequested: ((String, String?) -> Void)?
 
+    /// `rtach ws` changed the host's workspaces: the workspace and pane to show, if any
+    var onWorkspaceChanged: ((_ workspaceId: String?, _ paneId: String?) -> Void)?
+
     // MARK: - rtach Protocol Session
 
     /// State machine for rtach protocol (raw/framed mode handling)
@@ -663,6 +666,13 @@ class Session: ObservableObject, Identifiable {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path) (inbox \(inboxId ?? "none"))")
                 onShowImageRequested?(path, inboxId)
             }
+        case "workspace":
+            // "workspace;<ws>/<pane>" shows a new pane, "workspace;" only refreshes
+            let target = parts.count > 1 ? parts[1].split(separator: "/", maxSplits: 1) : []
+            let workspaceId = target.count == 2 ? String(target[0]) : nil
+            let paneId = target.count == 2 ? String(target[1]) : nil
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command workspace \(paneId ?? "(refresh)")")
+            onWorkspaceChanged?(workspaceId, paneId)
         default:
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
         }

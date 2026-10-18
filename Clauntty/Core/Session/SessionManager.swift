@@ -242,6 +242,17 @@ class SessionManager: ObservableObject {
     /// - Parameter rtachSessionId: The rtach session to attach to, or nil for new session
     func connect(session: Session, rtachSessionId: String? = nil) async throws {
         Logger.clauntty.debugOnly("SessionManager.connect called for session \(session.id.uuidString.prefix(8))")
+        // Another connect is under way (switchTo's lazy reconnect and the terminal view
+        // appearing both start one for a new pane): wait for it. A second channel
+        // attaches again with the same client id and replays the history into the
+        // same terminal twice.
+        if case .connecting = session.state {
+            for _ in 0..<150 {
+                guard case .connecting = session.state else { break }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if case .connected = session.state { return }
+        }
         session.state = .connecting
 
         let config = session.connectionConfig
@@ -352,6 +363,10 @@ class SessionManager: ObservableObject {
         session.onShowImageRequested = { [weak self, weak session] path, inboxId in
             guard let self = self, let session = session else { return }
             self.handleShowImageRequest(from: session, path: path, inboxId: inboxId)
+        }
+        session.onWorkspaceChanged = { [weak self, weak session] workspaceId, paneId in
+            guard let self = self, let session = session else { return }
+            Task { await self.workspaceChanged(on: session.connectionConfig, workspaceId: workspaceId, paneId: paneId) }
         }
 
         // Wire up auto-reconnect callback for when send detects nil channel

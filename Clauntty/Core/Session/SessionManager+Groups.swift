@@ -279,21 +279,21 @@ extension SessionManager {
             case .split:
                 let created = try await withHost(config) { connection in
                     try await RtachDeployer(connection: connection)
-                        .workspaceCommand(["split", group.activePaneId], as: WorkspaceCreated.self)
+                        .workspaceCommand(["split", group.activePaneId, "--quiet"], as: WorkspaceCreated.self)
                 }
                 await refreshWorkspaces(for: config)
                 selectPane(groupId: groupId, paneId: created.pane)
             case .newTab:
                 let created = try await withHost(config) { connection in
                     try await RtachDeployer(connection: connection)
-                        .workspaceCommand(["tab", group.workspaceId], as: WorkspaceCreated.self)
+                        .workspaceCommand(["tab", group.workspaceId, "--quiet"], as: WorkspaceCreated.self)
                 }
                 await refreshWorkspaces(for: config)
                 selectPane(groupId: groupId, paneId: created.pane)
             case .close:
                 _ = try await withHost(config) { connection in
                     try await RtachDeployer(connection: connection)
-                        .workspaceCommand(["close", group.activePaneId], as: WorkspacePaneClosed.self)
+                        .workspaceCommand(["close", group.activePaneId, "--quiet"], as: WorkspacePaneClosed.self)
                 }
                 await refreshWorkspaces(for: config)
             }
@@ -308,12 +308,31 @@ extension SessionManager {
         do {
             let created = try await withHost(config) { connection in
                 try await RtachDeployer(connection: connection)
-                    .workspaceCommand(["new"], in: folder.isEmpty ? "~" : folder, as: WorkspaceCreated.self)
+                    .workspaceCommand(["new", "--quiet"], in: folder.isEmpty ? "~" : folder, as: WorkspaceCreated.self)
             }
             await refreshWorkspaces(for: config)
             showWorkspace(created.workspace, config: config)
         } catch {
             workspaceMessage = error.localizedDescription
+        }
+    }
+
+    /// `rtach ws` changed a host's workspaces (from a terminal, or an agent): refresh, and
+    /// show the pane it made
+    func workspaceChanged(on config: SavedConnection, workspaceId: String?, paneId: String?) async {
+        // Asked to show it: a workspace closed on this phone comes back
+        if let workspaceId {
+            hiddenWorkspaces.remove(Self.workspaceKey(config.id, workspaceId))
+        }
+        await refreshWorkspaces(for: config)
+        guard let paneId,
+              let groupId = sessionGroups.first(where: { $0.panes.contains { $0.id == paneId } })?.id else { return }
+        selectPane(groupId: groupId, paneId: paneId)
+        // Looked up again: selectPane changed the group's pane. Shows the group's tab if
+        // another tab was active.
+        if let group = sessionGroups.first(where: { $0.id == groupId }),
+           let session = currentSession(of: group), activeSessionId != session.id {
+            switchTo(session)
         }
     }
 
