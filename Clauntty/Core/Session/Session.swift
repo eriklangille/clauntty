@@ -338,6 +338,13 @@ class Session: ObservableObject, Identifiable {
     /// `rtach ws` changed the host's workspaces: the workspace and pane to show, if any
     var onWorkspaceChanged: ((_ workspaceId: String?, _ paneId: String?) -> Void)?
 
+    /// A session's state changed (`pane;<id>;<json>`): any pane on the host, not only this one
+    var onPaneStateChanged: ((_ paneId: String, _ json: String) -> Void)?
+
+    /// rtach tracks an agent in this session (hooks): its state drives notifications,
+    /// not the idle guess
+    var agentTracked = false
+
     // MARK: - rtach Protocol Session
 
     /// State machine for rtach protocol (raw/framed mode handling)
@@ -665,6 +672,11 @@ class Session: ObservableObject, Identifiable {
                 let (path, inboxId) = ImageInbox.parseImageArgument(String(parts[1]))
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path) (inbox \(inboxId ?? "none"))")
                 onShowImageRequested?(path, inboxId)
+            }
+        case "pane":
+            let target = parts.count > 1 ? parts[1].split(separator: ";", maxSplits: 1) : []
+            if target.count == 2 {
+                onPaneStateChanged?(String(target[0]), String(target[1]))
             }
         case "workspace":
             // "workspace;<ws>/<pane>" shows a new pane, "workspace;" only refreshes

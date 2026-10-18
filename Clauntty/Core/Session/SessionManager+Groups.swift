@@ -94,6 +94,7 @@ extension SessionManager {
         guard group.activePaneId != paneId, let config = currentSession(of: group)?.connectionConfig else { return }
 
         let groupIsActive = activeSession?.groupId == groupId
+        markPaneSeen(paneId)
         group.recentPaneIds.removeAll { $0 == paneId || $0 == group.activePaneId }
         group.recentPaneIds.insert(group.activePaneId, at: 0)
         group.activePaneId = paneId
@@ -102,6 +103,107 @@ extension SessionManager {
 
         guard let session = paneSession(for: group, paneId: paneId, config: config) else { return }
         if groupIsActive {
+            switchTo(session)
+        }
+    }
+
+    // MARK: Pane state
+
+    /// A pane's title: an agent's task, else the program in front and its directory
+    func paneTitle(_ paneId: String, fallback: String?) -> String {
+        let fallbackTitle = fallback.flatMap { $0.isEmpty ? nil : $0 } ?? "shell"
+        guard let state = paneStates[paneId] else { return fallbackTitle }
+        if state.hasAgent {
+            // Claude Code's title is its task, after a spinner or "✳". Any other title
+            // is the shell's, not the agent's.
+            let title = state.title ?? ""
+            guard let first = title.unicodeScalars.first, !first.properties.isAlphabetic, !CharacterSet.alphanumerics.contains(first),
+                  first.value >= 0x2000 else { return state.agent ?? "agent" }
+            let task = title.drop { !$0.isLetter && !$0.isNumber }
+            return task.isEmpty ? (state.agent ?? "agent") : String(task)
+        }
+        let dir = Self.directoryName(state.cwd)
+        if let fg = state.fg, !fg.isEmpty, !Self.shells.contains(fg) {
+            return dir.isEmpty ? fg : "\(fg) · \(dir)"
+        }
+        return dir.isEmpty ? fallbackTitle : dir
+    }
+
+    private static let shells: Set<String> = ["zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "login"]
+
+    /// The last path component, "~" for a home directory
+    private static func directoryName(_ path: String?) -> String {
+        guard let path, !path.isEmpty else { return "" }
+        let parts = path.split(separator: "/")
+        if (parts.count == 2 && (parts[0] == "Users" || parts[0] == "home")) || (parts.count == 1 && parts[0] == "root") {
+            return "~"
+        }
+        return parts.last.map(String.init) ?? "/"
+    }
+
+    /// The status glyph: an agent's state, with done only until the user has seen it
+    func paneStatus(_ paneId: String) -> PaneStatus {
+        guard let state = paneStates[paneId], state.hasAgent else { return .none }
+        switch state.state {
+        case "working": return .working
+        case "blocked": return .blocked
+        case "done": return unseenDonePanes.contains(paneId) ? .done : .idle
+        default: return .idle
+        }
+    }
+
+    /// `pane;<id>;<json>` from rtach: one pane's state changed. Notifies the user when
+    /// its agent needs them or finished out of sight.
+    func paneStateChanged(paneId: String, json: String) {
+        guard let state = try? JSONDecoder().decode(RemotePaneState.self, from: Data(json.utf8)) else { return }
+        let previous = paneStates[paneId]
+        paneStates[paneId] = state
+        guard let index = sessionGroups.firstIndex(where: { $0.panes.contains { $0.id == paneId } }) else { return }
+
+        let shown = activeSession?.pane?.paneId == paneId && !NotificationManager.shared.appIsBackgrounded
+        if state.state == "done", previous?.state != "done", !shown {
+            unseenDonePanes.insert(paneId)
+        }
+        if state.state != "done" {
+            unseenDonePanes.remove(paneId)
+        }
+
+        var group = sessionGroups[index]
+        if let paneIndex = group.panes.firstIndex(where: { $0.id == paneId }) {
+            group.panes[paneIndex].title = paneTitle(paneId, fallback: group.panes[paneIndex].title)
+            group.panes[paneIndex].status = paneStatus(paneId)
+        }
+        sessionGroups[index] = group
+        for session in sessions where session.pane?.paneId == paneId {
+            session.agentTracked = state.hasAgent
+        }
+
+        guard state.hasAgent, previous?.state != state.state else { return }
+        let paneName = group.panes.first { $0.id == paneId }?.title ?? "agent"
+        let body: String?
+        switch state.state {
+        case "blocked": body = state.note ?? "Needs you"
+        case "done": body = "Finished"
+        default: body = nil
+        }
+        if let body {
+            Task { await NotificationManager.shared.schedulePaneAttention(workspace: group.title, pane: paneName, body: body, paneId: paneId) }
+        }
+    }
+
+    /// The user has seen a pane: its finished agent shows as idle from now on
+    func markPaneSeen(_ paneId: String) {
+        guard unseenDonePanes.remove(paneId) != nil,
+              let index = sessionGroups.firstIndex(where: { $0.panes.contains { $0.id == paneId } }),
+              let paneIndex = sessionGroups[index].panes.firstIndex(where: { $0.id == paneId }) else { return }
+        sessionGroups[index].panes[paneIndex].status = paneStatus(paneId)
+    }
+
+    /// Show a pane (a notification was tapped)
+    func showPane(_ paneId: String) {
+        guard let group = sessionGroups.first(where: { $0.panes.contains { $0.id == paneId } }) else { return }
+        selectPane(groupId: group.id, paneId: paneId)
+        if let updated = sessionGroups.first(where: { $0.id == group.id }), let session = currentSession(of: updated) {
             switchTo(session)
         }
     }
@@ -159,9 +261,14 @@ extension SessionManager {
         var shown = Set<UUID>()
 
         for workspace in workspaces {
+            for tab in workspace.tabs {
+                for pane in tab.panes {
+                    paneStates[pane.id] = pane.state
+                }
+            }
             let panes = workspace.tabs.enumerated().flatMap { tabIndex, tab in
                 tab.panes.map { pane in
-                    TabPane(id: pane.id, title: pane.title.flatMap { $0.isEmpty ? nil : $0 } ?? "shell", status: .none, group: tabIndex)
+                    TabPane(id: pane.id, title: paneTitle(pane.id, fallback: pane.title), status: paneStatus(pane.id), group: tabIndex)
                 }
             }
             guard !panes.isEmpty else { continue }
@@ -205,6 +312,7 @@ extension SessionManager {
         let current = paneSession(for: group, paneId: group.activePaneId, config: config)
         for session in sessions where session.groupId == groupId {
             session.pane?.groupTitle = group.title
+            session.agentTracked = session.pane.flatMap { paneStates[$0.paneId] }?.hasAgent ?? false
         }
         // Panes gone from the workspace: show the current one before closing them
         let gone = sessions.filter { $0.groupId == groupId && !paneIds.contains($0.pane?.paneId ?? "") }

@@ -121,6 +121,9 @@ class NotificationManager: NSObject, ObservableObject {
             return false
         }
 
+        // An agent rtach tracks notifies from its state (see schedulePaneAttention)
+        guard !session.agentTracked else { return false }
+
         // Check mode
         switch notificationMode {
         case .none:
@@ -166,6 +169,19 @@ class NotificationManager: NSObject, ObservableObject {
             pendingSessionIds.remove(session.id)
             Logger.clauntty.error("NotificationManager: failed to schedule notification: \(error.localizedDescription)")
         }
+    }
+
+    /// A workspace pane's agent needs the user, or finished, while the app is in the
+    /// background. Tapping it shows the pane.
+    func schedulePaneAttention(workspace: String, pane: String, body: String, paneId: String) async {
+        guard appIsBackgrounded, isAuthorized, notificationMode != .none else { return }
+        let content = UNMutableNotificationContent()
+        content.title = workspace == pane ? workspace : "\(workspace) · \(pane)"
+        content.body = body
+        content.sound = .default
+        content.userInfo = ["paneId": paneId]
+        let request = UNNotificationRequest(identifier: "pane-\(paneId)", content: content, trigger: nil)
+        try? await notificationCenter.add(request)
     }
 
     /// Notify that `clauntty show` sent images while the app was in the background.
@@ -273,6 +289,15 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     ) {
         let userInfo = response.notification.request.content.userInfo
 
+        // A workspace pane (schedulePaneAttention)
+        if let paneId = userInfo["paneId"] as? String {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                NotificationCenter.default.post(name: .switchToPane, object: nil, userInfo: ["paneId": paneId])
+            }
+            completionHandler()
+            return
+        }
+
         // Extract session ID synchronously
         guard let sessionIdString = userInfo["sessionId"] as? String,
               let sessionId = UUID(uuidString: sessionIdString) else {
@@ -310,4 +335,5 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
 
 extension Notification.Name {
     static let switchToSession = Notification.Name("switchToSession")
+    static let switchToPane = Notification.Name("switchToPane")
 }

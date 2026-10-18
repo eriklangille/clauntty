@@ -157,6 +157,10 @@ class SessionManager: ObservableObject {
     var workspacePaneIds: [UUID: Set<String>] = [:]
     /// A workspace action that failed, to show the user
     @Published var workspaceMessage: String?
+    /// Each pane's last state from rtach
+    var paneStates: [String: RemotePaneState] = [:]
+    /// Panes whose agent finished while the user wasn't looking: shown as done until seen
+    var unseenDonePanes: Set<String> = []
 
     /// UserDefaults key for persisted tabs
     private let persistedWebTabsKey = "clauntty_persisted_web_tabs"
@@ -364,6 +368,9 @@ class SessionManager: ObservableObject {
         session.onShowImageRequested = { [weak self, weak session] path, inboxId in
             guard let self = self, let session = session else { return }
             self.handleShowImageRequest(from: session, path: path, inboxId: inboxId)
+        }
+        session.onPaneStateChanged = { [weak self] paneId, json in
+            self?.paneStateChanged(paneId: paneId, json: json)
         }
         session.onWorkspaceChanged = { [weak self, weak session] workspaceId, paneId in
             guard let self = self, let session = session else { return }
@@ -651,6 +658,9 @@ class SessionManager: ObservableObject {
     /// Switch to a different session
     /// If the session is disconnected, triggers lazy reconnection
     func switchTo(_ session: Session) {
+        if let paneId = session.pane?.paneId {
+            markPaneSeen(paneId)
+        }
         let sessionTitle = session.title.prefix(20)
         let sessionId = session.id.uuidString.prefix(8)
         let previousId = activeSession?.id.uuidString.prefix(8) ?? "none"

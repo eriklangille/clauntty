@@ -334,6 +334,11 @@ struct AppContentView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 handleScenePhaseChange(newPhase)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .switchToPane)) { notification in
+                if let paneId = notification.userInfo?["paneId"] as? String {
+                    sessionManager.showPane(paneId)
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .switchToSession)) { notification in
                 handleSwitchToSession(notification)
             }
@@ -410,6 +415,10 @@ struct AppContentView: View {
             }
             // Workspaces may have changed on the desktop meanwhile
             Task { await sessionManager.refreshAllWorkspaces() }
+            // The pane on screen has been seen
+            if let paneId = sessionManager.activeSession?.pane?.paneId {
+                sessionManager.markPaneSeen(paneId)
+            }
         case .inactive:
             // Transitional state, don't change background flag
             break

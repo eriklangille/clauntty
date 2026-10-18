@@ -111,7 +111,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.15.0"
+    static let expectedVersion = "2.16.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -478,9 +478,43 @@ class RtachDeployer {
         permissions["allow"] = allow
         settings["permissions"] = permissions
 
+        // Agent state for the app's pane glyphs and notifications (rtach pane_state.zig).
+        // Our entries are the ones running `clauntty agent-state`; others stay as they are.
+        // By full path: another clauntty can come first on PATH. Outside an rtach session
+        // the command does nothing.
+        let marker = "clauntty agent-state"
+        let ours: [(event: String, matcher: String?, state: String)] = [
+            ("UserPromptSubmit", nil, "working"),
+            ("PreToolUse", "*", "working"),
+            ("PostToolUse", "*", "working"),
+            ("Notification", nil, "blocked"),
+            ("Stop", nil, "done"),
+            ("SessionStart", nil, "idle"),
+            ("SessionEnd", nil, "end"),
+        ]
+        var hooks = settings["hooks"] as? [String: Any] ?? [:]
+        let before = (try? JSONSerialization.data(withJSONObject: hooks, options: .sortedKeys)) ?? Data()
+        for entry in ours {
+            var groups = (hooks[entry.event] as? [[String: Any]] ?? []).filter { group in
+                let commands = (group["hooks"] as? [[String: Any]] ?? []).compactMap { $0["command"] as? String }
+                return !commands.contains { $0.contains(marker) }
+            }
+            var group: [String: Any] = [
+                "hooks": [["type": "command", "command": "~/.clauntty/bin/\(marker) \(entry.state)"]],
+            ]
+            if let matcher = entry.matcher { group["matcher"] = matcher }
+            groups.append(group)
+            hooks[entry.event] = groups
+        }
+        let after = (try? JSONSerialization.data(withJSONObject: hooks, options: .sortedKeys)) ?? Data()
+        if before != after {
+            settings["hooks"] = hooks
+            needsUpdate = true
+        }
+
         if needsUpdate {
             try await writeClaudeSettings(settings)
-            Logger.clauntty.debugOnly("Claude Code settings deployed (permissions)")
+            Logger.clauntty.debugOnly("Claude Code settings deployed (permissions, agent-state hooks)")
         } else {
             Logger.clauntty.debugOnly("Claude Code settings already configured")
         }
@@ -786,7 +820,25 @@ struct RemoteWorkspace: Decodable, Equatable {
         let id: String
         /// The terminal title, from the session's .title file
         let title: String?
+        /// What its master says is happening in it
+        let state: RemotePaneState?
     }
+}
+
+/// A session's `<socket>.state` (rtach's pane_state.zig): the program in front, its
+/// directory, and an agent's state. Also sent live as `pane;<id>;<json>`.
+struct RemotePaneState: Decodable, Equatable {
+    let fg: String?
+    let cwd: String?
+    let title: String?
+    /// "claude", or "none"
+    let agent: String?
+    /// none, idle, working, blocked or done
+    let state: String?
+    /// What a blocked agent is waiting for
+    let note: String?
+
+    var hasAgent: Bool { agent != nil && agent != "none" }
 }
 
 /// What `rtach ws new|tab|split` print
