@@ -641,7 +641,7 @@ struct SwitcherWindow: View {
         ZStack(alignment: .top) {
             // Clipped by UIKit: the terminal draws with Metal, which SwiftUI's clipping
             // doesn't reach
-            ClipHost {
+            ClipHost(passesTouches: !isFullscreen) {
                 TerminalView(session: session, isTabSelectorPresented: !isFocused, isVisible: true)
                     .id(session.id)
                     .frame(width: terminalSize.width, height: terminalSize.height)
@@ -652,10 +652,9 @@ struct SwitcherWindow: View {
                     .environmentObject(sessionManager)
                     .environmentObject(appState)
             }
-            // The focused window's terminal keeps hit testing: turning it off (leaving
-            // fullscreen) made SwiftUI drop the keyboard for a moment. In the switcher the
-            // overlay above it takes the touches, so a swipe anywhere pages.
-            .allowsHitTesting(isFocused)
+            // Outside fullscreen touches pass through the terminal (in UIKit: SwiftUI's
+            // allowsHitTesting, toggled on the view holding the keyboard, made it drop the
+            // keyboard for a moment), so the overlay takes them and a swipe anywhere pages
 
             // The pill's strip over the rows above the crop, and the bottom pad over the
             // rows below it
@@ -748,12 +747,22 @@ struct SwitcherWindow: View {
     }
 }
 
-/// Hosts SwiftUI content in a UIKit view that clips to its bounds
+/// Hosts SwiftUI content in a UIKit view that clips to its bounds, and can let touches
+/// pass through it
 private struct ClipHost<Content: View>: UIViewRepresentable {
+    var passesTouches = false
     @ViewBuilder let content: () -> Content
 
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView()
+    final class Container: UIView {
+        var passesTouches = false
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            passesTouches ? nil : super.hitTest(point, with: event)
+        }
+    }
+
+    func makeUIView(context: Context) -> Container {
+        let container = Container()
+        container.passesTouches = passesTouches
         container.clipsToBounds = true
         container.backgroundColor = .clear
         let host = UIHostingController(rootView: content())
@@ -773,7 +782,8 @@ private struct ClipHost<Content: View>: UIViewRepresentable {
         return container
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
+    func updateUIView(_ uiView: Container, context: Context) {
+        uiView.passesTouches = passesTouches
         context.coordinator.host?.rootView = content()
     }
 
