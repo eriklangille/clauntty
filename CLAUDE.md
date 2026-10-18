@@ -96,9 +96,13 @@ running the app in the simulator against the test container (see SSH Testing).
 CoreSimulator is out of date. Run `sudo xcodebuild -runFirstLaunch` in a real terminal on the Mac (over
 SSH, `ssh -t`). It asks for a password, so `!` in Claude Code can't run it.
 
-**Fake panes:** the tab bar's pane UI (dots, status glyph, swipe between panes, session menu) has no
-real data source yet. Turn on fake panes for every terminal tab in the simulator with
-`xcrun simctl spawn booted defaults write com.octerm.clauntty fakeTabPanes -bool YES`.
+**Workspace tabs:** each rtach workspace (`rtach ws`) on a connected host is one tab (a `SessionGroup`,
+`SessionManager+Groups.swift`); its panes are the dots, swipes and menu sections. The app refreshes
+`rtach ws list --json` when a host deploys, on foreground and when a tab's menu opens. Closing a
+workspace tab hides it on the phone (reopen from the server row's context menu, which also has "New
+Workspace…"). To try it in the simulator, run `rtach ws new demo` and `rtach ws split -v` in a tab on the
+test container, then open the tab's menu. Fake panes for every terminal tab, without a host:
+`xcrun simctl spawn booted defaults write com.octerm.clauntty fakeTabPanes -bool YES` (`NO` to turn off).
 
 ## IPA / TestFlight
 

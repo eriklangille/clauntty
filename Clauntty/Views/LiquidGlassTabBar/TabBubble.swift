@@ -126,7 +126,11 @@ class TabBubble: UIView {
 
     // Pane callbacks
     var onPaneStep: ((Int) -> Void)?  // +1 next pane (swipe down), -1 previous (swipe up)
-    var onPaneSelected: ((Int) -> Void)?  // Chip tapped in the expanded tab
+    var onPaneSelected: ((Int) -> Void)?
+    /// Session menu action on the shown pane of a workspace tab
+    var onPaneAction: ((PaneAction) -> Void)?
+    /// The session menu is about to open
+    var onMenuWillOpen: (() -> Void)?  // Chip tapped in the expanded tab
     var onPaneToggle: (() -> Void)?  // Double tap: back to the previous pane
 
     // MARK: - Constants
@@ -1163,12 +1167,14 @@ class TabBubble: UIView {
             onTabs: { [weak self] in self?.onTabs?() },
             onNewTab: { [weak self] in self?.onNewTab?() },
             onPorts: { [weak self] in self?.onPorts?() },
-            onClose: { [weak self] in self?.onDisconnect?() }
+            onClose: { [weak self] in self?.onDisconnect?() },
+            onPaneAction: onPaneAction == nil ? nil : { [weak self] action in self?.onPaneAction?(action) }
         )
     }
 
     /// Open the session menu from the tab
     func presentMenu() {
+        onMenuWillOpen?()
         menuButton.frame = bounds
         menuButton.isHidden = false
         if #available(iOS 17.4, *) {

@@ -29,6 +29,16 @@ struct TabPane: Equatable {
     var group: Int
 }
 
+/// Session menu actions on the pane a workspace tab shows
+enum PaneAction {
+    /// A new pane next to it (a split on the desktop)
+    case split
+    /// A new tab in the workspace, with one pane
+    case newTab
+    /// End the pane
+    case close
+}
+
 // MARK: - Status Indicator
 
 /// Small glyph for a pane's agent state: a spinning arc while working, a pulsing
@@ -236,7 +246,8 @@ enum SessionTabMenu {
         onTabs: @escaping () -> Void,
         onNewTab: @escaping () -> Void,
         onPorts: @escaping () -> Void,
-        onClose: @escaping () -> Void
+        onClose: @escaping () -> Void,
+        onPaneAction: ((PaneAction) -> Void)? = nil
     ) -> UIMenu {
         let actions = UIMenu(options: .displayInline, preferredElementSize: .small, children: [
             UIAction(title: "All Tabs", image: UIImage(systemName: "square.on.square")) { _ in onTabs() },
@@ -246,6 +257,14 @@ enum SessionTabMenu {
         ])
 
         var sections: [UIMenuElement] = [actions]
+        // Workspace tabs: actions on the pane shown
+        if let onPaneAction, !panes.isEmpty {
+            sections.append(UIMenu(options: .displayInline, children: [
+                UIAction(title: "New Pane", image: UIImage(systemName: "rectangle.split.2x1")) { _ in onPaneAction(.split) },
+                UIAction(title: "New Workspace Tab", image: UIImage(systemName: "plus.rectangle.on.rectangle")) { _ in onPaneAction(.newTab) },
+                UIAction(title: "End Pane", image: UIImage(systemName: "xmark.rectangle"), attributes: .destructive) { _ in onPaneAction(.close) },
+            ]))
+        }
         var groupStart = 0
         for index in panes.indices where index == panes.count - 1 || panes[index + 1].group != panes[index].group {
             let children = (groupStart...index).map { paneIndex -> UIAction in

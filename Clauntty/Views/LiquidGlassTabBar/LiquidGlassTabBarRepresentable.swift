@@ -39,6 +39,16 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
             guard case .terminal(let session) = tab, let groupId = session.groupId else { return }
             context.coordinator.sessionManager?.selectPane(groupId: groupId, paneId: pane.id)
         }
+        bar.onPaneAction = { tab, action in
+            guard case .terminal(let session) = tab, let groupId = session.groupId else { return }
+            Task { await context.coordinator.sessionManager?.performPaneAction(action, groupId: groupId) }
+        }
+        // Workspaces may have changed on the desktop (or been made in this tab)
+        bar.onMenuWillOpen = { tab in
+            guard case .terminal(let session) = tab,
+                  let manager = context.coordinator.sessionManager else { return }
+            Task { await manager.refreshWorkspaces(for: session.connectionConfig) }
+        }
         #if DEBUG
         if FakeTabPanes.isEnabled {
             bar.paneProvider = { tab in
@@ -46,6 +56,7 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
                 return (FakeTabPanes.panes(for: session.id), nil)
             }
             bar.onPaneSelected = nil
+            bar.onPaneAction = nil
         }
         #endif
 

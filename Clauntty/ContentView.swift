@@ -192,6 +192,17 @@ struct ContentView: View {
       Text("Sessions started from Clauntty can't use this Mac's login keychain, so code signing (Xcode builds) fails in them. Install a small helper so new sessions start in the desktop session? Remove it anytime with `rtach spawnd uninstall`.")
     }
     .alert(
+      "Workspace",
+      isPresented: Binding(
+        get: { sessionManager.workspaceMessage != nil },
+        set: { if !$0 { sessionManager.workspaceMessage = nil } }
+      )
+    ) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(sessionManager.workspaceMessage ?? "")
+    }
+    .alert(
       "Code Signing Helper",
       isPresented: Binding(
         get: { sessionManager.spawndMessage != nil },

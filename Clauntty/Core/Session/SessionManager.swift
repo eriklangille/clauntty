@@ -101,7 +101,7 @@ class SessionManager: ObservableObject {
     // MARK: - Connection Pool
 
     /// Pool of SSH connections, keyed by "user@host:port"
-    private var connectionPool: [String: SSHConnection] = [:]
+    var connectionPool: [String: SSHConnection] = [:]
 
     // MARK: - Reconnection Throttling
 
@@ -149,7 +149,14 @@ class SessionManager: ObservableObject {
     }
 
     /// Cache of RtachDeployer per connection (for session listing)
-    private var rtachDeployers: [String: RtachDeployer] = [:]
+    var rtachDeployers: [String: RtachDeployer] = [:]
+
+    /// Each connected host's workspaces, from the last refresh
+    var knownWorkspaces: [UUID: [RemoteWorkspace]] = [:]
+    /// Each host's workspace panes. They're shown in their workspace's tab, never as plain tabs.
+    var workspacePaneIds: [UUID: Set<String>] = [:]
+    /// A workspace action that failed, to show the user
+    @Published var workspaceMessage: String?
 
     /// UserDefaults key for persisted tabs
     private let persistedTabsKey = "clauntty_persisted_tabs"
@@ -216,7 +223,9 @@ class SessionManager: ObservableObject {
 
     func installSpawnd(_ offer: SpawndOffer) async {
         do {
-            let output = try await runSpawndInstall(config: offer.config)
+            let output = try await withHost(offer.config) { connection in
+                try await RtachDeployer(connection: connection).installSpawnd()
+            }
             Logger.clauntty.info("SessionManager: spawnd install on \(offer.hostName): \(output)")
             // Loaded: nothing to say. Otherwise rtach explains (nobody logged in at the desktop).
             if !output.contains("installed and loaded") {
@@ -227,26 +236,6 @@ class SessionManager: ObservableObject {
             spawndMessage = "Couldn't install it on \(offer.hostName): \(error.localizedDescription)"
             spawndOffered.remove(offer.id)
         }
-    }
-
-    /// Over the pooled connection if that works, else a new one: the connection kept
-    /// from deploying may have closed since
-    private func runSpawndInstall(config: SavedConnection) async throws -> String {
-        if let pooled = connectionPool[connectionKey(for: config)], pooled.isConnected,
-           let output = try? await RtachDeployer(connection: pooled).installSpawnd() {
-            return output
-        }
-        let connection = SSHConnection(
-            host: config.host,
-            port: config.port,
-            username: config.username,
-            authMethod: config.authMethod,
-            connectionId: config.id,
-            useTailscale: config.useTailscale
-        )
-        try await connection.connect()
-        defer { connection.disconnect() }
-        return try await RtachDeployer(connection: connection).installSpawnd()
     }
 
     /// Connect a session with optional rtach session ID
@@ -290,6 +279,7 @@ class SessionManager: ObservableObject {
                     rtachDeployers[poolKey] = newDeployer
                     deployer = newDeployer
                     offerSpawndIfNeeded(newDeployer, config: config)
+                    Task { await refreshWorkspaces(for: config) }
                     Logger.clauntty.debugOnly("SessionManager: rtach deployed successfully")
                 } catch {
                     Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
@@ -450,6 +440,7 @@ class SessionManager: ObservableObject {
             try await deployer.ensureDeployed()
             rtachDeployers[poolKey] = deployer
             offerSpawndIfNeeded(deployer, config: config)
+            Task { await refreshWorkspaces(for: config) }
         }
 
         // Reconnect using existing rtach session ID
@@ -723,7 +714,7 @@ class SessionManager: ObservableObject {
     }
 
     /// Generate pool key for a connection config
-    private func connectionKey(for config: SavedConnection) -> String {
+    func connectionKey(for config: SavedConnection) -> String {
         return "\(config.username)@\(config.host):\(config.port)"
     }
 
@@ -1515,6 +1506,7 @@ class SessionManager: ObservableObject {
 
     /// Save current tabs to UserDefaults
     func savePersistence() {
+        saveGroups()
         var tabs: [PersistedTab] = []
 
         for (index, session) in sessions.enumerated() {
@@ -1554,6 +1546,7 @@ class SessionManager: ObservableObject {
     /// Load persisted tabs (call on app launch)
     /// Creates Session objects in disconnected state
     func loadPersistedTabs(connectionStore: ConnectionStore) {
+        loadPersistedGroups(connectionStore: connectionStore)
         guard let data = UserDefaults.standard.data(forKey: persistedTabsKey) else {
             Logger.clauntty.debugOnly("SessionManager: no persisted tabs found")
             return
@@ -1696,9 +1689,11 @@ class SessionManager: ObservableObject {
     /// - Marks missing sessions as remotely deleted
     /// - Auto-creates tabs for sessions not in local persistence
     func syncSessionsWithServer(config: SavedConnection, deployer: RtachDeployer) async {
+        await refreshWorkspaces(for: config)
         do {
-            // Group pane sessions come and go with their group's tab, not as plain tabs
+            // Workspace panes come and go with their workspace's tab, not as plain tabs
             let paneIds = Set(sessions.filter { $0.groupId != nil }.compactMap(\.rtachSessionId))
+                .union(workspacePaneIds[config.id] ?? [])
             let serverSessions = try await deployer.listSessions().filter { !paneIds.contains($0.id) }
             let serverSessionIds = Set(serverSessions.map { $0.id })
 

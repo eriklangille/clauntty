@@ -408,6 +408,8 @@ struct AppContentView: View {
             } else {
                 Logger.clauntty.debugOnly("APP_LIFECYCLE: no active session to resume")
             }
+            // Workspaces may have changed on the desktop meanwhile
+            Task { await sessionManager.refreshAllWorkspaces() }
         case .inactive:
             // Transitional state, don't change background flag
             break

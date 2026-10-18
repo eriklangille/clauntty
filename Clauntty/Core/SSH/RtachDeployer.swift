@@ -323,6 +323,43 @@ class RtachDeployer {
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: Workspaces
+
+    /// The workspaces on the host (`rtach ws list --json`) and the host's own name
+    /// (`uname -n`), which tells apart saved connections that reach one machine
+    func listWorkspaces() async throws -> (hostName: String?, workspaces: [RemoteWorkspace]) {
+        let output = try await connection.executeCommand("uname -n; \(Self.remoteBinPath) ws list --json")
+        let lines = output.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let hostName = lines.first.map { $0.trimmingCharacters(in: .whitespaces) }
+        let json = lines.count > 1 ? String(lines[1]) : ""
+        let list = try JSONDecoder().decode(RemoteWorkspaceList.self, from: Data(json.utf8))
+        return (hostName?.isEmpty == false ? hostName : nil, list.workspaces)
+    }
+
+    /// Run `rtach ws <args>` and decode the JSON it prints. Errors carry rtach's message.
+    func workspaceCommand<T: Decodable>(_ args: [String], in directory: String? = nil, as type: T.Type) async throws -> T {
+        let quoted = args.map(Self.shellQuote).joined(separator: " ")
+        let cd = directory.map { "cd \(Self.shellPath($0)) && " } ?? ""
+        let output = try await connection.executeCommand("\(cd)\(Self.remoteBinPath) ws \(quoted) 2>&1")
+        do {
+            return try JSONDecoder().decode(T.self, from: Data(output.utf8))
+        } catch {
+            let message = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw RtachDeployError.commandFailed(message.isEmpty ? "rtach ws \(args.first ?? "") failed" : message)
+        }
+    }
+
+    static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Quoted, except a leading ~ so the shell expands it
+    static func shellPath(_ path: String) -> String {
+        if path == "~" { return "~" }
+        if path.hasPrefix("~/") { return "~/" + shellQuote(String(path.dropFirst(2))) }
+        return shellQuote(path)
+    }
+
     /// Clean up old rtach binaries that are no longer in use
     /// Keeps: current version + any versions with running processes
     private func cleanupOldBinaries() async {
@@ -704,6 +741,7 @@ enum RtachDeployError: Error, LocalizedError {
     case deploymentFailed
     case metadataSaveFailed
     case invalidSessionName
+    case commandFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -717,6 +755,48 @@ enum RtachDeployError: Error, LocalizedError {
             return "Failed to save session metadata"
         case .invalidSessionName:
             return "Invalid session name. Use only letters, numbers, and hyphens."
+        case .commandFailed(let message):
+            return message
         }
     }
+}
+
+// MARK: - Workspaces
+
+/// `rtach ws list --json`
+struct RemoteWorkspaceList: Decodable {
+    let workspaces: [RemoteWorkspace]
+}
+
+/// A workspace on a host: panes (rtach sessions) grouped into tabs
+struct RemoteWorkspace: Decodable, Equatable {
+    let id: String
+    let name: String
+    let cwd: String
+    let tabs: [Tab]
+
+    struct Tab: Decodable, Equatable {
+        let id: String
+        let name: String
+        /// In layout order
+        let panes: [Pane]
+    }
+
+    struct Pane: Decodable, Equatable {
+        let id: String
+        /// The terminal title, from the session's .title file
+        let title: String?
+    }
+}
+
+/// What `rtach ws new|tab|split` print
+struct WorkspaceCreated: Decodable {
+    let workspace: String
+    let tab: String
+    let pane: String
+}
+
+/// What `rtach ws close` prints
+struct WorkspacePaneClosed: Decodable {
+    let closed: String
 }

@@ -18,6 +18,10 @@ struct ConnectionListView: View {
     @State private var showingError = false
     @State private var showingSettings = false
 
+    // New workspace: the host, and the folder typed for it
+    @State private var workspaceHost: SavedConnection?
+    @State private var workspaceFolder = "~"
+
     var body: some View {
         List {
             if connectionStore.connections.isEmpty {
@@ -28,6 +32,22 @@ struct ConnectionListView: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             connect(to: connection)
+                        }
+                        .contextMenu {
+                            Button {
+                                workspaceFolder = "~"
+                                workspaceHost = connection
+                            } label: {
+                                Label("New Workspace…", systemImage: "rectangle.split.2x1")
+                            }
+                            // Workspaces closed on this phone
+                            ForEach(sessionManager.hiddenWorkspaces(for: connection), id: \.id) { workspace in
+                                Button {
+                                    openWorkspace(workspace.id, on: connection)
+                                } label: {
+                                    Label("Open \(workspace.name)", systemImage: "rectangle.stack")
+                                }
+                            }
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
@@ -88,6 +108,20 @@ struct ConnectionListView: View {
             if let connection = pendingConnection {
                 Text("Enter password for \(connection.username)@\(connection.host)")
             }
+        }
+        .alert("New Workspace", isPresented: Binding(
+            get: { workspaceHost != nil },
+            set: { if !$0 { workspaceHost = nil } }
+        ), presenting: workspaceHost) { connection in
+            TextField("Folder", text: $workspaceFolder)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Cancel", role: .cancel) {}
+            Button("Create") {
+                createWorkspace(on: connection, folder: workspaceFolder)
+            }
+        } message: { connection in
+            Text("A folder on \(connection.displayName). The workspace starts at its git root, if it has one.")
         }
         .alert("Connection Error", isPresented: $showingError) {
             Button("OK", role: .cancel) {}
@@ -153,6 +187,31 @@ struct ConnectionListView: View {
             .flatMap { $0.windows }
             .forEach { $0.endEditing(true) }
         NotificationCenter.default.post(name: .hideAllAccessoryBars, object: nil)
+    }
+
+    private func createWorkspace(on connection: SavedConnection, folder: String) {
+        isConnecting = true
+        Task {
+            await sessionManager.newWorkspace(on: connection, folder: folder)
+            isConnecting = false
+            // Shown here: ContentView's alert can't appear over this sheet
+            if let message = sessionManager.workspaceMessage {
+                sessionManager.workspaceMessage = nil
+                connectionError = message
+                showingError = true
+            } else {
+                dismiss()
+            }
+        }
+    }
+
+    private func openWorkspace(_ workspaceId: String, on connection: SavedConnection) {
+        isConnecting = true
+        Task {
+            await sessionManager.openWorkspace(workspaceId, config: connection)
+            isConnecting = false
+            dismiss()
+        }
     }
 
     private func connect(to connection: SavedConnection) {

@@ -67,6 +67,12 @@ class LiquidGlassTabBar: UIView {
     /// Called when the user switches panes within a session tab
     var onPaneSelected: ((TabItem, TabPane) -> Void)?
 
+    /// Session menu action on the shown pane of a workspace tab
+    var onPaneAction: ((TabItem, PaneAction) -> Void)?
+
+    /// A tab's session menu is about to open
+    var onMenuWillOpen: ((TabItem) -> Void)?
+
     // MARK: - State
 
     private var allTabs: [TabItem] = []
@@ -886,6 +892,15 @@ class LiquidGlassTabBar: UIView {
 
         bubble.onPaneSelected = { [weak self] index in
             self?.selectPane(index, in: tab)
+        }
+
+        if onPaneAction != nil {
+            bubble.onPaneAction = { [weak self] action in
+                self?.onPaneAction?(tab, action)
+            }
+        }
+        bubble.onMenuWillOpen = { [weak self] in
+            self?.onMenuWillOpen?(tab)
         }
 
         bubble.onPaneToggle = { [weak self] in
