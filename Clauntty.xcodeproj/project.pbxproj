@@ -48,6 +48,7 @@
 		C0000007 /* NewConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000007 /* NewConnectionView.swift */; };
 		C0000008 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000008 /* TerminalView.swift */; };
 		1417759DDD1EAFDD9411016D /* AgentSwitcherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DC0C373EF7C12642C82EAF /* AgentSwitcherView.swift */; };
+		5C1A7E2B9D3F4A6B8C0D1E2F /* PillMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D2B8F3C0E4A5B7C9D1E2F30 /* PillMenu.swift */; };
 		C0000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1000009 /* Assets.xcassets */; };
 		C0000010 /* GhosttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000010 /* GhosttyApp.swift */; };
 		C0000011 /* GhosttyBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000011 /* GhosttyBridge.swift */; };
@@ -159,6 +160,7 @@
 		C1000007 /* NewConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewConnectionView.swift; sourceTree = "<group>"; };
 		C1000008 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		A3DC0C373EF7C12642C82EAF /* AgentSwitcherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSwitcherView.swift; sourceTree = "<group>"; };
+		6D2B8F3C0E4A5B7C9D1E2F30 /* PillMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillMenu.swift; sourceTree = "<group>"; };
 		C1000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C1000010 /* GhosttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyApp.swift; sourceTree = "<group>"; };
 		C1000011 /* GhosttyBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyBridge.swift; sourceTree = "<group>"; };
@@ -362,6 +364,7 @@
 				C1000007 /* NewConnectionView.swift */,
 				C1000008 /* TerminalView.swift */,
 				A3DC0C373EF7C12642C82EAF /* AgentSwitcherView.swift */,
+				6D2B8F3C0E4A5B7C9D1E2F30 /* PillMenu.swift */,
 				C1000015 /* KeyboardAccessoryView.swift */,
 				C1000018 /* SessionTabBar.swift */,
 				59A3663E616FC97D48E5888C /* SessionPickerView.swift */,
@@ -639,6 +642,7 @@
 				C0000007 /* NewConnectionView.swift in Sources */,
 				C0000008 /* TerminalView.swift in Sources */,
 				1417759DDD1EAFDD9411016D /* AgentSwitcherView.swift in Sources */,
+				5C1A7E2B9D3F4A6B8C0D1E2F /* PillMenu.swift in Sources */,
 				C0000010 /* GhosttyApp.swift in Sources */,
 				C0000011 /* GhosttyBridge.swift in Sources */,
 				C0000012 /* TerminalSurface.swift in Sources */,

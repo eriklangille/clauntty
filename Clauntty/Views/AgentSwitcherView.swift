@@ -55,6 +55,8 @@ struct AgentSwitcherView: View {
     @State private var dragStart = Date()
     /// The fastest the finger went in this drag
     @State private var peakSpeed: CGFloat = 0
+    /// The window whose pill menu is open
+    @State private var menuWindow: UUID?
     /// Over a TUI the scroll waits until the drag can't be a flick: it's mouse wheel
     /// events, which a flick's undo wouldn't take back cleanly
     @State private var holdScroll = false
@@ -163,9 +165,12 @@ struct AgentSwitcherView: View {
                 // which would make a new, empty terminal.
                 ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                     let hidden = fullscreen && focused != item.id
-                    window(for: item.session, tabId: item.id, index: i, spec: specs[i], size: size)
+                    window(for: item.session, tabId: item.id, index: i, spec: specs[i], size: size,
+                           menuRoom: menuRoom(top: tops[i] + offset, size: size))
                         .frame(height: hidden ? 0 : specs[i].height, alignment: .top)
-                        .clipped()
+                        // Its open menu reaches over the windows below
+                        .clipShape(Rectangle().inset(by: menuWindow == item.id ? -4000 : 0))
+                        .zIndex(menuWindow == item.id ? 1 : 0)
                         .opacity(hidden ? 0 : 1)
                         .allowsHitTesting(!hidden)
                 }
@@ -180,12 +185,16 @@ struct AgentSwitcherView: View {
                         contentSize: Self.webSize(size),
                         windowWidth: isFull ? size.width : webWidth,
                         windowHeight: laidOut[items.count + i],
-                        menu: focused == web.id ? webMenu(web) : nil,
+                        menu: menuWindow == web.id ? WindowMenu(caption: web.urlDisplayString, actions: webActions(web)) : nil,
+                        isMenuOpen: menuWindow == web.id,
+                        menuRoom: menuRoom(top: tops[items.count + i] + offset, size: size),
+                        onMenu: { open in setMenu(open ? web.id : nil) },
                         onOpen: { openWeb(web) },
                         onExit: { exitWeb() }
                     )
                     .frame(height: hidden ? 0 : laidOut[items.count + i], alignment: .top)
-                    .clipped()
+                    .clipShape(Rectangle().inset(by: menuWindow == web.id ? -4000 : 0))
+                    .zIndex(menuWindow == web.id ? 1 : 0)
                     .opacity(hidden ? 0 : 1)
                     .allowsHitTesting(!hidden)
                 }
@@ -233,6 +242,7 @@ struct AgentSwitcherView: View {
                 }
             }
             .onChange(of: focused) { old, new in
+                menuWindow = nil
                 // Back to the overview: keep the window where it was on screen
                 if new == nil, old != nil, atControls {
                     scrollOffset = maxScroll
@@ -248,6 +258,7 @@ struct AgentSwitcherView: View {
             // The window typed into closed: back to the overview (or, from a web tab, to
             // the terminal typed into before)
             .onChange(of: ids) { _, ids in
+                if let menuWindow, !ids.contains(menuWindow) { self.menuWindow = nil }
                 if let focused, !ids.contains(focused) {
                     if webReturn != nil { return exitWeb() }
                     withAnimation(snap) {
@@ -443,6 +454,8 @@ struct AgentSwitcherView: View {
                        maxScroll: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
+                // Holding a pill: the finger is choosing from its menu
+                guard menuWindow == nil else { return }
                 let dx = value.translation.width
                 let dy = value.translation.height
                 if focused == nil {
@@ -482,6 +495,7 @@ struct AgentSwitcherView: View {
                 let projected = value.predictedEndTranslation.height
                 let mode = dragMode
                 dragMode = nil
+                guard menuWindow == nil else { return }
                 if focused != nil && mode == .scroll {
                     let duration = value.time.timeIntervalSince(dragStart)
                     let average = abs(dy) / max(0.05, duration)
@@ -691,7 +705,8 @@ struct AgentSwitcherView: View {
         return .none
     }
 
-    private func window(for session: Session, tabId: UUID, index i: Int, spec: WindowSpec, size: CGSize) -> some View {
+    private func window(for session: Session, tabId: UUID, index i: Int, spec: WindowSpec, size: CGSize,
+                        menuRoom: CGFloat) -> some View {
         let info = sessionManager.panes(for: session)
         let panes = info?.panes ?? []
         let activeIndex = info?.activeIndex ?? 0
@@ -714,15 +729,20 @@ struct AgentSwitcherView: View {
             webPanes: webPanes.count,
             activeWeb: web.flatMap { web in webPanes.firstIndex { $0.id == web.id } },
             webSize: Self.webSize(size),
-            menu: focused != tabId ? nil : web.map(webMenu) ?? menu(for: session, panes: panes, activeIndex: activeIndex),
+            menu: menuWindow == tabId ? windowMenu(for: session, tabId: tabId, panes: panes, activeIndex: activeIndex) : nil,
+            isMenuOpen: menuWindow == tabId,
+            menuRoom: menuRoom,
+            onMenu: { open in
+                setMenu(open ? tabId : nil)
+                if open { Task { await sessionManager.refreshWorkspaces(for: session.connectionConfig) } }
+            },
             onTap: { tapped(tabId, index: i, session: session) },
             onSwipe: { step in swipe(tabId, session: session, step: step) },
             onFullscreen: {
                 // A page opened from elsewhere goes back there; one swiped to in this
                 // window stays in it
                 if let web, !fullscreen { openWeb(web) } else if web != nil, webReturn != nil { exitWeb() } else { setFullscreen(!fullscreen) }
-            },
-            onMenuWillOpen: { Task { await sessionManager.refreshWorkspaces(for: session.connectionConfig) } }
+            }
         )
     }
 
@@ -792,21 +812,26 @@ struct AgentSwitcherView: View {
         }
     }
 
-    /// A web tab's pill, typed into or fullscreen: navigation, and close
-    private func webMenu(_ web: WebTab) -> UIMenu {
-        let row: [UIMenuElement] = [
-            UIAction(title: "Back", image: UIImage(systemName: "chevron.backward"),
-                     attributes: web.canGoBack ? [] : .disabled) { _ in web.goBack() },
-            UIAction(title: "Forward", image: UIImage(systemName: "chevron.forward"),
-                     attributes: web.canGoForward ? [] : .disabled) { _ in web.goForward() },
-            UIAction(title: "Reload", image: UIImage(systemName: "arrow.clockwise")) { _ in web.reload() },
-            UIAction(title: "Close", image: UIImage(systemName: "xmark"), attributes: .destructive) { _ in
-                sessionManager.closeWebTab(web)
-            },
+    /// A page's actions in its pill's menu: navigation, and close
+    private func webActions(_ web: WebTab) -> [WindowMenu.Item] {
+        [
+            .init(id: "back", title: "Back", icon: "chevron.backward", isDisabled: !web.canGoBack) { web.goBack() },
+            .init(id: "forward", title: "Forward", icon: "chevron.forward", isDisabled: !web.canGoForward) { web.goForward() },
+            .init(id: "reload", title: "Reload", icon: "arrow.clockwise") { web.reload() },
+            .init(id: "close", title: "Close", icon: "xmark", isDestructive: true) { sessionManager.closeWebTab(web) },
         ]
-        return UIMenu(title: web.urlDisplayString, children: [
-            UIMenu(options: .displayInline, preferredElementSize: .small, children: row),
-        ])
+    }
+
+    /// Open a window's pill menu (nil closes it)
+    private func setMenu(_ windowId: UUID?) {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) { menuWindow = windowId }
+    }
+
+    /// How far a window's open menu can reach down from its top: to the key bar while
+    /// typing, else the screen's bottom
+    private func menuRoom(top: CGFloat, size: CGSize) -> CGFloat {
+        let bottom = focused != nil && !fullscreen ? barTop(size) - 28 : size.height - 12
+        return bottom - top
     }
 
     private func setFullscreen(_ on: Bool) {
@@ -821,7 +846,15 @@ struct AgentSwitcherView: View {
         let webs = webPanes(of: windowId)
         let shown = webShown(in: windowId).flatMap { web in webs.firstIndex { $0.id == web.id } }
         let position = shown.map { terminals + $0 } ?? (info?.activeIndex ?? 0)
-        let target = position + step
+        showPane(position + step, in: windowId, session: session)
+    }
+
+    /// Show one of the workspace's panes in its window, counting its terminals, then its
+    /// web tabs
+    private func showPane(_ target: Int, in windowId: UUID, session: Session) {
+        let info = sessionManager.panes(for: session)
+        let terminals = max(1, info?.panes.count ?? 0)
+        let webs = webPanes(of: windowId)
         guard target >= 0, target < terminals + webs.count else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if target >= terminals {
@@ -877,25 +910,61 @@ struct AgentSwitcherView: View {
         .padding(.top, 6)
     }
 
-    /// The tab bar's session menu, for the window typed into
-    private func menu(for session: Session, panes: [TabPane], activeIndex: Int) -> UIMenu {
-        let groupId = session.groupId
-        return SessionTabMenu.make(
-            title: session.connectionConfig.displayName,
-            panes: panes,
-            activeIndex: activeIndex,
-            onSelectPane: { index in
-                guard let groupId, panes.indices.contains(index) else { return }
-                sessionManager.selectPane(groupId: groupId, paneId: panes[index].id)
-            },
-            onPaneAction: groupId == nil || panes.isEmpty ? nil : { action in
-                guard let groupId else { return }
-                Task { await sessionManager.performPaneAction(action, groupId: groupId) }
-            },
-            onNewTab: onNewTab,
-            onPorts: { onPorts(session) },
-            onClose: { sessionManager.closeTab(session) }
-        )
+    /// A terminal window's pill menu: the session's actions (a page's, showing one), then
+    /// its panes, one section per tab, its web tabs last
+    private func windowMenu(for session: Session, tabId: UUID, panes: [TabPane], activeIndex: Int) -> WindowMenu {
+        let workspace = panes.isEmpty ? nil : session.groupId
+        let webs = webPanes(of: tabId)
+        let shown = webShown(in: tabId)
+        var actions: [WindowMenu.Item] = []
+        if let shown {
+            actions = webActions(shown)
+        } else {
+            if let workspace {
+                actions.append(.init(id: "split", title: "New Pane", icon: "rectangle.split.2x1") {
+                    Task { await sessionManager.performPaneAction(.split, groupId: workspace) }
+                })
+                actions.append(.init(id: "new", title: "New Tab", icon: "plus") {
+                    Task { await sessionManager.performPaneAction(.newWorkspace, groupId: workspace) }
+                })
+            } else {
+                actions.append(.init(id: "new", title: "New Tab", icon: "plus", perform: onNewTab))
+            }
+            actions.append(.init(id: "ports", title: "Ports", icon: "globe") { onPorts(session) })
+            actions.append(.init(id: "close", title: "Close", icon: "xmark", isDestructive: true) {
+                if let workspace {
+                    Task { await sessionManager.performPaneAction(.close, groupId: workspace) }
+                } else {
+                    sessionManager.closeTab(session)
+                }
+            })
+        }
+        let terminals = panes.isEmpty ? [TabPane(id: "session", title: session.title, status: .none, group: 0)] : panes
+        var sections: [[WindowMenu.Item]] = []
+        var start = 0
+        for end in terminals.indices where end == terminals.count - 1 || terminals[end + 1].group != terminals[end].group {
+            sections.append((start...end).map { index in
+                let pane = terminals[index]
+                return .init(id: "pane:\(pane.id)", title: pane.title,
+                             subtitle: pane.status.label.isEmpty ? nil : pane.status.label,
+                             icon: pane.status.symbolName, tint: Color(uiColor: pane.status.tint),
+                             isOn: shown == nil && index == activeIndex) {
+                    showPane(index, in: tabId, session: session)
+                }
+            })
+            start = end + 1
+        }
+        if !webs.isEmpty {
+            sections.append(webs.enumerated().map { i, web in
+                // The title is the port until the page loads
+                .init(id: "web:\(web.id)", title: web.title,
+                      subtitle: web.pageTitle?.isEmpty == false ? ":\(String(web.remotePort.port))" : nil,
+                      icon: "globe", isOn: shown?.id == web.id) {
+                    showPane(terminals.count + i, in: tabId, session: session)
+                }
+            })
+        }
+        return WindowMenu(caption: shown?.urlDisplayString, actions: actions, sections: sections)
     }
 
 }
@@ -929,12 +998,15 @@ struct SwitcherWindow: View {
     let activeWeb: Int?
     /// The page's size (it keeps one, so fullscreen is a zoom)
     let webSize: CGSize
-    /// The session menu (or the page's), opened from the pill while typing into the window
-    let menu: UIMenu?
+    /// The pill's menu, while it's open: the session's (or the page's) actions and panes
+    let menu: WindowMenu?
+    let isMenuOpen: Bool
+    /// How far the menu can reach down from the window's top
+    let menuRoom: CGFloat
+    let onMenu: (Bool) -> Void
     let onTap: () -> Void
     let onSwipe: (Int) -> Void
     let onFullscreen: () -> Void
-    let onMenuWillOpen: () -> Void
 
     enum Mode: Equatable {
         /// The last couple of lines: what the agent said, or the shell's prompt
@@ -948,8 +1020,6 @@ struct SwitcherWindow: View {
     }
 
     @State private var pullDown: CGFloat = 0
-    /// Bumped to open the menu
-    @State private var menuRequests = 0
 
     static let bottomPad: CGFloat = 8
     /// What the terminal keeps at its bottom for the key bar while the keyboard is up
@@ -1131,23 +1201,18 @@ struct SwitcherWindow: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex,
-                     web: web, webPanes: webPanes, activeWeb: activeWeb)
-                .background(MenuAnchor(menu: menu, requests: menuRequests))
-                .contentShape(Capsule())
-                .onTapGesture {
-                    // Typing into it, the pill is the tab: its menu
-                    if isFocused, menu != nil {
-                        onMenuWillOpen()
-                        menuRequests &+= 1
-                    } else if !isFullscreen {
-                        onTap()
-                    }
-                }
-                .gesture(isFullscreen ? pullGesture : nil)
-                .simultaneousGesture(isFullscreen ? nil : swipeGesture)
+            // Typing into it, the pill is the tab: a tap opens its menu. Any window's opens
+            // when held.
+            PillMenu(isOpen: isMenuOpen, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
+                     room: menuRoom - 8, onOpen: { onMenu(true) }, onClose: { onMenu(false) },
+                     onTap: { if !isFullscreen { onTap() } }) {
+                PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex,
+                         web: web, webPanes: webPanes, activeWeb: activeWeb, glass: false)
+            }
+            .gesture(isFullscreen ? pullGesture : nil)
+            .simultaneousGesture(isFullscreen ? nil : swipeGesture)
             Spacer(minLength: 0)
-            if isFocused {
+            if isFocused && !isMenuOpen {
                 Button(action: onFullscreen) {
                     Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 14, weight: .semibold))
@@ -1170,6 +1235,7 @@ struct SwitcherWindow: View {
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 24)
             .onEnded { value in
+                guard !isMenuOpen else { return }
                 let dx = value.translation.width
                 let dy = value.translation.height
                 if abs(dx) > abs(dy), abs(dx) > 40 {
@@ -1183,6 +1249,7 @@ struct SwitcherWindow: View {
     private var pullGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
+                guard !isMenuOpen else { return }
                 let sideways = abs(value.translation.width) > abs(value.translation.height)
                 pullDown = sideways ? 0 : max(0, value.translation.height) * 0.6
             }
@@ -1190,6 +1257,7 @@ struct SwitcherWindow: View {
                 let dx = value.translation.width
                 let dy = value.translation.height
                 withAnimation(.spring(duration: 0.35)) { pullDown = 0 }
+                guard !isMenuOpen else { return }
                 if abs(dx) > abs(dy) {
                     if abs(dx) > 40 { onSwipe(dx < 0 ? 1 : -1) }
                 } else if dy > 80 {
@@ -1237,13 +1305,15 @@ struct WebWindow: View {
     let contentSize: CGSize
     let windowWidth: CGFloat
     let windowHeight: CGFloat
-    /// The pill's menu, fullscreen
-    let menu: UIMenu?
+    /// The pill's menu, while it's open
+    let menu: WindowMenu?
+    let isMenuOpen: Bool
+    let menuRoom: CGFloat
+    let onMenu: (Bool) -> Void
     let onOpen: () -> Void
     let onExit: () -> Void
 
     @State private var pullDown: CGFloat = 0
-    @State private var menuRequests = 0
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -1277,20 +1347,17 @@ struct WebWindow: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 7) {
-                WebPillLabel(webTab: webTab)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .glass(in: Capsule())
-            .background(MenuAnchor(menu: menu, requests: menuRequests))
-            .contentShape(Capsule())
-            .onTapGesture {
-                if isFocused { menuRequests &+= 1 } else { onOpen() }
+            PillMenu(isOpen: isMenuOpen, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
+                     room: menuRoom - 8, onOpen: { onMenu(true) }, onClose: { onMenu(false) }, onTap: onOpen) {
+                HStack(spacing: 7) {
+                    WebPillLabel(webTab: webTab)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
             .gesture(isFullscreen ? pullGesture : nil)
             Spacer(minLength: 0)
-            if isFullscreen {
+            if isFullscreen && !isMenuOpen {
                 Button(action: onExit) {
                     Image(systemName: "arrow.down.right.and.arrow.up.left")
                         .font(.system(size: 14, weight: .semibold))
@@ -1312,9 +1379,12 @@ struct WebWindow: View {
     /// Drag the pill down to come back
     private var pullGesture: some Gesture {
         DragGesture(minimumDistance: 8)
-            .onChanged { value in pullDown = max(0, value.translation.height) * 0.6 }
+            .onChanged { value in
+                guard !isMenuOpen else { return }
+                pullDown = max(0, value.translation.height) * 0.6
+            }
             .onEnded { value in
-                let exit = value.translation.height > 80
+                let exit = !isMenuOpen && value.translation.height > 80
                 withAnimation(.spring(duration: 0.35)) { pullDown = 0 }
                 if exit { onExit() }
             }
@@ -1410,35 +1480,6 @@ private struct WebPillLabel: View {
     }
 }
 
-/// Presents a native menu from the view it backs (as the tab bubble does) each time
-/// `requests` goes up
-private struct MenuAnchor: UIViewRepresentable {
-    let menu: UIMenu?
-    let requests: Int
-
-    func makeUIView(context: Context) -> PassthroughMenuButton {
-        let button = PassthroughMenuButton()
-        button.showsMenuAsPrimaryAction = true
-        return button
-    }
-
-    func updateUIView(_ button: PassthroughMenuButton, context: Context) {
-        button.menu = menu
-        guard requests != context.coordinator.requests else { return }
-        context.coordinator.requests = requests
-        if menu != nil, #available(iOS 17.4, *) {
-            button.performPrimaryAction()
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(requests: requests) }
-
-    final class Coordinator {
-        var requests: Int
-        init(requests: Int) { self.requests = requests }
-    }
-}
-
 /// The collapsed tab bubble: the pane's glyph and title, the workspace, the pane dots
 /// (its web tabs last, as globes). Showing a web tab, the page's title.
 private struct PanePill: View {
@@ -1450,6 +1491,8 @@ private struct PanePill: View {
     var web: WebTab? = nil
     var webPanes = 0
     var activeWeb: Int? = nil
+    /// Off when its menu draws the glass
+    var glass = true
 
     var body: some View {
         HStack(spacing: 7) {
@@ -1492,7 +1535,7 @@ private struct PanePill: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .glass(in: Capsule())
+        .modifier(PillGlass(isOn: glass))
     }
 
     /// Like the tab bar: other panes that need you or finished show their color
@@ -1597,7 +1640,15 @@ private struct GlassCircle: View {
 
 // MARK: - Style
 
-private extension View {
+private struct PillGlass: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        if isOn { content.glass(in: Capsule()) } else { content }
+    }
+}
+
+extension View {
     /// Liquid glass where the system has it, a material otherwise
     @ViewBuilder
     func glass<S: Shape>(in shape: S) -> some View {
