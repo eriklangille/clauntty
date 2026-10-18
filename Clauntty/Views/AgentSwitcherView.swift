@@ -60,8 +60,11 @@ struct AgentSwitcherView: View {
                 return nil
             }
             let specs = items.map { spec(for: $0.session, tabId: $0.id, size: size) }
-            let tops = Self.tops(specs.map(\.height), spacing: fullscreen ? 0 : Self.spacing)
-            let current = min(index, max(0, items.count - 1))
+            // Fullscreen lays the other windows out at zero height: position with that
+            let laidOut = zip(items, specs).map { item, spec in fullscreen && focused != item.id ? 0 : spec.height }
+            let tops = Self.tops(laidOut, spacing: fullscreen ? 0 : Self.spacing)
+            let focusedIndex = items.firstIndex { $0.id == focused }
+            let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, items.count - 1))
             let anchor: CGFloat = fullscreen ? 0 : (current == 0 ? 4 : Self.peek)
             let offset = (tops.indices.contains(current) ? anchor - tops[current] : 0) + drag
 
