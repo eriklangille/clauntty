@@ -57,6 +57,9 @@ struct AgentSwitcherView: View {
     @State private var peakSpeed: CGFloat = 0
     /// The window whose pill menu is open
     @State private var menuWindow: UUID?
+    /// The window whose menu is closing: it stays over the others until the panel is
+    /// back in its pill
+    @State private var closingMenu: UUID?
     /// Over a TUI the scroll waits until the drag can't be a flick: it's mouse wheel
     /// events, which a flick's undo wouldn't take back cleanly
     @State private var holdScroll = false
@@ -169,8 +172,8 @@ struct AgentSwitcherView: View {
                            menuRoom: menuRoom(top: tops[i] + offset, size: size))
                         .frame(height: hidden ? 0 : specs[i].height, alignment: .top)
                         // Its open menu reaches over the windows below
-                        .clipShape(Rectangle().inset(by: menuWindow == item.id ? -4000 : 0))
-                        .zIndex(menuWindow == item.id ? 1 : 0)
+                        .clipShape(WindowClip(isOff: menuLifted == item.id))
+                        .zIndex(menuLifted == item.id ? 1 : 0)
                         .opacity(hidden ? 0 : 1)
                         .allowsHitTesting(!hidden)
                 }
@@ -193,8 +196,8 @@ struct AgentSwitcherView: View {
                         onExit: { exitWeb() }
                     )
                     .frame(height: hidden ? 0 : laidOut[items.count + i], alignment: .top)
-                    .clipShape(Rectangle().inset(by: menuWindow == web.id ? -4000 : 0))
-                    .zIndex(menuWindow == web.id ? 1 : 0)
+                    .clipShape(WindowClip(isOff: menuLifted == web.id))
+                    .zIndex(menuLifted == web.id ? 1 : 0)
                     .opacity(hidden ? 0 : 1)
                     .allowsHitTesting(!hidden)
                 }
@@ -824,8 +827,16 @@ struct AgentSwitcherView: View {
 
     /// Open a window's pill menu (nil closes it)
     private func setMenu(_ windowId: UUID?) {
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) { menuWindow = windowId }
+        if windowId == nil { closingMenu = menuWindow }
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+            menuWindow = windowId
+        } completion: {
+            if menuWindow == nil { closingMenu = nil }
+        }
     }
+
+    /// The window drawn over the others, unclipped: its menu is open or closing
+    private var menuLifted: UUID? { menuWindow ?? closingMenu }
 
     /// How far a window's open menu can reach down from its top: to the key bar while
     /// typing, else the screen's bottom
@@ -1639,6 +1650,16 @@ private struct GlassCircle: View {
 }
 
 // MARK: - Style
+
+/// A window's bounds, or no clip while its menu reaches out of it. It doesn't animate: a
+/// spring between the two overshot into the window, cutting off its edges.
+private struct WindowClip: Shape {
+    let isOff: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(isOff ? rect.insetBy(dx: -4000, dy: -4000) : rect)
+    }
+}
 
 private struct PillGlass: ViewModifier {
     let isOn: Bool
