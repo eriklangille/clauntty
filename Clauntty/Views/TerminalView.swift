@@ -377,12 +377,14 @@ struct TerminalView: View {
                 session?.pauseOutput()
             }
         }
-        surface.onActiveStateChanged = { [weak session] active in
+        surface.onActiveStateChanged = { [weak session, weak surface] active in
             session?.setActiveState(active)
             if active {
                 session?.resumeOutput()
                 session?.claimActive()
-            } else {
+            } else if surface?.isShownInSwitcher != true {
+                // Still on screen in agent mode: pausing and resuming would make rtach
+                // signal a repaint each time you switch windows
                 session?.pauseOutput()
             }
         }

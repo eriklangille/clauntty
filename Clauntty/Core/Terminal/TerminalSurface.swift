@@ -1924,6 +1924,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Shown without being the active tab: render and stream, no keyboard
     private var isVisibleOnly = false
 
+    /// On screen in agent mode's switcher: stays streaming when it stops being active
+    var isShownInSwitcher: Bool { isVisibleOnly }
+
     /// Called when a visible-but-inactive terminal starts or stops needing output
     var onVisibleStateChanged: ((Bool) -> Void)?
 

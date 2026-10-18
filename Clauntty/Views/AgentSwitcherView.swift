@@ -37,11 +37,7 @@ struct AgentSwitcherView: View {
     var body: some View {
         GeometryReader { outer in
             let fullHeight = outer.size.height
-            VStack(spacing: 6) {
-                if !fullscreen {
-                    topBar
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+            VStack(spacing: 0) {
                 GeometryReader { geo in
                     ScrollViewReader { scroller in
                         ScrollView {
@@ -60,9 +56,12 @@ struct AgentSwitcherView: View {
                                             .id(tab.id)
                                     }
                                 }
+                                if !fullscreen {
+                                    controls
+                                }
                             }
                             .padding(.horizontal, fullscreen ? 0 : 10)
-                            .padding(.top, fullscreen ? 0 : 4)
+                            .padding(.top, fullscreen ? 0 : 2)
                             // Room to scroll a focused window to the top, clear of the key bar
                             .padding(.bottom, fullscreen ? 0 : (focused == nil ? 12 : geo.size.height))
                         }
@@ -110,8 +109,9 @@ struct AgentSwitcherView: View {
         let activeIndex = info?.activeIndex ?? 0
         let status = panes.indices.contains(activeIndex) ? panes[activeIndex].status : .none
         let isAgent = session.pane.flatMap { sessionManager.paneStates[$0.paneId] }?.hasAgent ?? false
-        // The focused terminal avoids the keyboard like a tab; the others keep full height
-        let terminalHeight = (isFocused ? viewport.height : fullHeight) - Self.pillStrip
+        // One size in every mode, so focusing or the keyboard never resizes the pane (and
+        // Claude never redraws): windows only crop it
+        let terminalHeight = fullHeight - Self.pillStrip
         let mode: SwitcherWindow.Mode = {
             if isFull { return .fullscreen(height: viewport.height) }
             // Most of the room above the key bar, so the other windows stay in view below
@@ -141,20 +141,19 @@ struct AgentSwitcherView: View {
 
     private func toggleFocus(_ tabId: UUID, session: Session, scroller: ScrollViewProxy?) {
         if fullscreen { return }
-        withAnimation(.spring(duration: 0.35, bounce: 0.12)) {
+        withAnimation(.spring(duration: 0.38, bounce: 0.1)) {
             if focused == tabId {
                 focused = nil
                 frozenOrder = nil
             } else {
                 frozenOrder = frozenOrder ?? windows.map(\.id)
                 focused = tabId
-                sessionManager.switchTo(session)
+                // Grow and move to the top in one motion
+                scroller?.scrollTo(tabId, anchor: .top)
             }
         }
         if focused == tabId {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                withAnimation(.spring(duration: 0.35)) { scroller?.scrollTo(tabId, anchor: .top) }
-            }
+            sessionManager.switchTo(session)
         }
     }
 
@@ -171,20 +170,20 @@ struct AgentSwitcherView: View {
         sessionManager.selectPane(groupId: groupId, paneId: info.panes[target].id)
     }
 
-    // MARK: Top bar
+    // MARK: Controls
 
-    private var topBar: some View {
-        HStack {
-            GlassCircle(systemName: "waveform", action: onVoice)
-            Spacer()
-            Text(summary)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-            Spacer()
-            GlassCircle(systemName: "plus", action: onNewTab)
+    /// Voice and a new workspace, after the windows
+    private var controls: some View {
+        HStack(spacing: 14) {
+            GlassCircle(systemName: "waveform", size: 44, action: onVoice)
+            if !summary.isEmpty {
+                Text(summary)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            GlassCircle(systemName: "plus", size: 44, action: onNewTab)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
+        .padding(.top, 6)
     }
 
     private var summary: String {
@@ -273,12 +272,12 @@ private struct SwitcherWindow: View {
             return (isAgent ? cursor.top - 2 * cell : promptLine, 2, cell)
         case .blocked:
             return (isAgent ? agentBottom : lastRow, 7, cell)
-        case .focused(let maxHeight):
+        case .focused(let maxHeight), .fullscreen(let maxHeight):
+            // Down to the input (Claude's box and footer, or the prompt), as many rows
+            // above it as fit: with the keyboard up the rest of the terminal is under it
             let bottom = isAgent ? agentBottom : promptLine
             let fit = Int((maxHeight - AgentSwitcherView.pillStrip - Self.bottomPad) / (cell * scale))
             return (bottom, max(2, min(fit, Int(bottom / cell))), cell)
-        case .fullscreen:
-            return (terminalSize.height, 0, cell)
         }
     }
 
@@ -290,8 +289,11 @@ private struct SwitcherWindow: View {
 
     var body: some View {
         let c = crop
-        // Moves the terminal down so its crop bottom sits at the window's bottom pad
-        let shift = isFullscreen ? 0 : max(0, (terminalSize.height - c.bottom) * scale - Self.bottomPad)
+        // Where the terminal's top row goes: the crop's bottom at the window's bottom pad,
+        // or right under the pill when everything fits (a short session)
+        let height = windowHeight
+        let top = min(height - Self.bottomPad - c.bottom * scale, AgentSwitcherView.pillStrip)
+        let shift = top - (height - terminalSize.height * scale)
         ZStack(alignment: .top) {
             // Clipped by UIKit: the terminal draws with Metal, which SwiftUI's clipping
             // doesn't reach
