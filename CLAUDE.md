@@ -370,6 +370,12 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   claims their size only while the app is in front. A pane can briefly have two containers
   when the tree changes shape; `TerminalViews.show(_:in:)` gives the view to the newest.
   Cmd+D / Cmd+Shift+D split (`ws split -h|-v`), Cmd+K is the pane switcher.
+- **Another device's size:** when rtach says the PTY isn't ours (`Session.ptySize`), the
+  terminal is drawn at that grid and `PaneHostView` scales it down from the top left; a
+  click takes the pane back. Output waits for the resize, as on the phone.
+- **Images and pages:** `clauntty show` fills the shared `imageViewer`, shown by
+  `ImageViewer` over the window. `clauntty tab PORT` makes a `WebTab`, listed under the
+  workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
 - **Testing:** `scripts/mac.sh` is the counterpart of `sim.sh`: `run`, `shot`, `click`, `drag`,

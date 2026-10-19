@@ -1,7 +1,14 @@
 import SwiftUI
 
+/// What the sidebar selects: a pane, or a web page from a port on the host.
+enum SidebarItem: Hashable {
+    case pane(PaneSelection)
+    case web(UUID)
+}
+
 /// Hosts, each with its workspaces and their panes, named and marked as on the
-/// phone and in rtach's picker. Selecting a pane shows it.
+/// phone and in rtach's picker, and web pages under the workspace that opened them.
+/// Selecting a row shows it.
 struct Sidebar: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
@@ -12,6 +19,14 @@ struct Sidebar: View {
                 Section {
                     ForEach(groups(on: connection)) { group in
                         WorkspaceRows(group: group)
+                        ForEach(sessionManager.webTabs.filter { $0.workspaceId == group.id }) { webTab in
+                            WebTabRow(webTab: webTab)
+                                .padding(.leading, 10)
+                        }
+                    }
+                    // Opened outside any workspace shown here
+                    ForEach(looseWebTabs(on: connection)) { webTab in
+                        WebTabRow(webTab: webTab)
                     }
                 } header: {
                     HostHeader(connection: connection)
@@ -29,17 +44,33 @@ struct Sidebar: View {
         sessionManager.sessionGroups.filter { $0.connectionId == connection.id }
     }
 
-    /// The pane shown, as the list's selection; picking a row shows that pane.
-    private var selection: Binding<PaneSelection?> {
+    private func looseWebTabs(on connection: SavedConnection) -> [WebTab] {
+        let groupIds = Set(sessionManager.sessionGroups.map(\.id))
+        return sessionManager.webTabs(on: connection).filter { webTab in
+            webTab.workspaceId.map { !groupIds.contains($0) } ?? true
+        }
+    }
+
+    /// The pane or page shown, as the list's selection; picking a row shows it.
+    private var selection: Binding<SidebarItem?> {
         Binding(
             get: {
+                if let webTab = sessionManager.activeWebTab { return .web(webTab.id) }
                 guard let session = sessionManager.activeSession, let groupId = session.groupId,
                       let paneId = session.pane?.paneId else { return nil }
-                return PaneSelection(groupId: groupId, paneId: paneId)
+                return .pane(PaneSelection(groupId: groupId, paneId: paneId))
             },
             set: { newValue in
-                guard let newValue else { return }
-                MainView.show(newValue, sessionManager)
+                switch newValue {
+                case .pane(let pane):
+                    MainView.show(pane, sessionManager)
+                case .web(let id):
+                    if let webTab = sessionManager.webTabs.first(where: { $0.id == id }) {
+                        sessionManager.switchTo(webTab)
+                    }
+                case nil:
+                    break
+                }
             }
         )
     }
@@ -52,7 +83,7 @@ private struct WorkspaceRows: View {
     var body: some View {
         if group.panes.count == 1, let pane = group.panes.first {
             PaneRow(title: group.title, status: pane.status)
-                .tag(PaneSelection(groupId: group.id, paneId: pane.id))
+                .tag(SidebarItem.pane(PaneSelection(groupId: group.id, paneId: pane.id)))
         } else {
             Text(group.title)
                 .font(.callout.weight(.semibold))
@@ -61,7 +92,7 @@ private struct WorkspaceRows: View {
             ForEach(group.panes, id: \.id) { pane in
                 PaneRow(title: pane.title, status: pane.status)
                     .padding(.leading, 10)
-                    .tag(PaneSelection(groupId: group.id, paneId: pane.id))
+                    .tag(SidebarItem.pane(PaneSelection(groupId: group.id, paneId: pane.id)))
             }
         }
     }
@@ -80,6 +111,27 @@ private struct PaneRow: View {
             Image(systemName: status.symbolName)
                 .foregroundStyle(status.color)
                 .symbolEffect(.pulse, isActive: status == .blocked)
+        }
+    }
+}
+
+/// A forwarded port's page; closing it stops the forward.
+private struct WebTabRow: View {
+    @EnvironmentObject private var sessionManager: SessionManager
+    @ObservedObject var webTab: WebTab
+
+    var body: some View {
+        Label {
+            Text(webTab.title)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        } icon: {
+            Image(systemName: "globe")
+                .foregroundStyle(.secondary)
+        }
+        .tag(SidebarItem.web(webTab.id))
+        .contextMenu {
+            Button("Close Page") { sessionManager.closeWebTab(webTab) }
         }
     }
 }

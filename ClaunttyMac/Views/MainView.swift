@@ -33,11 +33,15 @@ struct MainView: View {
                 }
             }
         }
+        .overlay {
+            ImageViewer(content: $sessionManager.imageViewer)
+        }
         // Closed: typing goes back to the pane you're in
         .onChange(of: switcher.shown) { _, shown in
-            if !shown, let session = sessionManager.activeSession {
-                DispatchQueue.main.async { views.focus(session) }
-            }
+            if !shown { refocus() }
+        }
+        .onChange(of: sessionManager.imageViewer == nil) { _, closed in
+            if closed { refocus() }
         }
         .onChange(of: sessionManager.sessions.map(\.id)) { _, ids in
             views.prune(keeping: Set(ids))
@@ -54,7 +58,9 @@ struct MainView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let session = sessionManager.activeSession, let group = sessionManager.sessionGroup(for: session) {
+        if let webTab = sessionManager.activeWebTab {
+            WebPane(webTab: webTab)
+        } else if let session = sessionManager.activeSession, let group = sessionManager.sessionGroup(for: session) {
             SplitPanes(group: group, views: views)
                 .background(ThemeColors.background)
         } else if hosts.opened.isEmpty {
@@ -66,11 +72,17 @@ struct MainView: View {
         }
     }
 
+    private func refocus() {
+        guard let session = sessionManager.activeSession else { return }
+        DispatchQueue.main.async { views.focus(session) }
+    }
+
     private var shownLayout: PaneLayout? {
         sessionManager.activeSession.flatMap { sessionManager.sessionGroup(for: $0) }?.shownLayout
     }
 
     private var title: String {
+        if let webTab = sessionManager.activeWebTab { return webTab.title }
         guard let session = sessionManager.activeSession,
               let group = sessionManager.sessionGroup(for: session),
               let pane = group.panes.first(where: { $0.id == group.activePaneId }) else {

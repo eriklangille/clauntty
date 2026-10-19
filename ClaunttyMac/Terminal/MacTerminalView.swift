@@ -73,7 +73,7 @@ final class MacTerminalView: NSView, NSTextInputClient {
             DispatchQueue.main.async { MacTerminalView.find(userdata)?.onInput?(data) }
         }
         ghostty_surface_set_pty_resize_callback(surface) { userdata, columns, rows, _, _ in
-            DispatchQueue.main.async { MacTerminalView.find(userdata)?.onResize?(columns, rows) }
+            DispatchQueue.main.async { MacTerminalView.find(userdata)?.didResize(columns: columns, rows: rows) }
         }
     }
 
@@ -101,6 +101,10 @@ final class MacTerminalView: NSView, NSTextInputClient {
 
     /// Program output, as if read from the pty.
     func write(_ data: Data) {
+        if heldOutput != nil {
+            heldOutput?.append(data)
+            return
+        }
         guard let surface, !data.isEmpty else { return }
         outputQueue.async {
             data.withUnsafeBytes { raw in
@@ -134,6 +138,75 @@ final class MacTerminalView: NSView, NSTextInputClient {
         guard let surface else { return nil }
         let size = ghostty_surface_size(surface)
         return (size.columns, size.rows)
+    }
+
+    // MARK: Another device's size
+
+    /// The grid another device attached to this pane gave it (it was typed on last), or
+    /// nil while it's ours. The terminal is drawn at that grid, scaled down if it doesn't
+    /// fit, instead of rewrapping the other device's lines into this pane.
+    private(set) var otherDeviceGrid: (rows: UInt16, columns: UInt16)?
+    /// Clicked while another device has the pane: take it back
+    var onUseHere: (() -> Void)?
+
+    /// Output that arrived while the terminal resizes to the other device's grid, and
+    /// that grid. The size message comes before the program's redraw for it, but the
+    /// terminal resizes a little after set_size: written meanwhile, the redraw would
+    /// land in the old grid.
+    private var heldOutput: [Data]?
+    private var heldOutputGrid: (rows: UInt16, columns: UInt16)?
+
+    func setOtherDeviceGrid(_ grid: (rows: UInt16, columns: UInt16)?) {
+        guard grid?.rows != otherDeviceGrid?.rows || grid?.columns != otherDeviceGrid?.columns else { return }
+        otherDeviceGrid = grid
+        if let surface, grid != nil { ghostty_surface_clear_selection(surface) }
+        if let grid, let current = gridSize, current.rows != grid.rows || current.columns != grid.columns {
+            heldOutputGrid = grid
+            if heldOutput == nil { heldOutput = [] }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, let held = self.heldOutputGrid, held == grid else { return }
+                self.releaseHeldOutput()
+            }
+        }
+        superview?.needsLayout = true
+    }
+
+    /// The size in points that shows `grid`: its cells, plus what the current size has
+    /// around its cells (the padding, and less than a cell left over)
+    private func pointSize(of grid: (rows: UInt16, columns: UInt16)) -> NSSize? {
+        guard let surface else { return nil }
+        let current = ghostty_surface_size(surface)
+        guard current.cell_width_px > 0, current.cell_height_px > 0 else { return nil }
+        let extraWidth = max(0, Int(current.width_px) - Int(current.columns) * Int(current.cell_width_px))
+        let extraHeight = max(0, Int(current.height_px) - Int(current.rows) * Int(current.cell_height_px))
+        let pixels = NSSize(width: Int(grid.columns) * Int(current.cell_width_px) + extraWidth,
+                            height: Int(grid.rows) * Int(current.cell_height_px) + extraHeight)
+        return convertFromBacking(pixels)
+    }
+
+    /// Lay out in a container of `size`: filling it, or at the other device's grid from
+    /// the top left. Returns how much the container should scale it down to fit.
+    func layout(in size: NSSize) -> CGFloat {
+        guard let grid = otherDeviceGrid, let gridSize = pointSize(of: grid) else {
+            frame = NSRect(origin: .zero, size: size)
+            return 1
+        }
+        frame = NSRect(origin: .zero, size: gridSize)
+        return min(1, size.width / gridSize.width, size.height / gridSize.height)
+    }
+
+    private func didResize(columns: UInt16, rows: UInt16) {
+        if let held = heldOutputGrid, held.rows == rows, held.columns == columns {
+            releaseHeldOutput()
+        }
+        onResize?(columns, rows)
+    }
+
+    private func releaseHeldOutput() {
+        guard let held = heldOutput else { return }
+        heldOutput = nil
+        heldOutputGrid = nil
+        held.forEach(write)
     }
 
     // MARK: Size and focus
@@ -372,12 +445,17 @@ final class MacTerminalView: NSView, NSTextInputClient {
     }
 
     private func button(_ state: ghostty_input_mouse_state_e, _ button: ghostty_input_mouse_button_e, _ event: NSEvent) {
-        guard let surface else { return }
+        guard let surface, otherDeviceGrid == nil else { return }
         _ = ghostty_surface_mouse_button(surface, state, button, Self.ghosttyMods(event.modifierFlags))
     }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        // Not a click into the terminal: it's scaled, so the point would land elsewhere
+        if otherDeviceGrid != nil {
+            onUseHere?()
+            return
+        }
         button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, event)
     }
     override func mouseUp(with event: NSEvent) { button(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event) }

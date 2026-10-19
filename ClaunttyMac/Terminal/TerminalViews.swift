@@ -86,9 +86,8 @@ final class TerminalViews {
     private func place(_ view: MacTerminalView, of sessionId: UUID) {
         guard let container = containers[sessionId]?.last?.view, view.superview !== container else { return }
         view.removeFromSuperview()
-        view.frame = container.bounds
-        view.autoresizingMask = [.width, .height]
         container.addSubview(view)
+        container.needsLayout = true
     }
 
     /// Drop views whose sessions are gone (closed panes, ended workspaces).
@@ -114,15 +113,24 @@ final class TerminalViews {
         session.onScrollbackReceived = { [weak view] data in view?.prependHistory(data) }
         view.onScrollNearTop = { [weak session] in session?.loadMoreScrollbackIfNeeded() }
         view.onInput = { [weak session] data in session?.sendData(data) }
+        // Session skips this while another device has the pane
         view.onResize = { [weak session] columns, rows in
             session?.sendWindowChange(rows: rows, columns: columns)
         }
-        // The PTY is ours again (we took it back, or the other device let go): it
-        // takes this window's size, which wasn't sent while another device had it.
-        session.onPtySizeChanged = { [weak session, weak view] size in
-            guard let session, let size, size.yours, let grid = view?.gridSize else { return }
-            session.sendWindowChange(rows: grid.rows, columns: grid.columns)
+        view.onUseHere = { [weak session] in session?.claimActive() }
+        // Another device has the pane: draw it at that device's grid. Ours again (we
+        // took it back, or the other device let go): back to this pane's size, which
+        // wasn't sent meanwhile.
+        let apply = { [weak session, weak view] (size: RtachClient.PtySize?) in
+            guard let session, let view else { return }
+            let other = size.flatMap { $0.yours ? nil : (rows: $0.rows, columns: $0.cols) }
+            view.setOtherDeviceGrid(other)
+            if other == nil, size != nil, let grid = view.gridSize {
+                session.sendWindowChange(rows: grid.rows, columns: grid.columns)
+            }
         }
+        session.onPtySizeChanged = apply
+        if session.ptySize != nil { apply(session.ptySize) }
     }
 }
 
@@ -143,9 +151,7 @@ struct TerminalContainer: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSView {
-        let container = NSView()
-        container.wantsLayer = true
-        return container
+        PaneHostView()
     }
 
     func updateNSView(_ container: NSView, context: Context) {
@@ -174,6 +180,29 @@ struct TerminalContainer: NSViewRepresentable {
     static func dismantleNSView(_ container: NSView, coordinator: Coordinator) {
         guard let sessionId = coordinator.sessionId else { return }
         coordinator.views?.remove(container, showing: sessionId)
+    }
+}
+
+/// Holds a pane's terminal: filling it, or at another device's grid from the top
+/// left, scaled down to fit.
+final class PaneHostView: NSView {
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func layout() {
+        super.layout()
+        guard let terminal = subviews.first as? MacTerminalView else { return }
+        let fit = terminal.layout(in: bounds.size)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.sublayerTransform = CATransform3DMakeScale(fit, fit, 1)
+        CATransaction.commit()
     }
 }
 

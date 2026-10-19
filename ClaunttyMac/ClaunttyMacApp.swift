@@ -58,6 +58,8 @@ struct ClaunttyMacApp: App {
     /// current ones.
     private func start() async {
         sessionManager.loadPersistedTabs(connectionStore: hosts.store)
+        // Pages reconnect their port when shown
+        sessionManager.loadPersistedWebTabs(connectionStore: hosts.store)
         for connection in hosts.opened {
             await sessionManager.refreshWorkspaces(for: connection)
         }
@@ -91,9 +93,9 @@ struct PaneCommands: Commands {
             Button("Split Down") { split(.splitDown) }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(activeGroup == nil)
-            Button("Close Pane…") { closePane() }
+            Button(sessionManager.activeWebTab == nil ? "Close Pane…" : "Close Page") { closePane() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
-                .disabled(activeGroup == nil)
+                .disabled(activeGroup == nil && sessionManager.activeWebTab == nil)
             Divider()
             Button("Next Pane") { move(by: 1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
@@ -141,6 +143,11 @@ struct PaneCommands: Commands {
     }
 
     private func closePane() {
+        // A page only stops forwarding its port: nothing to confirm
+        if let webTab = sessionManager.activeWebTab {
+            sessionManager.closeWebTab(webTab)
+            return
+        }
         guard let group = activeGroup,
               let pane = group.panes.first(where: { $0.id == group.activePaneId }) else { return }
         let alert = NSAlert()
