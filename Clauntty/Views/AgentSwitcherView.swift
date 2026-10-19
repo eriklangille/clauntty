@@ -1263,6 +1263,9 @@ struct SwitcherWindow: View {
     }
 
     @State private var pullDown: CGFloat = 0
+    /// The finger down is a hold: on the phone a hold under a second or so ends as a tap
+    /// too, which closed the menu it had just opened
+    @State private var held = false
 
     static let bottomPad: CGFloat = 8
     /// What the terminal keeps at its bottom for the key bar while the keyboard is up
@@ -1423,6 +1426,7 @@ struct SwitcherWindow: View {
                     // Typing into it, a tap goes to the terminal as in a tab: a click for a
                     // TUI, else paste (a page goes fullscreen)
                     .onTapGesture { location in
+                        guard !held else { return }
                         guard isFocused, web == nil else { return onTap() }
                         session.tapTerminal?(terminalPoint(location, placement))
                     }
@@ -1430,7 +1434,12 @@ struct SwitcherWindow: View {
                     .gesture(
                         LongPressGesture(minimumDuration: 0.5)
                             .sequenced(before: DragGesture(minimumDistance: 0))
+                            .onChanged { value in
+                                if case .second(true, _) = value { held = true }
+                            }
                             .onEnded { value in
+                                // Past the tap it can end as
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { held = false }
                                 guard isFocused, web == nil, case .second(true, let drag?) = value else { return }
                                 session.holdTerminal?(terminalPoint(drag.startLocation, placement))
                             },
