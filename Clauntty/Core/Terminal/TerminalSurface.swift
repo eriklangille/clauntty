@@ -480,6 +480,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
             // Mark as inactive to prevent delayed becomeFirstResponder calls
             self.isActiveTab = false
+            self.clearWindowSelection()
 
             self.accessoryBar.isHidden = true
             self.accessoryBar.isUserInteractionEnabled = false
@@ -1479,7 +1480,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     /// Agent mode, leaving fullscreen: the window doesn't take touches, so its selection's
-    /// handles couldn't be dragged, and stayed
+    /// handles couldn't be dragged, and stayed. Also when the terminal stops being active.
     func clearWindowSelection() {
         if isEditMenuVisible { dismissEditMenu() }
         guard let surface, ghostty_surface_has_selection(surface) else { return hideSelectionHandles() }
@@ -1929,10 +1930,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Hide and show Ghostty's drawing layers to force a new drawable. Don't toggle the
         // view's own isHidden: this view is the keyboard's first responder, and hiding it
         // while the keyboard is (re)activating leaves UIKit's keyboard/layout state broken.
+        // Not the subviews' layers: that showed hidden selection handles, where they last
+        // were, after every switch back to the terminal.
+        let drawing = layer.sublayers?.filter { sublayer in !subviews.contains { $0.layer === sublayer } } ?? []
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer.sublayers?.forEach { $0.isHidden = true }
-        layer.sublayers?.forEach { $0.isHidden = false }
+        drawing.forEach { $0.isHidden = true }
+        drawing.forEach { $0.isHidden = false }
         CATransaction.commit()
 
         // Also do size toggle
@@ -2034,7 +2038,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let stateChanged = active != isActiveTab
         isActiveTab = active
         if !active {
-            hideSelectionHandles()
+            // A selection doesn't outlive switching away, as in a text view
+            clearWindowSelection()
         }
 
         // Notify about active state change (for power management) - only if state changed.
