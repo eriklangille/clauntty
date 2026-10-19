@@ -93,6 +93,8 @@ struct AgentSwitcherView: View {
     @State private var dropTop: CGFloat = 0
     /// The window whose images are open (`clauntty show`), zoomed from its corner
     @State private var openImages: OpenImages?
+    /// The window whose images were last opened: they go once the viewer has closed
+    @State private var viewedImages: UUID?
     @Namespace private var imagesZoom
 
     struct OpenImages: Identifiable {
@@ -421,14 +423,23 @@ struct AgentSwitcherView: View {
             .onChange(of: geo.frame(in: .global).minY) { _, y in originY = y }
         }
         .ignoresSafeArea(.keyboard)
-        .fullScreenCover(item: $openImages) { open in
+        // Seen images go when the viewer closes (after it zooms back into the thumbnail);
+        // the viewer's Save keeps one in Photos
+        .fullScreenCover(item: $openImages, onDismiss: {
+            if let window = viewedImages {
+                viewedImages = nil
+                clearImages(window)
+            }
+        }) { open in
             ImageViewerView(content: Binding(
                 get: { sessionManager.windowImages[open.id] },
-                // Closing keeps them in the corner; Clear takes them away
                 set: { if $0 == nil { openImages = nil } }
-            ), onClear: { clearImages(open.id) })
+            ))
             // From the thumbnail, which is tagged with the images' id
             .modifier(ZoomFrom(id: sessionManager.windowImages[open.id]?.id ?? open.id, namespace: imagesZoom))
+        }
+        .onChange(of: openImages?.id) { _, window in
+            if let window { viewedImages = window }
         }
         // A notification for a window's images was tapped
         .onChange(of: sessionManager.openImagesWindow) { _, window in
@@ -940,7 +951,7 @@ struct AgentSwitcherView: View {
         )
     }
 
-    /// Clear a window's images: from its corner, or the viewer's Clear
+    /// Clear a window's images: swiped away from its corner, or seen in the viewer
     private func clearImages(_ windowId: UUID) {
         if openImages?.id == windowId { openImages = nil }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { sessionManager.windowImages[windowId] = nil }

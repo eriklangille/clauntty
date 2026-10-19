@@ -17,6 +17,8 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Clauntty uses the microphone for voice-to-text input in the terminal, for talking to the voice agent, and for web pages that request audio input</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Clauntty saves images your servers send to Photos when you tap Save</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Allow camera access for web pages that request video input</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

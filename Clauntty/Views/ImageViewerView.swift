@@ -1,3 +1,5 @@
+import os
+import Photos
 import SwiftUI
 import UIKit
 
@@ -34,13 +36,14 @@ struct ImageViewerContent: Identifiable {
 /// or tap Done to close
 struct ImageViewerView: View {
     @Binding var content: ImageViewerContent?
-    /// Agent mode: clear the window's images (they stay in its corner until then)
-    var onClear: (() -> Void)? = nil
 
     @State private var page = 0
     @State private var isZoomed = false
     @State private var showChrome = true
     @State private var dragOffset: CGFloat = 0
+    /// Images saved to Photos, and ones that couldn't be (no access)
+    @State private var saved: Set<UUID> = []
+    @State private var saveFailed: Set<UUID> = []
 
     private var items: [ImageViewerContent.Item] { content?.items ?? [] }
 
@@ -117,10 +120,13 @@ struct ImageViewerView: View {
                 Spacer()
 
                 HStack(spacing: 20) {
-                    if let onClear {
-                        Button(action: onClear) {
-                            Image(systemName: "trash")
+                    if items.indices.contains(page), items[page].image != nil {
+                        let item = items[page]
+                        Button { save(item) } label: {
+                            Image(systemName: saved.contains(item.id) ? "checkmark"
+                                : saveFailed.contains(item.id) ? "exclamationmark.triangle" : "square.and.arrow.down")
                         }
+                        .disabled(saved.contains(item.id))
                     }
                     if items.indices.contains(page), let image = items[page].image {
                         ShareLink(
@@ -167,6 +173,26 @@ struct ImageViewerView: View {
 
     private func close() {
         content = nil
+    }
+
+    /// Add the image to Photos (agent mode clears images once they've been viewed)
+    private func save(_ item: ImageViewerContent.Item) {
+        guard let image = item.image else { return }
+        Task { @MainActor in
+            let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+            do {
+                guard status == .authorized || status == .limited else { throw CocoaError(.userCancelled) }
+                try await PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }
+                saved.insert(item.id)
+                saveFailed.remove(item.id)
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } catch {
+                saveFailed.insert(item.id)
+                Logger.clauntty.warning("ImageViewer: couldn't save \(item.name) to Photos: \(error.localizedDescription)")
+            }
+        }
     }
 }
 
