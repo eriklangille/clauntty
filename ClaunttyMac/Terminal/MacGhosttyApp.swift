@@ -29,8 +29,13 @@ final class MacGhosttyApp: ObservableObject {
             supports_selection_clipboard: false,
             wakeup_cb: { userdata in MacGhosttyApp.wakeup(userdata) },
             action_cb: { _, target, action in MacGhosttyApp.action(target: target, action: action) },
-            read_clipboard_cb: { _, _, _, _, _, _ in GHOSTTY_CLIPBOARD_READ_UNSUPPORTED },
-            confirm_read_clipboard_cb: { _, _, _, _ in },
+            // The userdata of these is the surface's: MacTerminalView handles them
+            read_clipboard_cb: { userdata, _, state, mimes, mimesLen, list in
+                MacTerminalView.readClipboard(userdata, state: state, mimes: mimes, mimesLen: mimesLen, list: list)
+            },
+            confirm_read_clipboard_cb: { userdata, confirm, state, request in
+                MacTerminalView.confirmReadClipboard(userdata, confirm: confirm, state: state, request: request)
+            },
             write_clipboard_cb: { _, _, content, len, _ in MacGhosttyApp.writeClipboard(content, len) },
             close_surface_cb: { _, _ in }
         )

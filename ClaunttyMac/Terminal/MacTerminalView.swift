@@ -14,6 +14,9 @@ final class MacTerminalView: NSView, NSTextInputClient {
     var onInput: ((Data) -> Void)?
     /// The terminal resized to this grid (after Ghostty's resize coalescing). Main thread.
     var onResize: ((_ columns: UInt16, _ rows: UInt16) -> Void)?
+    /// Scrolled to within `nearTopRows` of the oldest line: time to load older history.
+    var onScrollNearTop: (() -> Void)?
+    private let nearTopRows: UInt = 100
 
     /// Program output goes through here: ghostty_surface_write_pty_output can
     /// block when the termio queue is full, so never on the main thread.
@@ -85,7 +88,7 @@ final class MacTerminalView: NSView, NSTextInputClient {
         }
     }
 
-    private static func find(_ userdata: UnsafeMutableRawPointer?) -> MacTerminalView? {
+    static func find(_ userdata: UnsafeMutableRawPointer?) -> MacTerminalView? {
         let id = Int(bitPattern: userdata)
         registryLock.lock()
         defer { registryLock.unlock() }
@@ -103,6 +106,25 @@ final class MacTerminalView: NSView, NSTextInputClient {
                 ghostty_surface_write_pty_output(surface, ptr, UInt(raw.count))
             }
         }
+    }
+
+    /// Older output, from rtach's history, added above the scrollback. Through the
+    /// output queue, so it can't land in the middle of a write.
+    func prependHistory(_ data: Data) {
+        guard let surface, !data.isEmpty else { return }
+        outputQueue.async {
+            data.withUnsafeBytes { raw in
+                guard let ptr = raw.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
+                _ = ghostty_surface_prepend_scrollback(surface, ptr, UInt(raw.count))
+            }
+        }
+    }
+
+    /// Run a Ghostty keybinding action (`copy_to_clipboard`, `set_font_size:14`...).
+    @discardableResult
+    func perform(_ action: String) -> Bool {
+        guard let surface else { return false }
+        return action.withCString { ghostty_surface_binding_action(surface, $0, UInt(strlen($0))) }
     }
 
     /// The terminal's grid right now.
@@ -390,6 +412,100 @@ final class MacTerminalView: NSView, NSTextInputClient {
         default: 0
         }
         ghostty_surface_mouse_scroll(surface, x, y, (precise ? 1 : 0) | momentum << 1)
+        // Scrolling back toward the oldest line: fetch older history (not on the
+        // alternate screen, which has no scrollback)
+        if y > 0, !ghostty_surface_is_alternate_screen(surface),
+           ghostty_surface_scrollback_offset(surface) < nearTopRows {
+            onScrollNearTop?()
+        }
+    }
+
+    // MARK: Edit menu
+
+    @objc func copy(_ sender: Any?) { perform("copy_to_clipboard") }
+    @objc func paste(_ sender: Any?) { perform("paste_from_clipboard") }
+    @IBAction override func selectAll(_ sender: Any?) { perform("select_all") }
+}
+
+extension MacTerminalView: NSMenuItemValidation {
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(copy(_:)):
+            return surface.map { ghostty_surface_has_selection($0) } ?? false
+        case #selector(paste(_:)):
+            return NSPasteboard.general.string(forType: .string) != nil
+        default:
+            return true
+        }
+    }
+}
+
+// MARK: - Clipboard requests from Ghostty
+
+extension MacTerminalView {
+    /// Ghostty wants the clipboard (a paste, or a program asking with OSC 52).
+    /// Plain text only, from the general pasteboard.
+    static func readClipboard(_ userdata: UnsafeMutableRawPointer?, state: UnsafeMutableRawPointer?,
+                              mimes: UnsafePointer<UnsafePointer<CChar>?>?, mimesLen: Int,
+                              list: Bool) -> ghostty_clipboard_read_result_e {
+        guard let view = find(userdata), let surface = view.surface else { return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED }
+        let text = NSPasteboard.general.string(forType: .string)
+        var wanted: [String] = []
+        for i in 0..<mimesLen {
+            guard let ptr = mimes?[i] else { continue }
+            let mime = String(cString: ptr)
+            if mime.hasPrefix("text/plain"), !wanted.contains(mime) { wanted.append(mime) }
+        }
+        let contents = text.map { text in wanted.map { ($0, text) } } ?? []
+        if contents.isEmpty && !list { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
+        complete(surface, contents: contents, available: text == nil ? [] : ["text/plain"],
+                 confirmed: false, state: state)
+        return GHOSTTY_CLIPBOARD_READ_STARTED
+    }
+
+    /// Ghostty asks before a paste it finds risky (several lines, control
+    /// characters) and before a program reads the clipboard. Your own paste goes
+    /// ahead; a program reading it is refused.
+    static func confirmReadClipboard(_ userdata: UnsafeMutableRawPointer?,
+                                     confirm: UnsafePointer<ghostty_clipboard_confirm_s>?,
+                                     state: UnsafeMutableRawPointer?, request: ghostty_clipboard_request_e) {
+        guard let view = find(userdata), let surface = view.surface else { return }
+        guard request == GHOSTTY_CLIPBOARD_REQUEST_PASTE, let c = confirm?.pointee else {
+            ghostty_surface_deny_clipboard_request(surface, state)
+            return
+        }
+        var contents: [(String, String)] = []
+        for i in 0..<c.contents_len {
+            guard let item = c.contents?[i], let mime = item.mime, let data = item.data else { continue }
+            let text = String(decoding: UnsafeRawBufferPointer(start: data, count: item.len), as: UTF8.self)
+            contents.append((String(cString: mime), text))
+        }
+        complete(surface, contents: contents, available: [], confirmed: true, state: state)
+    }
+
+    private static func complete(_ surface: ghostty_surface_t, contents: [(mime: String, text: String)],
+                                 available: [String], confirmed: Bool, state: UnsafeMutableRawPointer?) {
+        // C strings that live until Ghostty has copied them
+        var owned: [UnsafeMutablePointer<CChar>] = []
+        defer { owned.forEach { free($0) } }
+        let dup = { (s: String) -> UnsafeMutablePointer<CChar> in
+            let p = strdup(s)!
+            owned.append(p)
+            return p
+        }
+        let cContents = contents.map { entry in
+            ghostty_clipboard_content_s(mime: dup(entry.mime), data: dup(entry.text), len: entry.text.utf8.count)
+        }
+        let cAvailable: [UnsafePointer<CChar>?] = available.map { UnsafePointer(dup($0)) }
+        cContents.withUnsafeBufferPointer { contentsBuf in
+            cAvailable.withUnsafeBufferPointer { availableBuf in
+                var complete = ghostty_clipboard_complete_s(
+                    contents: contentsBuf.baseAddress, contents_len: contentsBuf.count,
+                    available: availableBuf.baseAddress, available_len: availableBuf.count,
+                    confirmed: confirmed, remember: false)
+                ghostty_surface_complete_clipboard_request(surface, &complete, state)
+            }
+        }
     }
 }
 

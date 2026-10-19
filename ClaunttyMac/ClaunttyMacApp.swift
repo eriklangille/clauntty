@@ -34,20 +34,34 @@ struct ClaunttyMacApp: App {
                 // Back at the Mac: the pane on screen takes its size back from the phone
                 sessionManager.activeSession?.claimActive()
             }
+            // Remember the pane you're on, so a relaunch (or a crash) comes back to it
+            .onChange(of: sessionManager.activeSessionId) { _, _ in
+                sessionManager.savePersistence()
+            }
         }
-        .commands { PaneCommands(sessionManager: sessionManager, hosts: hosts) }
+        .commands {
+            PaneCommands(sessionManager: sessionManager, hosts: hosts)
+            CommandGroup(after: .toolbar) {
+                Button("Bigger") { ghostty.terminalViews?.adjustFontSize(by: 1) }
+                    .keyboardShortcut("=")
+                Button("Smaller") { ghostty.terminalViews?.adjustFontSize(by: -1) }
+                    .keyboardShortcut("-")
+                Button("Actual Size") { ghostty.terminalViews?.adjustFontSize(by: nil) }
+                    .keyboardShortcut("0")
+            }
+        }
     }
 
     /// Saved workspaces first, so the sidebar is there at once, then each host's
     /// current ones.
     private func start() async {
-        sessionManager.loadPersistedGroups(connectionStore: hosts.store)
+        sessionManager.loadPersistedTabs(connectionStore: hosts.store)
         for connection in hosts.opened {
             await sessionManager.refreshWorkspaces(for: connection)
         }
-        if sessionManager.activeSession == nil,
-           let group = PaneCommands.groups(sessionManager, hosts).first,
-           let session = sessionManager.currentSession(of: group) {
+        // The pane from last time if it's still there, else the first one; switching connects it
+        if let session = sessionManager.activeSession
+            ?? PaneCommands.groups(sessionManager, hosts).first.flatMap({ sessionManager.currentSession(of: $0) }) {
             sessionManager.switchTo(session)
         }
     }

@@ -17,8 +17,21 @@ final class TerminalViews {
         weak var session: Session?
     }
 
+    /// Points; 0 is Ghostty's default. Every pane uses it, and it's remembered.
+    private(set) var fontSize: Float = UserDefaults.standard.float(forKey: "fontSize")
+    private static let defaultFontSize: Float = 13
+
     init(app: ghostty_app_t) {
         self.app = app
+    }
+
+    /// Bigger (+1), smaller (-1), or back to the default (nil), in every pane.
+    func adjustFontSize(by step: Float?) {
+        let current = fontSize == 0 ? Self.defaultFontSize : fontSize
+        fontSize = step.map { min(36, max(8, current + $0)) } ?? 0
+        UserDefaults.standard.set(fontSize, forKey: "fontSize")
+        let action = fontSize == 0 ? "reset_font_size" : "set_font_size:\(fontSize)"
+        for entry in views.values { entry.view.perform(action) }
     }
 
     /// The session's view, made and wired to it on first use. `size` is where it'll
@@ -28,7 +41,7 @@ final class TerminalViews {
             if entry.session.session === session { return entry.view }
             entry.view.removeFromSuperview()
         }
-        let view = MacTerminalView(app: app)
+        let view = MacTerminalView(app: app, fontSize: fontSize)
         view.frame = NSRect(origin: .zero, size: size)
         wire(session, to: view)
         views[session.id] = (WeakSession(session: session), view)
@@ -52,6 +65,10 @@ final class TerminalViews {
         let earlier = session.getScrollbackData()
         if !earlier.isEmpty { view.write(earlier) }
         session.onDataReceived = { [weak view] data in view?.write(data) }
+        // Older history from rtach goes above the scrollback; scrolling near the
+        // top of it asks for the next page, as on the phone
+        session.onScrollbackReceived = { [weak view] data in view?.prependHistory(data) }
+        view.onScrollNearTop = { [weak session] in session?.loadMoreScrollbackIfNeeded() }
         view.onInput = { [weak session] data in session?.sendData(data) }
         view.onResize = { [weak session] columns, rows in
             session?.sendWindowChange(rows: rows, columns: columns)
