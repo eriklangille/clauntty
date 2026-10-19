@@ -377,8 +377,8 @@ class Session: ObservableObject, Identifiable {
     var onOpenBrowserRequested: ((String) -> Void)?
 
     /// Called when `clauntty show` sends an image path on the remote host, with its
-    /// inbox ID (nil from rtach before 2.10)
-    var onShowImageRequested: ((String, String?) -> Void)?
+    /// inbox ID (nil from rtach before 2.10) and the pane that sent it (rtach 2.21+)
+    var onShowImageRequested: ((_ path: String, _ inboxId: String?, _ pane: String?) -> Void)?
 
     /// `rtach ws` changed the host's workspaces: the workspace and pane to show, if any
     var onWorkspaceChanged: ((_ workspaceId: String?, _ paneId: String?) -> Void)?
@@ -716,9 +716,9 @@ class Session: ObservableObject, Identifiable {
             }
         case "image":
             if parts.count > 1 {
-                let (path, inboxId) = ImageInbox.parseImageArgument(String(parts[1]))
-                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path) (inbox \(inboxId ?? "none"))")
-                onShowImageRequested?(path, inboxId)
+                let (path, inboxId, pane) = ImageInbox.parseImageArgument(String(parts[1]))
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path) (inbox \(inboxId ?? "none"), pane \(pane ?? "none"))")
+                onShowImageRequested?(path, inboxId, pane)
             }
         case "pane":
             let target = parts.count > 1 ? parts[1].split(separator: ";", maxSplits: 1) : []

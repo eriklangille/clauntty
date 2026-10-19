@@ -198,14 +198,15 @@ class NotificationManager: NSObject, ObservableObject {
 
     /// Notify that `clauntty show` sent images while the app was in the background.
     /// Opening the app shows them.
-    func scheduleImagesReady(count: Int, host: String, sessionId: UUID) async {
+    /// `window`: agent mode's window the images are in, opened when the notification is tapped
+    func scheduleImagesReady(count: Int, host: String, sessionId: UUID, window: UUID? = nil) async {
         guard isAuthorized, notificationMode != .none else { return }
 
         let content = UNMutableNotificationContent()
         content.title = count == 1 ? "New image" : "\(count) new images"
         content.body = "From \(host)"
         content.sound = .default
-        content.userInfo = ["sessionId": sessionId.uuidString]
+        content.userInfo = window.map { ["imagesWindow": $0.uuidString] } ?? ["sessionId": sessionId.uuidString]
 
         let request = UNNotificationRequest(identifier: "images-\(UUID().uuidString)", content: content, trigger: nil)
         do {
@@ -301,6 +302,15 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     ) {
         let userInfo = response.notification.request.content.userInfo
 
+        // Images in an agent mode window: open them there
+        if let window = (userInfo["imagesWindow"] as? String).flatMap(UUID.init(uuidString:)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                NotificationCenter.default.post(name: .openWindowImages, object: nil, userInfo: ["window": window])
+            }
+            completionHandler()
+            return
+        }
+
         // A workspace pane (schedulePaneAttention, or a push from rtach)
         if let paneId = (userInfo["paneId"] ?? userInfo["pane"]) as? String {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -348,4 +358,6 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
 extension Notification.Name {
     static let switchToSession = Notification.Name("switchToSession")
     static let switchToPane = Notification.Name("switchToPane")
+    /// Agent mode: open a window's images (`userInfo["window"]`: its tab id)
+    static let openWindowImages = Notification.Name("openWindowImages")
 }

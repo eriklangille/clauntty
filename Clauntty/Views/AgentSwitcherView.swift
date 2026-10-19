@@ -91,6 +91,14 @@ struct AgentSwitcherView: View {
     /// Where the moved window was let go, from the top of the view: it stays there as the
     /// windows grow back
     @State private var dropTop: CGFloat = 0
+    /// The window whose images are open (`clauntty show`), zoomed from its corner
+    @State private var openImages: OpenImages?
+    @Namespace private var imagesZoom
+
+    struct OpenImages: Identifiable {
+        /// The window's tab id
+        let id: UUID
+    }
 
     enum DragMode {
         /// A quick swipe: the next or previous window
@@ -361,6 +369,10 @@ struct AgentSwitcherView: View {
             .onChange(of: ids) { _, ids in
                 if let menuWindow, !ids.contains(menuWindow) { self.menuWindow = nil }
                 if let moving, !ids.contains(moving) { self.moving = nil }
+                // A closed window's images go with it
+                for window in sessionManager.windowImages.keys where !ids.contains(window) {
+                    sessionManager.windowImages[window] = nil
+                }
                 if let focused, !ids.contains(focused) {
                     if webReturn != nil { return exitWeb() }
                     withAnimation(snap) {
@@ -409,6 +421,21 @@ struct AgentSwitcherView: View {
             .onChange(of: geo.frame(in: .global).minY) { _, y in originY = y }
         }
         .ignoresSafeArea(.keyboard)
+        .fullScreenCover(item: $openImages) { open in
+            ImageViewerView(content: Binding(
+                get: { sessionManager.windowImages[open.id] },
+                // Closing keeps them in the corner; Clear takes them away
+                set: { if $0 == nil { openImages = nil } }
+            ), onClear: { clearImages(open.id) })
+            // From the thumbnail, which is tagged with the images' id
+            .modifier(ZoomFrom(id: sessionManager.windowImages[open.id]?.id ?? open.id, namespace: imagesZoom))
+        }
+        // A notification for a window's images was tapped
+        .onChange(of: sessionManager.openImagesWindow) { _, window in
+            guard let window else { return }
+            sessionManager.openImagesWindow = nil
+            if sessionManager.windowImages[window] != nil { openImages = OpenImages(id: window) }
+        }
         // The window above slides under the status bar: fade it there, so only its last
         // lines show below
         .overlay(alignment: .top) {
@@ -905,8 +932,18 @@ struct AgentSwitcherView: View {
                 if let web, !fullscreen { openWeb(web) } else if web != nil, webReturn != nil { exitWeb() } else { setFullscreen(!fullscreen) }
             },
             canMove: canMove(tabId),
-            onMove: onMove
+            onMove: onMove,
+            images: sessionManager.windowImages[tabId],
+            imagesZoom: imagesZoom,
+            onImages: { openImages = OpenImages(id: tabId) },
+            onClearImages: { clearImages(tabId) }
         )
+    }
+
+    /// Clear a window's images: from its corner, or the viewer's Clear
+    private func clearImages(_ windowId: UUID) {
+        if openImages?.id == windowId { openImages = nil }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { sessionManager.windowImages[windowId] = nil }
     }
 
     // MARK: Actions
@@ -1195,6 +1232,11 @@ struct SwitcherWindow: View {
     /// In the overview: held, it moves
     let canMove: Bool
     let onMove: (WindowMove) -> Void
+    /// Images `clauntty show` sent from this window's panes, in its corner
+    let images: ImageViewerContent?
+    let imagesZoom: Namespace.ID
+    let onImages: () -> Void
+    let onClearImages: () -> Void
 
     enum Mode: Equatable {
         /// The last couple of lines: what the agent said, or the shell's prompt
@@ -1389,15 +1431,18 @@ struct SwitcherWindow: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        // Top-aligned: the images' thumbnail is taller than the pill
+        HStack(alignment: .top, spacing: 8) {
             // Floating, both at the right, the pill in the corner (its menu grows left)
             if floatsPill {
                 Spacer(minLength: 0)
+                thumbnail
                 fullscreenButton
                 pill
             } else {
                 pill
                 Spacer(minLength: 0)
+                thumbnail
                 fullscreenButton
             }
         }
@@ -1417,6 +1462,13 @@ struct SwitcherWindow: View {
         }
         .gesture(isFullscreen ? pullGesture : nil)
         .simultaneousGesture(isFullscreen ? nil : swipeGesture)
+    }
+
+    @ViewBuilder private var thumbnail: some View {
+        if let images, !images.items.isEmpty, !isMenuOpen {
+            ImagesThumbnail(content: images, zoom: imagesZoom, onOpen: onImages, onClear: onClearImages)
+                .transition(.scale(scale: 0.4).combined(with: .opacity))
+        }
     }
 
     @ViewBuilder private var fullscreenButton: some View {
@@ -1595,6 +1647,96 @@ struct WebWindow: View {
                 withAnimation(.spring(duration: 0.35)) { pullDown = 0 }
                 if exit { onExit() }
             }
+    }
+}
+
+/// A window's images from `clauntty show`: the newest, with how many there are. Tap to
+/// open them, swipe it sideways to clear them.
+private struct ImagesThumbnail: View {
+    let content: ImageViewerContent
+    let zoom: Namespace.ID
+    let onOpen: () -> Void
+    let onClear: () -> Void
+
+    @State private var slide: CGFloat = 0
+
+    static let size: CGFloat = 44
+
+    var body: some View {
+        ZStack {
+            if let image = content.items.last?.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+            }
+        }
+        .frame(width: Self.size, height: Self.size)
+        .background(Color.black.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+        )
+        .modifier(ZoomSource(id: content.id, namespace: zoom))
+        .overlay(alignment: .topTrailing) {
+            if content.items.count > 1 {
+                Text("\(content.items.count)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 5)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(Capsule().fill(.white))
+                    .offset(x: 6, y: -6)
+            }
+        }
+        .contentShape(Rectangle())
+        .offset(x: slide)
+        .opacity(1 - min(abs(slide) / 120, 0.8))
+        .onTapGesture(perform: onOpen)
+        .gesture(
+            DragGesture(minimumDistance: 10)
+                .onChanged { value in
+                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                    slide = value.translation.width
+                }
+                .onEnded { value in
+                    if abs(value.translation.width) > 60 || abs(value.predictedEndTranslation.width) > 160 {
+                        onClear()
+                    } else {
+                        withAnimation(.spring(duration: 0.3)) { slide = 0 }
+                    }
+                }
+        )
+    }
+}
+
+/// The viewer zooms out of a window's thumbnail and back into it (iOS 18)
+private struct ZoomSource: ViewModifier {
+    let id: UUID
+    let namespace: Namespace.ID
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.matchedTransitionSource(id: id, in: namespace)
+        } else {
+            content
+        }
+    }
+}
+
+private struct ZoomFrom: ViewModifier {
+    let id: UUID
+    let namespace: Namespace.ID
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.navigationTransition(.zoom(sourceID: id, in: namespace))
+        } else {
+            content
+        }
     }
 }
 

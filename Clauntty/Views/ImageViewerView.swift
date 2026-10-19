@@ -34,6 +34,8 @@ struct ImageViewerContent: Identifiable {
 /// or tap Done to close
 struct ImageViewerView: View {
     @Binding var content: ImageViewerContent?
+    /// Agent mode: clear the window's images (they stay in its corner until then)
+    var onClear: (() -> Void)? = nil
 
     @State private var page = 0
     @State private var isZoomed = false
@@ -114,7 +116,12 @@ struct ImageViewerView: View {
 
                 Spacer()
 
-                Group {
+                HStack(spacing: 20) {
+                    if let onClear {
+                        Button(action: onClear) {
+                            Image(systemName: "trash")
+                        }
+                    }
                     if items.indices.contains(page), let image = items[page].image {
                         ShareLink(
                             item: Image(uiImage: image),

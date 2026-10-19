@@ -2,6 +2,7 @@ import Foundation
 import NIOCore
 import NIOSSH
 import os.log
+import SwiftUI
 import UIKit
 
 /// Manages all terminal sessions, web tabs, and connection pooling
@@ -19,8 +20,14 @@ class SessionManager: ObservableObject {
     /// Ports being forwarded without a web tab (background forwarding)
     @Published var forwardedPorts: [ForwardedPort] = []
 
-    /// Images sent with `clauntty show`, presented full screen while non-nil
+    /// Images sent with `clauntty show`, presented full screen while non-nil (the tab
+    /// bar; agent mode keeps them with their windows)
     @Published var imageViewer: ImageViewerContent?
+
+    /// Agent mode: each window's images (by its tab id), shown in its corner until cleared
+    @Published var windowImages: [UUID: ImageViewerContent] = [:]
+    /// A window whose images should open (a notification for them was tapped)
+    @Published var openImagesWindow: UUID?
 
     /// A Mac host to offer spawnd for, so code signing works in its sessions (asked
     /// while non-nil)
@@ -39,7 +46,14 @@ class SessionManager: ObservableObject {
     }
 
     /// `clauntty show a.png b.png` sends one command per file; collect them into one viewer
-    private var pendingImagePaths: [(session: Session, path: String, inboxId: String?)] = []
+    private var pendingImagePaths: [PendingImage] = []
+
+    private struct PendingImage {
+        let session: Session
+        let path: String
+        let inboxId: String?
+        let pane: String?
+    }
     private var pendingImageTask: Task<Void, Never>?
 
     /// Inbox entries shown or being shown this run. The live command and the inbox check
@@ -376,9 +390,9 @@ class SessionManager: ObservableObject {
             guard let self = self, let session = session else { return }
             self.handleOpenBrowserRequest(from: session, urlString: urlString)
         }
-        session.onShowImageRequested = { [weak self, weak session] path, inboxId in
+        session.onShowImageRequested = { [weak self, weak session] path, inboxId, pane in
             guard let self = self, let session = session else { return }
-            self.handleShowImageRequest(from: session, path: path, inboxId: inboxId)
+            self.handleShowImageRequest(from: session, path: path, inboxId: inboxId, pane: pane)
         }
         session.onPaneStateChanged = { [weak self] paneId, json in
             self?.paneStateChanged(paneId: paneId, json: json)
@@ -1247,11 +1261,11 @@ class SessionManager: ObservableObject {
     private static let maxImageBytes = 20 * 1024 * 1024
 
     /// Queue an image from `clauntty show`; paths arriving together open as one viewer
-    private func handleShowImageRequest(from session: Session, path: String, inboxId: String?) {
+    private func handleShowImageRequest(from session: Session, path: String, inboxId: String?, pane: String?) {
         if let inboxId {
             guard inboxIdsSeen.insert(inboxId).inserted else { return }
         }
-        pendingImagePaths.append((session, path, inboxId))
+        pendingImagePaths.append(PendingImage(session: session, path: path, inboxId: inboxId, pane: pane))
         pendingImageTask?.cancel()
         pendingImageTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
@@ -1282,19 +1296,23 @@ class SessionManager: ObservableObject {
                 if let created = ImageInbox.createdAt(entry.id), Date().timeIntervalSince(created) > ImageInbox.maxAge {
                     expired.append(entry.id)
                 } else {
-                    self.handleShowImageRequest(from: session, path: entry.path, inboxId: entry.id)
+                    self.handleShowImageRequest(from: session, path: entry.path, inboxId: entry.id, pane: entry.pane)
                 }
             }
             await session.removeFromImageInbox(expired)
         }
     }
 
-    private func showImages(_ batch: [(session: Session, path: String, inboxId: String?)]) async {
+    private func showImages(_ batch: [PendingImage]) async {
         var images: [ImageViewerContent.Item] = []
+        // Where each image goes in agent mode: its pane's window
+        var windows: [UUID?] = []
         // Inbox entries to delete: shown, or never going to work (missing, not an image,
         // too large). A failed download stays for the next connect to retry.
         var finished: [(session: Session, id: String)] = []
-        for (session, path, inboxId) in batch {
+        for pending in batch {
+            let (session, path, inboxId) = (pending.session, pending.path, pending.inboxId)
+            windows.append(imageWindow(pane: pending.pane, from: session))
             let name = (path as NSString).lastPathComponent
             var retry = false
             do {
@@ -1319,24 +1337,56 @@ class SessionManager: ObservableObject {
         guard let source = batch.first?.session else { return }
         let host = source.connectionConfig.name.isEmpty ? source.connectionConfig.host : source.connectionConfig.name
         Logger.clauntty.debugOnly("SessionManager: showing \(images.count) image(s) from \(host)")
+        let away = UIApplication.shared.applicationState != .active
 
-        if var current = imageViewer {
-            // Already viewing: add the new images and jump to the first of them
-            current.selection = current.items.count
-            current.items += images
-            imageViewer = current
+        if UserDefaults.standard.bool(forKey: "agentMode"), windows.allSatisfy({ $0 != nil }) {
+            // In the corner of each image's window; nothing opens by itself
+            for window in Set(windows.compactMap { $0 }) {
+                let added = zip(images, windows).filter { $0.1 == window }.map(\.0)
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    if var current = windowImages[window] {
+                        current.selection = current.items.count
+                        current.items += added
+                        windowImages[window] = current
+                    } else {
+                        windowImages[window] = ImageViewerContent(host: host, items: added)
+                    }
+                }
+                if away {
+                    await NotificationManager.shared.scheduleImagesReady(count: added.count, host: host, sessionId: source.id, window: window)
+                }
+            }
+            if !away { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         } else {
-            imageViewer = ImageViewerContent(host: host, items: images)
-        }
-
-        if UIApplication.shared.applicationState != .active {
-            await NotificationManager.shared.scheduleImagesReady(count: images.count, host: host, sessionId: source.id)
+            if var current = imageViewer {
+                // Already viewing: add the new images and jump to the first of them
+                current.selection = current.items.count
+                current.items += images
+                imageViewer = current
+            } else {
+                imageViewer = ImageViewerContent(host: host, items: images)
+            }
+            if away {
+                await NotificationManager.shared.scheduleImagesReady(count: images.count, host: host, sessionId: source.id)
+            }
         }
 
         for group in Dictionary(grouping: finished, by: { ObjectIdentifier($0.session) }).values {
             guard let session = group.first?.session else { continue }
             await session.removeFromImageInbox(group.map(\.id))
         }
+    }
+
+    /// The window for an image sent from `pane`: the pane's workspace window, else the
+    /// window shown. Nil with no window open.
+    private func imageWindow(pane: String?, from session: Session) -> UUID? {
+        if let pane {
+            if let group = sessionGroups.first(where: { $0.panes.contains { $0.id == pane } }) { return group.id }
+            if let shown = sessions.first(where: { $0.rtachSessionId == pane && $0.groupId == nil }) { return shown.id }
+        }
+        let window = activeSession ?? session
+        let id = window.groupId ?? window.id
+        return orderedTabs().contains { $0.id == id } ? id : nil
     }
 
     /// Switch to an appropriate tab after closing one
@@ -1779,14 +1829,17 @@ enum ImageInbox {
     struct Entry: Equatable {
         let id: String
         let path: String
+        /// The pane that sent it (rtach 2.21+, from inside an rtach session)
+        var pane: String? = nil
     }
 
     /// Entries older than this are skipped (rtach's inbox.max_age_ms)
     static let maxAge: TimeInterval = 6 * 60 * 60
 
-    /// Prints `<id>\t<path>` per entry. sh, not the login shell (which may be fish); the
-    /// script has no single quotes
-    static let listCommand = #"sh -c 'cd ~/.clauntty/inbox 2>/dev/null || exit 0; for f in [0-9]*; do [ -f "$f" ] && printf "%s\t%s\n" "$f" "$(cat "$f")"; done; exit 0'"#
+    /// Prints `<id>\t<path>\t<pane>` per entry (an entry is its path, then the pane on a
+    /// second line). sh, not the login shell (which may be fish); the script has no
+    /// single quotes
+    static let listCommand = #"sh -c 'cd ~/.clauntty/inbox 2>/dev/null || exit 0; for f in [0-9]*; do [ -f "$f" ] && printf "%s\t%s\t%s\n" "$f" "$(sed -n 1p "$f")" "$(sed -n 2p "$f")"; done; exit 0'"#
 
     static func removeCommand(_ ids: [String]) -> String? {
         let valid = ids.filter(isValidId)
@@ -1805,20 +1858,26 @@ enum ImageInbox {
         return Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
     }
 
-    /// Argument of an `image` command: `<id>;<path>` from rtach 2.10+, or just `<path>`
-    static func parseImageArgument(_ arg: String) -> (path: String, id: String?) {
-        let parts = arg.split(separator: ";", maxSplits: 1)
-        if parts.count == 2, isValidId(String(parts[0])) {
-            return (String(parts[1]), String(parts[0]))
-        }
-        return (arg, nil)
+    /// Argument of an `image` command: `<id>;<pane>;<path>` from rtach 2.21+ (the pane
+    /// empty outside rtach), `<id>;<path>` from 2.10+, or just `<path>`. The path is
+    /// absolute, so after the id a `/` means there's no pane.
+    static func parseImageArgument(_ arg: String) -> (path: String, id: String?, pane: String?) {
+        let parts = arg.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, isValidId(String(parts[0])) else { return (arg, nil, nil) }
+        let id = String(parts[0])
+        let rest = parts[1]
+        if rest.hasPrefix("/") { return (String(rest), id, nil) }
+        let fields = rest.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        guard fields.count == 2 else { return (String(rest), id, nil) }
+        return (String(fields[1]), id, fields[0].isEmpty ? nil : String(fields[0]))
     }
 
     static func parseList(_ output: String) -> [Entry] {
         output.split(separator: "\n").compactMap { line in
-            let fields = line.split(separator: "\t", maxSplits: 1)
-            guard fields.count == 2, isValidId(String(fields[0])) else { return nil }
-            return Entry(id: String(fields[0]), path: String(fields[1]))
+            let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard fields.count >= 2, isValidId(String(fields[0])), !fields[1].isEmpty else { return nil }
+            let pane = fields.count == 3 && !fields[2].isEmpty ? String(fields[2]) : nil
+            return Entry(id: String(fields[0]), path: String(fields[1]), pane: pane)
         }
     }
 }

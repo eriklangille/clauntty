@@ -351,6 +351,11 @@ struct AppContentView: View {
                     sessionManager.showPane(paneId)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .openWindowImages)) { notification in
+                if let window = notification.userInfo?["window"] as? UUID {
+                    sessionManager.openImagesWindow = window
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .switchToSession)) { notification in
                 handleSwitchToSession(notification)
             }
