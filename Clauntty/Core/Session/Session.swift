@@ -334,6 +334,8 @@ class Session: ObservableObject, Identifiable {
     var tapTerminal: ((CGPoint) -> Void)?
     /// A press and hold there: the edit menu (Paste), as a long press shows it
     var holdTerminal: ((CGPoint) -> Void)?
+    /// Drops the terminal's selection, its handles and menu
+    var clearSelection: (() -> Void)?
     /// The terminal has had output since the app started (agent mode's windows say
     /// they're connecting until then)
     @Published private(set) var hasOutput = false

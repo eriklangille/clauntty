@@ -235,6 +235,7 @@ bool ghostty_surface_is_alternate_screen(ghostty_surface_t);
 bool ghostty_surface_prepend_scrollback(ghostty_surface_t, const char*, uintptr_t);
 uintptr_t ghostty_surface_scrollback_offset(ghostty_surface_t);
 void ghostty_surface_set_power_mode(ghostty_surface_t, int);   // 0 normal, 1 low power
+void ghostty_surface_clear_selection(ghostty_surface_t);       // no click: a TUI taking the mouse would get it, and Shift extends
 ```
 
 Send the SSH window change from the resize callback, not after `ghostty_surface_set_size`. The terminal

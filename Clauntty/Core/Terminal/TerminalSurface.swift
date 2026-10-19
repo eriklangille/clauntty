@@ -1142,15 +1142,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         return cursorRect.contains(point)
     }
 
-    /// Clear the current selection by simulating a click
+    /// Clear the current selection. Not with a click: a TUI that takes the mouse would get
+    /// it, and with Shift Ghostty extends the selection instead.
     private func clearSelection() {
         guard let surface = self.surface else { return }
-        // A click (press + release at same spot) clears selection. Shift keeps it from a
-        // TUI that takes the mouse (it would get a click at its top-left corner).
-        let mods = isMouseCaptured ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
-        ghostty_surface_mouse_pos(surface, 0, 0, mods)
-        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
-        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, mods)
+        ghostty_surface_clear_selection(surface)
         hideSelectionHandles()
     }
 
@@ -1161,6 +1157,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Track if edit menu is currently visible
     private var isEditMenuVisible = false
+    /// The menu was opened for a selection (Copy), and closes when it goes
+    private var menuHasSelection = false
 
     /// Selection handle views for adjusting selection bounds
     private lazy var startHandle: SelectionHandleView = {
@@ -1287,6 +1285,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         guard draggingHandle == .none, let surface = self.surface else { return }
         guard ghostty_surface_has_selection(surface) else {
             hideSelectionHandles()
+            if isEditMenuVisible && menuHasSelection { dismissEditMenu() }
             return
         }
 
@@ -1346,13 +1345,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // On first drag event, start the selection from anchor point
         if draggingHandle != .start {
             draggingHandle = .start
+            longPressMods = isMouseCaptured ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
+            // A press with Shift while there's a selection extends it from where it began
+            ghostty_surface_clear_selection(surface)
             // Press at anchor (end point) to start continuous drag
-            ghostty_surface_mouse_pos(surface, Double(selectionEndPoint.x), Double(selectionEndPoint.y), GHOSTTY_MODS_NONE)
-            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            ghostty_surface_mouse_pos(surface, Double(selectionEndPoint.x), Double(selectionEndPoint.y), longPressMods)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, longPressMods)
         }
 
         // Move to current drag position (button still held)
-        ghostty_surface_mouse_pos(surface, Double(point.x), Double(point.y), GHOSTTY_MODS_NONE)
+        ghostty_surface_mouse_pos(surface, Double(point.x), Double(point.y), longPressMods)
     }
 
     private func handleEndHandleDrag(to point: CGPoint) {
@@ -1365,13 +1367,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // On first drag event, start the selection from anchor point
         if draggingHandle != .end {
             draggingHandle = .end
+            longPressMods = isMouseCaptured ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
+            // A press with Shift while there's a selection extends it from where it began
+            ghostty_surface_clear_selection(surface)
             // Press at anchor (start point) to start continuous drag
-            ghostty_surface_mouse_pos(surface, Double(selectionStartPoint.x), Double(selectionStartPoint.y), GHOSTTY_MODS_NONE)
-            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            ghostty_surface_mouse_pos(surface, Double(selectionStartPoint.x), Double(selectionStartPoint.y), longPressMods)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, longPressMods)
         }
 
         // Move to current drag position (button still held)
-        ghostty_surface_mouse_pos(surface, Double(point.x), Double(point.y), GHOSTTY_MODS_NONE)
+        ghostty_surface_mouse_pos(surface, Double(point.x), Double(point.y), longPressMods)
     }
 
     private func handleSelectionHandleDragEnded() {
@@ -1379,7 +1384,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Release mouse button to finalize selection
         if draggingHandle != .none {
-            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, longPressMods)
         }
 
         draggingHandle = .none
@@ -1402,7 +1407,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
     }
 
-    /// Modifiers for the current long press, fixed when it begins
+    /// Modifiers for the current long press or handle drag, fixed when it begins
     private var longPressMods = GHOSTTY_MODS_NONE
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -1416,8 +1421,10 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // click. Holding Shift makes Ghostty select instead, like a desktop terminal.
             longPressMods = isMouseCaptured ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
 
-            // Start selection with mouse press at location
+            // Start selection with mouse press at location. A new one: with Shift, a press
+            // extends the one there.
             isSelecting = true
+            ghostty_surface_clear_selection(surface)
             ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), longPressMods)
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, longPressMods)
 
@@ -1463,6 +1470,22 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         showPasteMenuAtCursor()
     }
 
+    /// Typing drops the selection, as in a desktop terminal. Keys go to SSH, not through
+    /// Ghostty, which would drop it itself.
+    private func dropSelectionForTyping() {
+        guard let surface, ghostty_surface_has_selection(surface) else { return }
+        clearSelection()
+        if isEditMenuVisible && menuHasSelection { dismissEditMenu() }
+    }
+
+    /// Agent mode, leaving fullscreen: the window doesn't take touches, so its selection's
+    /// handles couldn't be dragged, and stayed
+    func clearWindowSelection() {
+        if isEditMenuVisible { dismissEditMenu() }
+        guard let surface, ghostty_surface_has_selection(surface) else { return hideSelectionHandles() }
+        clearSelection()
+    }
+
     /// A press and hold on agent mode's window: the menu there, as a long press shows it
     /// (Paste even when a TUI takes the mouse)
     func windowHold(at location: CGPoint) {
@@ -1479,6 +1502,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     private func showEditMenu(at location: CGPoint) {
+        menuHasSelection = surface.map { ghostty_surface_has_selection($0) } ?? false
         // Use UIEditMenuInteraction (iOS 16+)
         let menuConfig = UIEditMenuConfiguration(identifier: nil, sourcePoint: location)
         if let interaction = interactions.first(where: { $0 is UIEditMenuInteraction }) as? UIEditMenuInteraction {
@@ -1568,8 +1592,13 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     }
 
     @objc override func selectAll(_ sender: Any?) {
-        // TODO: Implement select all if Ghostty supports it
-        Logger.clauntty.debugOnly("Select all not yet implemented")
+        guard let surface else { return }
+        let action = "select_all"
+        guard ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) else { return }
+        // Copy next: the menu again, mid-screen (the selection's ends can be in the
+        // scrollback)
+        showSelectionHandles()
+        showEditMenu(at: CGPoint(x: bounds.midX, y: bounds.midY))
     }
 
     // MARK: - Scroll Handling
@@ -2332,6 +2361,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     func insertText(_ text: String) {
         Logger.clauntty.verbose("insertText called: '\(text)' (\(text.count) chars)")
+        dropSelectionForTyping()
 
         // Return with the Ctrl or Option toggle on
         if text == "\n" {
@@ -2384,6 +2414,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     func deleteBackward() {
         Logger.clauntty.verbose("deleteBackward called")
+        dropSelectionForTyping()
         // Send backspace (ASCII DEL 0x7F or BS 0x08) to SSH
         let backspace = Data([0x7F])  // DEL character
         onTextInput?(backspace)

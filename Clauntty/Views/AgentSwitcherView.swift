@@ -325,6 +325,8 @@ struct AgentSwitcherView: View {
                 if !on {
                     hideEdge()
                     landscapeFull = false
+                    // A selection made fullscreen: its handles can't be dragged in a window
+                    for session in sessionManager.sessions { session.clearSelection?() }
                 }
             }
             // Typing in landscape is fullscreen; back in portrait, the window

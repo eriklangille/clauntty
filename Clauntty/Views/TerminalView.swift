@@ -345,6 +345,7 @@ struct TerminalView: View {
         session.readCursorRow = { [weak surface] in surface?.cursorRow() }
         session.tapTerminal = { [weak surface] point in surface?.windowTap(at: point) }
         session.holdTerminal = { [weak surface] point in surface?.windowHold(at: point) }
+        session.clearSelection = { [weak surface] in surface?.clearWindowSelection() }
         session.showKeyboard = { [weak surface] in surface?.showSoftwareKeyboard() }
         session.scrollTerminal = { [weak surface] dy in
             guard let surface else { return }
