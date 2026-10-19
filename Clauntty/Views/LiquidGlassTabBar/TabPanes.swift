@@ -1,14 +1,6 @@
 import UIKit
 
-/// Agent state of one pane
-enum PaneStatus: Equatable {
-    /// No agent in the pane (a shell, a dev server)
-    case none
-    case idle
-    case working
-    case blocked
-    case done
-
+extension PaneStatus {
     var tint: UIColor {
         switch self {
         case .none: return UIColor.label.withAlphaComponent(0.35)
@@ -18,25 +10,6 @@ enum PaneStatus: Equatable {
         case .done: return .systemGreen
         }
     }
-}
-
-/// One pane inside a session tab
-struct TabPane: Equatable {
-    let id: String
-    var title: String
-    var status: PaneStatus
-    /// Tab the pane belongs to within its group. Panes in the same tab are splits on the desktop.
-    var group: Int
-}
-
-/// Session menu actions on a workspace tab
-enum PaneAction {
-    /// A new pane next to the one shown (a split on the desktop)
-    case split
-    /// A new workspace (tab) on the same host
-    case newWorkspace
-    /// End the pane shown; the last one takes its workspace along
-    case close
 }
 
 // MARK: - Status Indicator
@@ -211,29 +184,6 @@ final class PaneDotsView: UIView {
 }
 
 // MARK: - Expanded Tab
-
-extension PaneStatus {
-    /// Subtitle for a pane in the session menu, empty when there's nothing worth saying
-    var label: String {
-        switch self {
-        case .working: return "Working"
-        case .blocked: return "Needs you"
-        case .done: return "Done"
-        case .idle, .none: return ""
-        }
-    }
-
-    /// SF Symbol for menus, which can't host the animated indicator
-    var symbolName: String {
-        switch self {
-        case .working: return "circle.dotted"
-        case .blocked: return "exclamationmark.circle.fill"
-        case .done: return "checkmark.circle.fill"
-        case .idle: return "circle"
-        case .none: return "terminal"
-        }
-    }
-}
 
 /// Native menu for the active session tab: its actions as an icon row, then its panes,
 /// one section per tab in the workspace

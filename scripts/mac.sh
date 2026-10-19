@@ -6,6 +6,7 @@
 # Usage:
 #   ./scripts/mac.sh build                 # Debug build
 #   ./scripts/mac.sh run [-- app args]     # build, quit the running app, launch
+#                                          # (CLAUNTTY_SSH_CONFIG=file: another ssh config)
 #   ./scripts/mac.sh quit
 #   ./scripts/mac.sh shot [name]           # window screenshot -> screenshots/mac-<name>.png
 #   ./scripts/mac.sh click X Y [right|double]
@@ -76,7 +77,10 @@ case "$cmd" in
         [ "${1:-}" = "--" ] && shift
         build
         quit_app
-        open -n "$APP" --args "$@"
+        # CLAUNTTY_SSH_CONFIG points the app at another ssh config (tests use a scratch one)
+        env_args=()
+        [ -n "${CLAUNTTY_SSH_CONFIG:-}" ] && env_args=(--env "CLAUNTTY_SSH_CONFIG=$CLAUNTTY_SSH_CONFIG")
+        open -n "${env_args[@]}" "$APP" --args "$@"
         for _ in $(seq 1 40); do
             curl -sf "$DRIVER/windows?app=$BUNDLE_ID" 2>/dev/null | grep -q '"window"' && { echo "Running."; exit 0; }
             sleep 0.25

@@ -163,7 +163,12 @@ extension SessionManager {
         paneStates[paneId] = state
         guard let index = sessionGroups.firstIndex(where: { $0.panes.contains { $0.id == paneId } }) else { return }
 
-        let shown = activeSession?.pane?.paneId == paneId && !NotificationManager.shared.appIsBackgrounded
+        #if os(iOS)
+        let appShown = !NotificationManager.shared.appIsBackgrounded
+        #else
+        let appShown = true
+        #endif
+        let shown = activeSession?.pane?.paneId == paneId && appShown
         if state.state == "done", previous?.state != "done", !shown {
             unseenDonePanes.insert(paneId)
         }
@@ -190,9 +195,13 @@ extension SessionManager {
         default: body = nil
         }
         // A master that pushes tells the phone itself, even once iOS has suspended the app
+        #if os(iOS)
         if let body, !(state.pushes == true && PushNotifications.shared.isActive) {
             Task { await NotificationManager.shared.schedulePaneAttention(workspace: group.title, pane: paneName, body: body, paneId: paneId) }
         }
+        #else
+        _ = body  // Notifications aren't in the Mac app's v1.
+        #endif
     }
 
     /// The user has seen a pane: its finished agent shows as idle from now on
@@ -395,7 +404,8 @@ extension SessionManager {
             username: config.username,
             authMethod: config.authMethod,
             connectionId: config.id,
-            useTailscale: config.useTailscale
+            useTailscale: config.useTailscale,
+            proxyCommand: config.proxyCommand
         )
         try await connection.connect()
         defer { connection.disconnect() }

@@ -32,6 +32,8 @@ class SSHConnection: ObservableObject {
     let username: String
     /// Dial through the embedded Tailscale node instead of the device network
     let useTailscale: Bool
+    /// An ssh_config ProxyCommand to carry the connection (macOS)
+    let proxyCommand: String?
     private let authMethod: AuthMethod
     private let connectionId: UUID
 
@@ -40,6 +42,10 @@ class SSHConnection: ObservableObject {
     private var channel: Channel?
     private var sshChildChannel: Channel?
     private var channelHandler: SSHChannelHandler?
+    #if os(macOS)
+    /// The running ProxyCommand, if the connection goes through one
+    private var proxyProcess: ProxyCommandProcess?
+    #endif
 
     /// Cached remote platform (detected once per connection)
     private var cachedPlatform: RemotePlatform?
@@ -71,12 +77,14 @@ class SSHConnection: ObservableObject {
         username: String,
         authMethod: AuthMethod,
         connectionId: UUID,
-        useTailscale: Bool = false
+        useTailscale: Bool = false,
+        proxyCommand: String? = nil
     ) {
         self.host = host
         self.port = port
         self.username = username
         self.useTailscale = useTailscale
+        self.proxyCommand = proxyCommand
         self.authMethod = authMethod
         self.connectionId = connectionId
     }
@@ -106,11 +114,9 @@ class SSHConnection: ObservableObject {
                 Task { @MainActor in self?.authSucceededReceived() }
             }
 
-            // Create client bootstrap
-            let bootstrap = ClientBootstrap(group: group)
-                .channelInitializer { channel in
-                    // Add SSH handler, then the banner handler after it
-                    // (runs on the channel's event loop, so sync operations are fine)
+            // Add SSH handler, then the banner handler after it
+            // (runs on the channel's event loop, so sync operations are fine)
+            let initializeChannel: @Sendable (Channel) -> EventLoopFuture<Void> = { channel in
                     channel.eventLoop.makeCompletedFuture {
                         try channel.pipeline.syncOperations.addHandlers(
                             NIOSSHHandler(
@@ -128,7 +134,11 @@ class SSHConnection: ObservableObject {
                             SSHAuthBannerHandler(onBanner: onBanner, onAuthSucceeded: onAuthSucceeded)
                         )
                     }
-                }
+            }
+
+            // Create client bootstrap
+            let bootstrap = ClientBootstrap(group: group)
+                .channelInitializer(initializeChannel)
                 .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
                 .connectTimeout(.seconds(30))
 
@@ -142,8 +152,17 @@ class SSHConnection: ObservableObject {
                 channel = try await bootstrap.connect(host: host, port: port).get()
             }
             #else
-            // A Mac reaches the tailnet through the system's Tailscale.
-            channel = try await bootstrap.connect(host: host, port: port).get()
+            if let proxyCommand {
+                // As ssh does: run the command, and SSH goes over its stdin and stdout
+                let proxy = try ProxyCommandProcess(proxyCommand, host: host, port: port, user: username)
+                proxyProcess = proxy
+                channel = try await NIOPipeBootstrap(group: group)
+                    .channelInitializer(initializeChannel)
+                    .takingOwnershipOfDescriptors(input: proxy.readDescriptor, output: proxy.writeDescriptor)
+                    .get()
+            } else {
+                channel = try await bootstrap.connect(host: host, port: port).get()
+            }
             #endif
             self.channel = channel
             Logger.clauntty.debugOnly("SSH TCP connection established")
@@ -159,6 +178,10 @@ class SSHConnection: ObservableObject {
 
         } catch {
             Logger.clauntty.error("SSH connection failed: \(error.localizedDescription)")
+            #if os(macOS)
+            proxyProcess?.terminate()
+            proxyProcess = nil
+            #endif
             SSHAuthPrompts.shared.resolve(self)
             state = .error(error)
             throw error
@@ -169,9 +192,7 @@ class SSHConnection: ObservableObject {
     /// (Tailscale SSH check mode) and is holding authentication until they do
     private func authBannerReceived(_ message: String) {
         Logger.clauntty.debugOnly("SSH banner from \(self.host): \(message)")
-        #if os(iOS)
         TailscaleDebugLog.note("ssh banner from \(host): \(message.replacingOccurrences(of: "\n", with: " "))")
-        #endif
         guard !authSucceeded, let url = SSHAuthPrompts.link(in: message) else { return }
         SSHAuthPrompts.shared.show(for: self, host: host, message: message, url: url) { [weak self] in
             self?.disconnect()
@@ -180,9 +201,7 @@ class SSHConnection: ObservableObject {
 
     private func authSucceededReceived() {
         authSucceeded = true
-        #if os(iOS)
         TailscaleDebugLog.note("ssh auth succeeded for \(host)")
-        #endif
         SSHAuthPrompts.shared.resolve(self)
     }
 
@@ -535,6 +554,10 @@ class SSHConnection: ObservableObject {
         channel = nil
         sshChildChannel = nil
         channelHandler = nil
+        #if os(macOS)
+        proxyProcess?.terminate()
+        proxyProcess = nil
+        #endif
         SSHAuthPrompts.shared.resolve(self)
 
         // Note: We don't shut down the event loop group since we use the global singleton

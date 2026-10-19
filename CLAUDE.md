@@ -355,15 +355,23 @@ shared files need no project change; to change what's excluded, packages or sett
 that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit the Mac pbxproj.
 
 - **Shared code:** platform differences go behind `#if os(iOS)` / `canImport(UIKit)` seams;
-  `Core/Platform.swift` has `PlatformImage`/`PlatformColor`. A new file under `Clauntty/Core`
-  must still be added to `Clauntty.xcodeproj` for iOS (it lists files explicitly).
+  `Core/Platform.swift` has `PlatformImage`/`PlatformColor`/`PlatformApp`. A new file under
+  `Clauntty/Core` must still be added to `Clauntty.xcodeproj` for iOS (it lists files
+  explicitly): `python3 scripts/add-ios-source.py Clauntty/Core/X/New.swift Sibling.swift`.
+- **Connections:** hosts come from `~/.ssh/config` (`ClaunttyMac/Connections/SSHConfig.swift`),
+  opened ones are kept in the shared `ConnectionStore`. Key files via `.sshKey(keyId:
+  "file:<path>")`; `ProxyCommand` (and `ProxyJump`, as `ssh -W`) runs as a process that SSH
+  goes over. With no key, auth falls back to "none", which is all Tailscale SSH needs.
+- **Sessions:** the shared `SessionManager` (workspaces, panes, reconnects) drives the
+  sidebar; `TerminalViews` keeps one terminal view per session object.
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
 - **Testing:** `scripts/mac.sh` is the counterpart of `sim.sh`: `run`, `shot`, `click`, `drag`,
   `scroll`, `type`, `key cmd+t`, `size W H`, `logs`. Input and screenshots go through
-  mac-driver (sim-stream repo), which holds Screen Recording and Accessibility. Test against
-  the SSH container, e.g. `./scripts/mac.sh run -- --host <container ip> --user testuser
-  --password testpass` (spike args, until connections come from `~/.ssh/config`).
+  mac-driver (sim-stream repo), which holds Screen Recording and Accessibility; it refuses
+  input while the screen is locked. Test against the SSH container with a scratch config, so
+  your real hosts aren't touched: `CLAUNTTY_SSH_CONFIG=/tmp/test/config ./scripts/mac.sh run`
+  (a `Host` for the container with an `IdentityFile` authorized for testuser there).
 
 ## Key Info
 

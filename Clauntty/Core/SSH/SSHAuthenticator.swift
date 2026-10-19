@@ -12,6 +12,7 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
 
     private var triedPassword = false
     private var triedKey = false
+    private var triedNone = false
 
     init(username: String, authMethod: AuthMethod, connectionId: UUID) {
         self.username = username
@@ -29,7 +30,7 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
         case .password:
             guard availableMethods.contains(.password), !triedPassword else {
                 // No more auth methods to try
-                nextChallengePromise.succeed(nil)
+                offerNoneOrGiveUp(nextChallengePromise)
                 return
             }
 
@@ -50,7 +51,7 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
                     )
                     nextChallengePromise.succeed(offer)
                 } catch {
-                    nextChallengePromise.succeed(nil)
+                    self.offerNoneOrGiveUp(nextChallengePromise)
                 }
             }
 
@@ -58,7 +59,7 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
             Logger.clauntty.debugOnly("SSH auth: trying publicKey, available=\(availableMethods.contains(.publicKey)), triedKey=\(self.triedKey)")
             guard availableMethods.contains(.publicKey), !triedKey else {
                 Logger.clauntty.debugOnly("SSH auth: no more methods to try")
-                nextChallengePromise.succeed(nil)
+                offerNoneOrGiveUp(nextChallengePromise)
                 return
             }
 
@@ -79,10 +80,23 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
                     Logger.clauntty.debugOnly("SSH auth: offer sent")
                 } catch {
                     Logger.clauntty.error("SSH auth: failed to load SSH key: \(error.localizedDescription)")
-                    nextChallengePromise.succeed(nil)
+                    self.offerNoneOrGiveUp(nextChallengePromise)
                 }
             }
         }
+    }
+
+    /// Last resort, once: the "none" method. Tailscale SSH lets a device on the
+    /// tailnet in with it (no password or key: the tailnet identity is the
+    /// credential); any other server just refuses it.
+    private func offerNoneOrGiveUp(_ promise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>) {
+        guard !triedNone else {
+            promise.succeed(nil)
+            return
+        }
+        triedNone = true
+        Logger.clauntty.debugOnly("SSH auth: trying none")
+        promise.succeed(NIOSSHUserAuthenticationOffer(username: username, serviceName: "ssh-connection", offer: .none))
     }
 
     // MARK: - Credential Loading
@@ -96,6 +110,15 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
     }
 
     private func loadPrivateKey(keyId: String) throws -> NIOSSHPrivateKey {
+        // The Mac app uses the key files ~/.ssh/config names, not keys imported into the Keychain
+        if keyId.hasPrefix(Self.keyFilePrefix) {
+            let path = String(keyId.dropFirst(Self.keyFilePrefix.count))
+            guard let data = FileManager.default.contents(atPath: path) else {
+                throw AuthError.keyNotFound
+            }
+            return try parsePrivateKey(data: data, passphrase: nil)
+        }
+
         // Load key data from Keychain
         guard let keyInfo = try KeychainHelper.getSSHKey(id: keyId) else {
             throw AuthError.keyNotFound
@@ -273,6 +296,9 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
             throw AuthError.unsupportedKeyFormat("Key type '\(keyType)' not supported. Use Ed25519 or ECDSA.")
         }
     }
+
+    /// A key ID that names a key file instead of a Keychain entry: `file:/path/to/key`
+    static let keyFilePrefix = "file:"
 
     enum AuthError: Error, LocalizedError {
         case passwordNotFound

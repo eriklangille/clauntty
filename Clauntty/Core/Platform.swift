@@ -30,3 +30,40 @@ extension NSImage {
     }
 }
 #endif
+
+/// App-level calls shared code makes, per platform.
+@MainActor
+enum PlatformApp {
+    /// The app is in the foreground and may use the network. An iOS app gets
+    /// suspended in the background; a Mac app keeps running either way.
+    static var isActive: Bool {
+        #if canImport(UIKit)
+        UIApplication.shared.applicationState == .active
+        #else
+        true
+        #endif
+    }
+
+    static func open(_ url: URL) async {
+        #if canImport(UIKit)
+        await UIApplication.shared.open(url)
+        #else
+        NSWorkspace.shared.open(url)
+        #endif
+    }
+
+    /// A light tap of haptic feedback where the device has it.
+    static func tapFeedback() {
+        #if canImport(UIKit)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
+    }
+}
+
+#if !os(iOS)
+/// The Mac reaches the tailnet through the system's Tailscale, so there's no
+/// embedded node to log about.
+enum TailscaleDebugLog {
+    static func note(_ message: String) {}
+}
+#endif

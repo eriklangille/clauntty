@@ -11,6 +11,8 @@ struct SavedConnection: Codable, Identifiable, Hashable {
     var lastConnected: Date?
     /// Connect through clauntty's embedded Tailscale node
     var useTailscale: Bool
+    /// An ssh_config ProxyCommand (macOS): SSH runs over its stdin and stdout
+    var proxyCommand: String?
 
     init(
         id: UUID = UUID(),
@@ -20,7 +22,8 @@ struct SavedConnection: Codable, Identifiable, Hashable {
         username: String,
         authMethod: AuthMethod,
         lastConnected: Date? = nil,
-        useTailscale: Bool = false
+        useTailscale: Bool = false,
+        proxyCommand: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -30,10 +33,11 @@ struct SavedConnection: Codable, Identifiable, Hashable {
         self.authMethod = authMethod
         self.lastConnected = lastConnected
         self.useTailscale = useTailscale
+        self.proxyCommand = proxyCommand
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, host, port, username, authMethod, lastConnected, useTailscale
+        case id, name, host, port, username, authMethod, lastConnected, useTailscale, proxyCommand
     }
 
     init(from decoder: Decoder) throws {
@@ -47,6 +51,7 @@ struct SavedConnection: Codable, Identifiable, Hashable {
         lastConnected = try c.decodeIfPresent(Date.self, forKey: .lastConnected)
         // Added later; connections saved before Tailscale support lack it
         useTailscale = try c.decodeIfPresent(Bool.self, forKey: .useTailscale) ?? false
+        proxyCommand = try c.decodeIfPresent(String.self, forKey: .proxyCommand)
     }
 
     /// Whether the host looks like a tailnet address (100.64.0.0/10 or MagicDNS)

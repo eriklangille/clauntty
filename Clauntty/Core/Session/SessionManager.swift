@@ -3,7 +3,6 @@ import NIOCore
 import NIOSSH
 import os.log
 import SwiftUI
-import UIKit
 
 /// Manages all terminal sessions, web tabs, and connection pooling
 /// Reuses SSH connections when opening multiple tabs to the same server
@@ -204,7 +203,8 @@ class SessionManager: ObservableObject {
                 username: config.username,
                 authMethod: config.authMethod,
                 connectionId: config.id,
-                useTailscale: config.useTailscale
+                useTailscale: config.useTailscale,
+                proxyCommand: config.proxyCommand
             )
 
             try await connection.connect()
@@ -291,7 +291,8 @@ class SessionManager: ObservableObject {
             username: config.username,
             authMethod: config.authMethod,
             connectionId: config.id,
-            useTailscale: config.useTailscale
+            useTailscale: config.useTailscale,
+            proxyCommand: config.proxyCommand
         )
         try await connection.connect()
         Logger.clauntty.debugOnly("SessionManager: SSH connection established for \(session.id.uuidString.prefix(8))")
@@ -420,7 +421,7 @@ class SessionManager: ObservableObject {
                 return
             }
             // In the background the foreground handler reconnects it on return
-            guard UIApplication.shared.applicationState == .active else { return }
+            guard PlatformApp.isActive else { return }
             TailscaleDebugLog.note("tab \(session.id.uuidString.prefix(8)) lost its connection, reconnecting")
             Logger.clauntty.debugOnly("SessionManager: active session \(session.id.uuidString.prefix(8)) needs reconnect, triggering auto-reconnect")
             Task {
@@ -440,7 +441,9 @@ class SessionManager: ObservableObject {
         }
 
         // Request notification permission on first session connect
+        #if os(iOS)
         await NotificationManager.shared.requestAuthorizationIfNeeded()
+        #endif
     }
 
     /// Reconnect a disconnected session
@@ -488,7 +491,8 @@ class SessionManager: ObservableObject {
                 username: config.username,
                 authMethod: config.authMethod,
                 connectionId: config.id,
-                useTailscale: config.useTailscale
+                useTailscale: config.useTailscale,
+                proxyCommand: config.proxyCommand
             )
             try await connection.connect()
             connectionPool[poolKey] = connection
@@ -683,7 +687,8 @@ class SessionManager: ObservableObject {
                 username: config.username,
                 authMethod: config.authMethod,
                 connectionId: config.id,
-                useTailscale: config.useTailscale
+                useTailscale: config.useTailscale,
+                proxyCommand: config.proxyCommand
             )
             do {
                 try await connection.connect()
@@ -779,7 +784,8 @@ class SessionManager: ObservableObject {
             username: config.username,
             authMethod: config.authMethod,
             connectionId: config.id,
-            useTailscale: config.useTailscale
+            useTailscale: config.useTailscale,
+            proxyCommand: config.proxyCommand
         )
         try await connection.connect()
         connectionPool[poolKey] = connection
@@ -976,7 +982,8 @@ class SessionManager: ObservableObject {
                 username: config.username,
                 authMethod: config.authMethod,
                 connectionId: config.id,
-                useTailscale: config.useTailscale
+                useTailscale: config.useTailscale,
+                proxyCommand: config.proxyCommand
             )
             try await connection.connect()
             connectionPool[poolKey] = connection
@@ -1261,7 +1268,7 @@ class SessionManager: ObservableObject {
                     Logger.clauntty.error("SessionManager: failed to forward callback port \(port): \(error)")
                 }
             }
-            await UIApplication.shared.open(url)
+            await PlatformApp.open(url)
             Logger.clauntty.debugOnly("Opened browser URL: \(urlString)")
         }
     }
@@ -1326,7 +1333,7 @@ class SessionManager: ObservableObject {
             var retry = false
             do {
                 let data = try await session.downloadFile(path, maxBytes: Self.maxImageBytes)
-                if let image = UIImage(data: data) {
+                if let image = PlatformImage(data: data) {
                     images.append(.init(name: name, image: image))
                 } else {
                     images.append(.init(name: name, error: data.isEmpty ? "File not found or empty" : "Not an image"))
@@ -1346,7 +1353,7 @@ class SessionManager: ObservableObject {
         guard let source = batch.first?.session else { return }
         let host = source.connectionConfig.name.isEmpty ? source.connectionConfig.host : source.connectionConfig.name
         Logger.clauntty.debugOnly("SessionManager: showing \(images.count) image(s) from \(host)")
-        let away = UIApplication.shared.applicationState != .active
+        let away = !PlatformApp.isActive
 
         if UserDefaults.standard.bool(forKey: "agentMode"), windows.allSatisfy({ $0 != nil }) {
             // In the corner of each image's window; nothing opens by itself
@@ -1361,11 +1368,13 @@ class SessionManager: ObservableObject {
                         windowImages[window] = ImageViewerContent(host: host, items: added)
                     }
                 }
+                #if os(iOS)
                 if away {
                     await NotificationManager.shared.scheduleImagesReady(count: added.count, host: host, sessionId: source.id, window: window)
                 }
+                #endif
             }
-            if !away { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            if !away { PlatformApp.tapFeedback() }
         } else {
             if var current = imageViewer {
                 // Already viewing: add the new images and jump to the first of them
@@ -1375,9 +1384,11 @@ class SessionManager: ObservableObject {
             } else {
                 imageViewer = ImageViewerContent(host: host, items: images)
             }
+            #if os(iOS)
             if away {
                 await NotificationManager.shared.scheduleImagesReady(count: images.count, host: host, sessionId: source.id)
             }
+            #endif
         }
 
         for group in Dictionary(grouping: finished, by: { ObjectIdentifier($0.session) }).values {

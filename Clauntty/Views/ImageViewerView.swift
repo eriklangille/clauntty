@@ -3,35 +3,6 @@ import Photos
 import SwiftUI
 import UIKit
 
-/// Images sent from a remote host with `clauntty show`
-struct ImageViewerContent: Identifiable {
-    struct Item: Identifiable {
-        let id = UUID()
-        let name: String
-        let image: UIImage?
-        /// Why the image couldn't be shown (download failed, not an image)
-        let error: String?
-
-        init(name: String, image: UIImage) {
-            self.name = name
-            self.image = image
-            self.error = nil
-        }
-
-        init(name: String, error: String) {
-            self.name = name
-            self.image = nil
-            self.error = error
-        }
-    }
-
-    let id = UUID()
-    let host: String
-    var items: [Item]
-    /// Page to show; set when more images arrive while the viewer is open
-    var selection = 0
-}
-
 /// Full-screen viewer: swipe between images, pinch or double-tap to zoom, swipe down
 /// or tap Done to close
 struct ImageViewerView: View {

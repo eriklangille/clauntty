@@ -8,12 +8,18 @@ let macLog = Logger(subsystem: "com.clauntty.mac", category: "terminal")
 @MainActor
 final class MacGhosttyApp: ObservableObject {
     @Published private(set) var app: ghostty_app_t?
+    /// The app's terminal views, once Ghostty is up
+    @Published private(set) var terminalViews: TerminalViews?
     private var config: ghostty_config_t?
 
     init() {
         guard let cfg = ghostty_config_new() else {
             macLog.error("ghostty_config_new failed")
             return
+        }
+        // The phone's default dark theme, so both look alike
+        if let theme = ThemeManager.shared.defaultTheme(dark: true) {
+            ThemeManager.shared.applyTheme(theme, to: cfg)
         }
         ghostty_config_finalize(cfg)
         config = cfg
@@ -33,6 +39,8 @@ final class MacGhosttyApp: ObservableObject {
             return
         }
         self.app = app
+        ghostty_app_set_color_scheme(app, GHOSTTY_COLOR_SCHEME_DARK)
+        terminalViews = TerminalViews(app: app)
     }
 
     nonisolated static func wakeup(_ userdata: UnsafeMutableRawPointer?) {

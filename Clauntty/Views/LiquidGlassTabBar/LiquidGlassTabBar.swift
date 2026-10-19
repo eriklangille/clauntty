@@ -1,32 +1,6 @@
 import UIKit
 import os.log
 
-/// Unified tab item representing either a terminal session or web tab
-@MainActor
-enum TabItem: Identifiable, Equatable {
-    case terminal(Session)
-    case web(WebTab)
-
-    nonisolated var id: UUID {
-        switch self {
-        // Every pane of a session group is one tab
-        case .terminal(let session): return session.groupId ?? session.id
-        case .web(let webTab): return webTab.id
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .terminal(let session): return session.title
-        case .web(let webTab): return webTab.title
-        }
-    }
-
-    nonisolated static func == (lhs: TabItem, rhs: TabItem) -> Bool {
-        lhs.id == rhs.id
-    }
-}
-
 /// Safari-style liquid glass tab bar with centered active tab
 class LiquidGlassTabBar: UIView {
 

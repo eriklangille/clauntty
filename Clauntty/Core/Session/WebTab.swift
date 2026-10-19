@@ -1,6 +1,5 @@
 import Foundation
 import os.log
-import UIKit
 import WebKit
 
 /// Represents a web tab that displays a forwarded port via WKWebView
@@ -44,7 +43,7 @@ class WebTab: ObservableObject, Identifiable {
     @Published var state: State = .connecting
 
     /// Cached screenshot for tab selector (captured when switching away)
-    var cachedScreenshot: UIImage?
+    var cachedScreenshot: PlatformImage?
 
     /// The actual local port (may differ from requested if using port 0)
     @Published private(set) var localPort: Int
