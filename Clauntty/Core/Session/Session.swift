@@ -373,6 +373,13 @@ class Session: ObservableObject, Identifiable {
     /// ends rather than reconnecting
     var isClosing = false
 
+    /// Its rtach session said it ended (`ended`, rtach 2.22+): its shell exited or it was
+    /// stopped. When the channel closes it ends rather than reconnecting.
+    var hasEnded = false
+
+    /// Called when the rtach session says it ended
+    var onSessionEnded: (() -> Void)?
+
     /// Called when a URL should be opened in the device browser
     var onOpenBrowserRequested: ((String) -> Void)?
 
@@ -720,6 +727,10 @@ class Session: ObservableObject, Identifiable {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path) (inbox \(inboxId ?? "none"), pane \(pane ?? "none"))")
                 onShowImageRequested?(path, inboxId, pane)
             }
+        case "ended":
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach session ended")
+            hasEnded = true
+            onSessionEnded?()
         case "pane":
             let target = parts.count > 1 ? parts[1].split(separator: ";", maxSplits: 1) : []
             if target.count == 2 {

@@ -167,6 +167,11 @@ class SessionManager: ObservableObject {
 
     /// Each connected host's workspaces, from the last refresh
     var knownWorkspaces: [UUID: [RemoteWorkspace]] = [:]
+    /// Each host's own name, from the last refresh (workspace tab ids are made from it)
+    var knownHostNames: [UUID: String] = [:]
+    /// Panes whose session ended: left out of every workspace list, since the host can
+    /// still list one for a moment after it ends
+    var endedPanes: Set<String> = []
     /// Each host's workspace panes. They're shown in their workspace's tab, never as plain tabs.
     var workspacePaneIds: [UUID: Set<String>] = [:]
     /// A workspace action that failed, to show the user
@@ -356,13 +361,13 @@ class SessionManager: ObservableObject {
                     Logger.clauntty.debugOnly("Session \(session.id.uuidString.prefix(8)): channel became inactive, marking disconnected")
                     let sessionGone = session.channelHandler?.exitStatus == RtachDeployer.noSessionExit
                     session.handleChannelInactive()
-                    // Its rtach session ended (closed, or its shell exited): the tab ends
-                    // too, rather than reconnecting. The host's workspaces no longer have
-                    // the pane, so refreshing takes the tab away.
-                    if sessionGone || session.isClosing {
+                    // Its rtach session ended (it said `ended`, or there was none to
+                    // reattach to, or the user closed it): the tab ends too, rather than
+                    // reconnecting
+                    if sessionGone || session.isClosing || session.hasEnded {
                         session.state = .remotelyDeleted
-                        if let self, session.pane != nil {
-                            Task { await self.refreshWorkspaces(for: session.connectionConfig) }
+                        if let self, let pane = session.pane {
+                            self.paneEnded(pane.paneId, config: session.connectionConfig)
                         }
                         return
                     }
@@ -389,6 +394,10 @@ class SessionManager: ObservableObject {
         session.onOpenBrowserRequested = { [weak self, weak session] urlString in
             guard let self = self, let session = session else { return }
             self.handleOpenBrowserRequest(from: session, urlString: urlString)
+        }
+        session.onSessionEnded = { [weak self, weak session] in
+            guard let self, let session, let pane = session.pane else { return }
+            self.paneEnded(pane.paneId, config: session.connectionConfig)
         }
         session.onShowImageRequested = { [weak self, weak session] path, inboxId, pane in
             guard let self = self, let session = session else { return }

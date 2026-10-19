@@ -217,17 +217,47 @@ extension SessionManager {
     /// Close what a tab shows: in a workspace, end the pane shown (the last one takes
     /// the workspace and its tab along); a plain tab (no rtach) closes its session
     func closeTab(_ session: Session) {
-        if let groupId = session.groupId {
+        if session.groupId != nil, let paneId = session.pane?.paneId {
             session.isClosing = true
+            let config = session.connectionConfig
+            // Gone now, not when the host answers. That takes the group too if it was
+            // its last pane, so the close below doesn't look the group up.
+            paneEnded(paneId, config: config, refresh: false)
             Task {
-                await performPaneAction(.close, groupId: groupId)
-                // Still there (closing failed): it reconnects as usual again
-                if let paneId = session.pane?.paneId, workspacePaneIds[session.connectionConfig.id]?.contains(paneId) == true {
+                do {
+                    _ = try await withHost(config) { connection in
+                        try await RtachDeployer(connection: connection)
+                            .workspaceCommand(["close", paneId, "--quiet"], as: WorkspacePaneClosed.self)
+                    }
+                } catch {
+                    workspaceMessage = error.localizedDescription
+                }
+                await refreshWorkspaces(for: config)
+                // Still there (closing failed): it comes back
+                if workspacePaneIds[config.id]?.contains(paneId) == true {
                     session.isClosing = false
+                    endedPanes.remove(paneId)
+                    if let workspaces = knownWorkspaces[config.id] {
+                        applyWorkspaces(workspaces, hostName: knownHostNames[config.id], config: config)
+                    }
                 }
             }
         } else {
             closeSession(session)
+        }
+    }
+
+    /// A pane's session ended (its shell exited, it was stopped, or the user closed it):
+    /// take it out of the host's last known workspaces now, so its tab goes (or shows the
+    /// workspace's next pane) without waiting for the host, then check with the host
+    func paneEnded(_ paneId: String, config: SavedConnection, refresh: Bool = true) {
+        guard endedPanes.insert(paneId).inserted else { return }
+        Logger.clauntty.debugOnly("SessionManager: pane \(paneId.prefix(8)) ended")
+        if let workspaces = knownWorkspaces[config.id] {
+            applyWorkspaces(workspaces, hostName: knownHostNames[config.id], config: config)
+        }
+        if refresh {
+            Task { await refreshWorkspaces(for: config) }
         }
     }
 
@@ -266,9 +296,12 @@ extension SessionManager {
     }
 
     /// Make the group tabs match a host's workspaces
-    func applyWorkspaces(_ workspaces: [RemoteWorkspace], hostName: String?, config: SavedConnection) {
-        knownWorkspaces[config.id] = workspaces
-        workspacePaneIds[config.id] = Set(workspaces.flatMap { $0.tabs.flatMap { $0.panes.map(\.id) } })
+    func applyWorkspaces(_ listed: [RemoteWorkspace], hostName: String?, config: SavedConnection) {
+        knownWorkspaces[config.id] = listed
+        if let hostName { knownHostNames[config.id] = hostName }
+        // As the host lists them, so a pane that failed to close shows up here
+        workspacePaneIds[config.id] = Set(listed.flatMap { $0.tabs.flatMap { $0.panes.map(\.id) } })
+        let workspaces = endedPanes.isEmpty ? listed : listed.compactMap { $0.without(endedPanes) }
         var shown = Set<UUID>()
 
         for workspace in workspaces {

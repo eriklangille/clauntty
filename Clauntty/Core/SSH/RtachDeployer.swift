@@ -111,7 +111,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.21.0"
+    static let expectedVersion = "2.22.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -865,6 +865,15 @@ struct RemoteWorkspace: Decodable, Equatable {
         let title: String?
         /// What its master says is happening in it
         let state: RemotePaneState?
+    }
+
+    /// Without some panes: tabs left empty go, and the workspace too if none are left
+    func without(_ paneIds: Set<String>) -> RemoteWorkspace? {
+        let kept = tabs.compactMap { tab -> Tab? in
+            let panes = tab.panes.filter { !paneIds.contains($0.id) }
+            return panes.isEmpty ? nil : Tab(id: tab.id, name: tab.name, panes: panes)
+        }
+        return kept.isEmpty ? nil : RemoteWorkspace(id: id, name: name, cwd: cwd, tabs: kept)
     }
 }
 

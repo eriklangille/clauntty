@@ -1162,11 +1162,8 @@ struct AgentSwitcherView: View {
             }
             actions.append(.init(id: "ports", title: "Ports", icon: "globe") { onPorts(session) })
             actions.append(.init(id: "close", title: "Close", icon: "xmark", isDestructive: true) {
-                if let workspace {
-                    Task { await sessionManager.performPaneAction(.close, groupId: workspace) }
-                } else {
-                    sessionManager.closeTab(session)
-                }
+                // Ends the pane shown; its window goes (or shows the next pane) right away
+                sessionManager.closeTab(session)
             })
         }
         let terminals = panes.isEmpty ? [TabPane(id: "session", title: session.title, status: .none, group: 0)] : panes
