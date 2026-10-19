@@ -85,7 +85,7 @@ struct PaneSwitcher: View {
             }
         }
         .frame(width: 520)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .glass(in: .rect(cornerRadius: 14))
         // After the terminal has let go of the keyboard
         .onAppear { DispatchQueue.main.async { fieldFocused = true } }
         .onChange(of: query) { _, _ in selected = 0 }

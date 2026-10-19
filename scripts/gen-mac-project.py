@@ -84,7 +84,7 @@ def main():
         "CLANG_ENABLE_OBJC_ARC": "YES",
         "COPY_PHASE_STRIP": "NO",
         "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
-        "MACOSX_DEPLOYMENT_TARGET": "26.0",
+        "MACOSX_DEPLOYMENT_TARGET": "14.0",
         "SDKROOT": "macosx",
     }
     project_debug = {**project_common,

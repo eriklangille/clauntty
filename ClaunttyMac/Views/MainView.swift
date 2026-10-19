@@ -141,7 +141,7 @@ struct HostPicker: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .glassEffect(.regular, in: .rect(cornerRadius: 10))
+                            .glass(in: .rect(cornerRadius: 10))
                         }
                     }
                     .frame(maxWidth: 360)
@@ -173,6 +173,18 @@ extension MainView {
               let session = sessionManager.currentSession(of: group) else { return }
         if sessionManager.activeSession?.id != session.id {
             sessionManager.switchTo(session)
+        }
+    }
+}
+
+extension View {
+    /// Liquid glass on macOS 26, the blurred material before it
+    @ViewBuilder
+    func glass<S: Shape>(in shape: S) -> some View {
+        if #available(macOS 26, *) {
+            glassEffect(.regular, in: shape)
+        } else {
+            background(.regularMaterial, in: shape)
         }
     }
 }

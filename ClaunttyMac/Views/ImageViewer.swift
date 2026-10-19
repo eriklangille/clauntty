@@ -78,7 +78,7 @@ struct ImageViewer: View {
         .font(.title3)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .glassEffect(.regular, in: .capsule)
+        .glass(in: .capsule)
         .frame(maxWidth: 640)
     }
 
@@ -100,7 +100,7 @@ struct ImageViewer: View {
         .font(.title3)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .glassEffect(.regular, in: .capsule)
+        .glass(in: .capsule)
     }
 
     private func turn(_ offset: Int, count: Int) {

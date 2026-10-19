@@ -242,7 +242,7 @@ struct TerminalStatusOverlay: View {
                 .padding(.vertical, 7)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: .capsule)
+        .glass(in: .capsule)
         .disabled(action == nil)
     }
 }
