@@ -1088,6 +1088,13 @@ class SessionManager: ObservableObject {
         moveTab(from: sourceIndex, to: destination)
     }
 
+    /// Move a tab to another's place: after it if it was above, before it if below
+    func moveTab(id: UUID, to other: UUID) {
+        ensureTabOrderComplete()
+        guard let source = tabOrder.firstIndex(of: id), let destination = tabOrder.firstIndex(of: other) else { return }
+        moveTab(from: source, to: destination)
+    }
+
     /// Move a tab to the end of the order
     func moveTabToEnd(id: UUID) {
         // Ensure tabOrder is complete before moving

@@ -75,6 +75,22 @@ struct AgentSwitcherView: View {
     /// When the screen last rotated: the keyboard hides and shows again as it does, which
     /// isn't putting it away
     @State private var rotatedAt = Date.distantPast
+    /// The window held in the overview to move it: it follows the finger, the windows
+    /// shrink so most fit, and the others make room
+    @State private var moving: UUID?
+    /// The finger on screen while moving
+    @State private var moveY: CGFloat = 0
+    /// Where the finger holds the moving window, from its top
+    @State private var moveGrab: CGFloat = 0
+    /// Whether the finger's place in the moving window is known (from its first drag)
+    @State private var moveGrabbed = false
+    /// The windows it moves among: the terminals, or the web tabs with windows of their own
+    @State private var moveList: [UUID] = []
+    /// How far the overview scrolls with the windows shrunk: the edges scroll it
+    @State private var moveMaxScroll: CGFloat = 0
+    /// Where the moved window was let go, from the top of the view: it stays there as the
+    /// windows grow back
+    @State private var dropTop: CGFloat = 0
 
     enum DragMode {
         /// A quick swipe: the next or previous window
@@ -148,6 +164,7 @@ struct AgentSwitcherView: View {
             let laidOut = zip(items, specs).map { item, spec in fullscreen && focused != item.id ? 0 : spec.height }
                 + loose.map { web in
                     if fullscreen { return focused == web.id ? size.height : 0 }
+                    if moving != nil { return Self.movingHeight(width: webWidth, size: size) }
                     if focused == web.id { return max(160, barTop(size) - Self.peek - 10) }
                     return Self.webHeight(width: webWidth, size: size)
                 }
@@ -183,11 +200,14 @@ struct AgentSwitcherView: View {
                 ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                     let hidden = fullscreen && focused != item.id
                     window(for: item.session, tabId: item.id, index: i, spec: specs[i], size: size,
-                           menuRoom: menuRoom(top: tops[i] + offset, size: size))
+                           menuRoom: menuRoom(top: tops[i] + offset, size: size)) { phase in
+                        move(item.id, phase, among: items.map(\.id), ids: ids, tops: tops, heights: laidOut, maxScroll: maxScroll)
+                    }
                         .frame(height: hidden ? 0 : specs[i].height, alignment: .top)
                         // Its open menu reaches over the windows below
                         .clipShape(WindowClip(isOff: menuLifted == item.id))
-                        .zIndex(menuLifted == item.id ? 1 : 0)
+                        .modifier(Lifted(isOn: moving == item.id, offset: movedTop - tops[i]))
+                        .zIndex(moving == item.id ? 2 : menuLifted == item.id ? 1 : 0)
                         .opacity(hidden ? 0 : 1)
                         .allowsHitTesting(!hidden)
                 }
@@ -207,11 +227,16 @@ struct AgentSwitcherView: View {
                         menuRoom: menuRoom(top: tops[items.count + i] + offset, size: size),
                         onMenu: { open in setMenu(open ? web.id : nil) },
                         onOpen: { openWeb(web) },
-                        onExit: { exitWeb() }
+                        onExit: { exitWeb() },
+                        canMove: canMove(web.id),
+                        onMove: { phase in
+                            move(web.id, phase, among: loose.map(\.id), ids: ids, tops: tops, heights: laidOut, maxScroll: maxScroll)
+                        }
                     )
                     .frame(height: hidden ? 0 : laidOut[items.count + i], alignment: .top)
                     .clipShape(WindowClip(isOff: menuLifted == web.id))
-                    .zIndex(menuLifted == web.id ? 1 : 0)
+                    .modifier(Lifted(isOn: moving == web.id, offset: movedTop - tops[items.count + i]))
+                    .zIndex(moving == web.id ? 2 : menuLifted == web.id ? 1 : 0)
                     .opacity(hidden ? 0 : 1)
                     .allowsHitTesting(!hidden)
                 }
@@ -319,12 +344,23 @@ struct AgentSwitcherView: View {
             }
             // A window closed: the overview stays within its ends
             .onChange(of: maxScroll) { _, limit in
+                if moving != nil { moveMaxScroll = limit }
                 if scrollOffset > limit { withAnimation(snap) { scrollOffset = limit } }
+            }
+            // Moving a window, the edges scroll the overview under it: it may pass another
+            .onChange(of: scrollOffset) {
+                if moving != nil { makeRoom(ids: ids, tops: tops, heights: laidOut) }
+            }
+            // A moved window let go: it stays where it is on screen as the windows grow back
+            .onChange(of: moving) { old, new in
+                guard new == nil, let old, let i = ids.firstIndex(of: old) else { return }
+                withAnimation(snap) { scrollOffset = min(max(0, tops[i] - dropTop), maxScroll) }
             }
             // The window typed into closed: back to the overview (or, from a web tab, to
             // the terminal typed into before)
             .onChange(of: ids) { _, ids in
                 if let menuWindow, !ids.contains(menuWindow) { self.menuWindow = nil }
+                if let moving, !ids.contains(moving) { self.moving = nil }
                 if let focused, !ids.contains(focused) {
                     if webReturn != nil { return exitWeb() }
                     withAnimation(snap) {
@@ -470,12 +506,14 @@ struct AgentSwitcherView: View {
             // From where it settles (the first window has nothing above to peek) down to
             // the key bar, so nothing is left to show between them
             if isFocused { return .focused(maxHeight: max(160, barTop(size) - Self.anchor(for: i) - 10)) }
-            return status == .blocked ? .blocked : .collapsed
+            return status == .blocked && moving == nil ? .blocked : .collapsed
         }()
         var height = SwitcherWindow.height(cursor: session.cursorRow, mode: mode, isAgent: isAgent,
                                            terminalSize: terminalSize, windowWidth: width)
         // Showing its web tab, a collapsed window is a web window's height
-        if !isFocused, webShown(in: tabId) != nil { height = Self.webHeight(width: width, size: size) }
+        if !isFocused, webShown(in: tabId) != nil {
+            height = moving != nil ? Self.movingHeight(width: width, size: size) : Self.webHeight(width: width, size: size)
+        }
         return WindowSpec(mode: mode, isAgent: isAgent, status: status, terminalSize: terminalSize, width: width, height: height)
     }
 
@@ -525,8 +563,9 @@ struct AgentSwitcherView: View {
                        maxScroll: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
-                // Holding a pill: the finger is choosing from its menu
-                guard menuWindow == nil else { return }
+                // Holding a pill: the finger is choosing from its menu. Holding a window:
+                // moving it.
+                guard menuWindow == nil, moving == nil else { return }
                 let dx = value.translation.width
                 let dy = value.translation.height
                 if focused == nil {
@@ -566,7 +605,7 @@ struct AgentSwitcherView: View {
                 let projected = value.predictedEndTranslation.height
                 let mode = dragMode
                 dragMode = nil
-                guard menuWindow == nil else { return }
+                guard menuWindow == nil, moving == nil else { return }
                 if focused != nil && mode == .scroll {
                     let duration = value.time.timeIntervalSince(dragStart)
                     let average = abs(dy) / max(0.05, duration)
@@ -685,6 +724,83 @@ struct AgentSwitcherView: View {
         withAnimation(snap) { index = target }
     }
 
+    // MARK: Moving
+
+    /// Windows move in the overview, one at a time
+    private func canMove(_ id: UUID) -> Bool {
+        focused == nil && !fullscreen && menuWindow == nil && (moving == nil || moving == id)
+    }
+
+    /// The moving window's top in the layout: under the finger
+    private var movedTop: CGFloat { moveY - originY + scrollOffset - moveGrab }
+
+    /// A window held in the overview lifts and follows the finger among `list` (the
+    /// terminals, or the web tabs of their own). `ids`, `tops` and `heights` are the layout.
+    private func move(_ id: UUID, _ phase: WindowMove, among list: [UUID], ids: [UUID], tops: [CGFloat],
+                      heights: [CGFloat], maxScroll: CGFloat) {
+        switch phase {
+        case .lift:
+            guard canMove(id), moving == nil, let i = ids.firstIndex(of: id) else { return }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            // It stays where it is until the finger moves
+            moveGrab = 0
+            moveY = originY + tops[i] - scrollOffset
+            moveGrabbed = false
+            moveList = list
+            moveMaxScroll = maxScroll
+            withAnimation(snap) { moving = id }
+            scrollAtEdges()
+        case .drag(let y):
+            guard moving == id, let i = ids.firstIndex(of: id) else { return }
+            if !moveGrabbed {
+                // Shrunk, the window stays under the finger: where it holds it, or its
+                // bottom
+                moveGrabbed = true
+                moveGrab = min(max(16, y - (moveY - moveGrab)), heights[i] - 16)
+            }
+            moveY = y
+            makeRoom(ids: ids, tops: tops, heights: heights)
+        case .drop:
+            guard moving == id, let i = ids.firstIndex(of: id) else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            dropTop = tops[i] - scrollOffset
+            // After the other gestures the finger ends: lifting it isn't a swipe or a scroll
+            DispatchQueue.main.async { withAnimation(snap) { moving = nil } }
+        }
+    }
+
+    /// The moving window's middle passed the middle of the window above or below: they
+    /// swap
+    private func makeRoom(ids: [UUID], tops: [CGFloat], heights: [CGFloat]) {
+        guard let moving, let i = ids.firstIndex(of: moving), tops.count == ids.count else { return }
+        let middle = movedTop + heights[i] / 2
+        let other: UUID? = {
+            if i + 1 < ids.count, moveList.contains(ids[i + 1]), middle > tops[i + 1] + heights[i + 1] / 2 { return ids[i + 1] }
+            if i > 0, moveList.contains(ids[i - 1]), middle < tops[i - 1] + heights[i - 1] / 2 { return ids[i - 1] }
+            return nil
+        }()
+        guard let other else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        withAnimation(snap) { sessionManager.moveTab(id: moving, to: other) }
+    }
+
+    /// While a window moves, a finger near the top or bottom scrolls the overview, faster
+    /// the closer it is
+    private func scrollAtEdges() {
+        Task { @MainActor in
+            let zone: CGFloat = 70
+            while moving != nil {
+                try? await Task.sleep(for: .milliseconds(16))
+                let y = moveY - originY
+                let bottom = UIScreen.main.bounds.height - originY - Self.collapsedBar
+                let step: CGFloat = y < zone ? -(zone - y) / zone * 14
+                    : y > bottom - zone ? (y - bottom + zone) / zone * 14 : 0
+                let next = min(max(0, scrollOffset + step), moveMaxScroll)
+                if next != scrollOffset { scrollOffset = next }
+            }
+        }
+    }
+
     // MARK: Windows
 
     /// Terminal tabs, in tab order: windows stay where they are whatever their agents do
@@ -708,6 +824,12 @@ struct AgentSwitcherView: View {
     /// A web window: its pill over the top of the page
     static func webHeight(width: CGFloat, size: CGSize) -> CGFloat {
         pillStrip + 200 * (width / size.width) + SwitcherWindow.bottomPad
+    }
+
+    /// A page's window while one is moved: a collapsed terminal's height
+    static func movingHeight(width: CGFloat, size: CGSize) -> CGFloat {
+        SwitcherWindow.height(cursor: nil, mode: .collapsed, isAgent: false,
+                              terminalSize: CGSize(width: size.width, height: size.height - pillStrip), windowWidth: width)
     }
 
     /// A page's size: the screen below the pill, in every mode (so fullscreen is a zoom)
@@ -744,7 +866,7 @@ struct AgentSwitcherView: View {
     }
 
     private func window(for session: Session, tabId: UUID, index i: Int, spec: WindowSpec, size: CGSize,
-                        menuRoom: CGFloat) -> some View {
+                        menuRoom: CGFloat, onMove: @escaping (WindowMove) -> Void) -> some View {
         let info = sessionManager.panes(for: session)
         let panes = info?.panes ?? []
         let activeIndex = info?.activeIndex ?? 0
@@ -781,7 +903,9 @@ struct AgentSwitcherView: View {
                 // A page opened from elsewhere goes back there; one swiped to in this
                 // window stays in it
                 if let web, !fullscreen { openWeb(web) } else if web != nil, webReturn != nil { exitWeb() } else { setFullscreen(!fullscreen) }
-            }
+            },
+            canMove: canMove(tabId),
+            onMove: onMove
         )
     }
 
@@ -924,6 +1048,8 @@ struct AgentSwitcherView: View {
     /// Show the workspace's next or previous pane in this window: its terminals, then its
     /// web tabs
     private func swipe(_ windowId: UUID, session: Session, step: Int) {
+        // The end of a move, not a swipe
+        guard moving == nil else { return }
         let info = sessionManager.panes(for: session)
         let terminals = max(1, info?.panes.count ?? 0)
         let webs = webPanes(of: windowId)
@@ -1066,6 +1192,9 @@ struct SwitcherWindow: View {
     let onTap: () -> Void
     let onSwipe: (Int) -> Void
     let onFullscreen: () -> Void
+    /// In the overview: held, it moves
+    let canMove: Bool
+    let onMove: (WindowMove) -> Void
 
     enum Mode: Equatable {
         /// The last couple of lines: what the agent said, or the shell's prompt
@@ -1245,6 +1374,7 @@ struct SwitcherWindow: View {
                         including: isFocused && web == nil ? .all : .subviews
                     )
                     .simultaneousGesture(swipeGesture)
+                    .modifier(MoveHold(isOn: canMove, onMove: onMove))
             }
         }
         .frame(width: windowWidth, height: windowHeight)
@@ -1386,6 +1516,8 @@ struct WebWindow: View {
     let onMenu: (Bool) -> Void
     let onOpen: () -> Void
     let onExit: () -> Void
+    let canMove: Bool
+    let onMove: (WindowMove) -> Void
 
     @State private var pullDown: CGFloat = 0
 
@@ -1403,6 +1535,7 @@ struct WebWindow: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onOpen)
+                    .modifier(MoveHold(isOn: canMove, onMove: onMove))
             }
         }
         .frame(width: windowWidth, height: windowHeight)
@@ -1462,6 +1595,64 @@ struct WebWindow: View {
                 withAnimation(.spring(duration: 0.35)) { pullDown = 0 }
                 if exit { onExit() }
             }
+    }
+}
+
+/// A window held in the overview: lifted, moved by the finger, let go
+enum WindowMove {
+    /// Held long enough (where the finger is comes with the first drag)
+    case lift
+    /// The finger at `y` on screen
+    case drag(y: CGFloat)
+    case drop
+}
+
+/// Hold a window to move it. Reports where the finger is on screen. (A drag tracking the
+/// finger from its touch, beside the hold, kept the hold from ever starting.)
+private struct MoveHold: ViewModifier {
+    let isOn: Bool
+    let onMove: (WindowMove) -> Void
+
+    @State private var lifted = false
+    /// Back to false when the finger lifts or the touch is cancelled
+    @GestureState private var held = false
+
+    func body(content: Content) -> some View {
+        content
+            .gesture(
+                LongPressGesture(minimumDuration: 0.4)
+                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+                    .updating($held) { value, state, _ in
+                        if case .second(true, _) = value { state = true }
+                    }
+                    .onChanged { value in
+                        guard case .second(true, let drag) = value else { return }
+                        if !lifted {
+                            lifted = true
+                            onMove(.lift)
+                        }
+                        if let drag { onMove(.drag(y: drag.location.y)) }
+                    },
+                including: isOn ? .all : .subviews
+            )
+            .onChange(of: held) { _, held in
+                guard !held, lifted else { return }
+                lifted = false
+                onMove(.drop)
+            }
+    }
+}
+
+/// The moving window: over the others, a little bigger, following the finger
+private struct Lifted: ViewModifier {
+    let isOn: Bool
+    let offset: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isOn ? 1.03 : 1)
+            .shadow(color: .black.opacity(isOn ? 0.5 : 0), radius: 18, y: 8)
+            .offset(y: isOn ? offset : 0)
     }
 }
 
