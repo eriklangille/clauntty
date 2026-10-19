@@ -1,5 +1,6 @@
 import SwiftUI
 import os.log
+import RtachClient
 
 /// Wrapper class to hold terminal surface reference (works with SwiftUI @StateObject)
 @MainActor
@@ -356,6 +357,20 @@ struct TerminalView: View {
         session.scheduleCursorUpdate()
         session.readTerminalText = { [weak surface] wholeScreen in
             surface?.captureVisibleText(wholeScreen: wholeScreen, styled: true)
+        }
+
+        // Another device (a laptop) in use: the terminal is drawn at its size; a tap
+        // takes the pane back
+        let otherDeviceGrid = { (size: RtachClient.PtySize?) -> (rows: UInt16, columns: UInt16)? in
+            guard let size, !size.yours else { return nil }
+            return (size.rows, size.cols)
+        }
+        session.onPtySizeChanged = { [weak surface] size in
+            surface?.setOtherDeviceGrid(otherDeviceGrid(size))
+        }
+        surface.setOtherDeviceGrid(otherDeviceGrid(session.ptySize))
+        surface.onUseHere = { [weak session] in
+            session?.claimActive()
         }
 
         // Set up callback for terminal title changes → session title

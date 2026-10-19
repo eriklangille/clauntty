@@ -595,6 +595,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                 Logger.clauntty.debugOnly("TAB_SWITCH[\(view.sessionId)]: terminal resized to \(columns)x\(rows), notifying SSH")
                 view.appliedTerminalSize = (rows, columns)
                 view.onTerminalSizeChanged?(rows, columns)
+                view.releaseHeldOutput(resizedTo: (rows, columns))
             }
         }
 
@@ -956,7 +957,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     private let pinchScaleThreshold: CGFloat = 0.15
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-        guard let surface = self.surface else { return }
+        // At another device's grid the terminal is scaled to fit: bigger cells would only
+        // be scaled down more
+        guard let surface = self.surface, otherDeviceGrid == nil else { return }
 
         switch gesture.state {
         case .began:
@@ -1070,6 +1073,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: self)
+
+        // Another device has the pane: a tap takes it back (its size, then the keyboard).
+        // Not a click: the terminal is scaled, so the point would land elsewhere.
+        if otherDeviceGrid != nil {
+            onUseHere?()
+            if !isFirstResponder {
+                _ = becomeFirstResponder()
+            }
+            return
+        }
 
         // Clear any existing selection
         clearSelection()
@@ -1458,6 +1471,10 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// A tap on agent mode's window, whose terminal doesn't take touches: a click when a
     /// TUI takes the mouse, else the paste menu at the cursor
     func windowTap(at location: CGPoint) {
+        if otherDeviceGrid != nil {
+            onUseHere?()
+            return
+        }
         if isEditMenuVisible {
             dismissEditMenu()
             return
@@ -1851,13 +1868,33 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         Logger.clauntty.verbose("sizeDidChange: \(Int(size.width))x\(Int(size.height))pt @\(scale)x = \(pixelWidth)x\(pixelHeight)px")
 
         ghostty_surface_set_content_scale(surface, scale, scale)
-        ghostty_surface_set_size(surface, pixelWidth, pixelHeight)
-
-        // Update sublayer frame and scale to match
-        if let sublayer = ghosttySublayer {
-            sublayer.frame = CGRect(origin: .zero, size: size)
-            sublayer.contentsScale = scale
+        var (width, height, fit) = surfacePixelSize(surface, fitting: pixelWidth, pixelHeight)
+        ghostty_surface_set_size(surface, width, height)
+        // From a size whose grid was clamped (a 1x1 surface not laid out yet), the
+        // estimate misses: size again from the one just set, which isn't
+        if let grid = otherDeviceGrid {
+            let set = ghostty_surface_size(surface)
+            if set.columns != grid.columns || set.rows != grid.rows {
+                (width, height, fit) = surfacePixelSize(surface, fitting: pixelWidth, pixelHeight)
+                ghostty_surface_set_size(surface, width, height)
+            }
         }
+
+        // Update sublayer frame and scale to match. Its bounds times contentsScale must be
+        // the surface's pixel size exactly, or Ghostty discards every frame (half a pixel
+        // over, since that's truncated). Scaled down from the top left for another
+        // device's grid.
+        if let sublayer = ghosttySublayer {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            sublayer.anchorPoint = .zero
+            sublayer.position = .zero
+            sublayer.bounds = CGRect(x: 0, y: 0, width: (CGFloat(width) + 0.5) / scale, height: (CGFloat(height) + 0.5) / scale)
+            sublayer.transform = CATransform3DMakeScale(fit, fit, 1)
+            sublayer.contentsScale = scale
+            CATransaction.commit()
+        }
+        layoutOtherDevicePill(below: CGFloat(height) / scale * fit, in: size)
 
         // Query terminal grid size and notify if changed
         let surfaceSize = ghostty_surface_size(surface)
@@ -1940,8 +1977,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         CATransaction.commit()
 
         // Also do size toggle
-        ghostty_surface_set_size(surface, w, h - 40)
-        ghostty_surface_set_size(surface, w, h)
+        let (width, height, _) = surfacePixelSize(surface, fitting: w, h)
+        ghostty_surface_set_size(surface, width, height - 40)
+        ghostty_surface_set_size(surface, width, height)
         ghostty_surface_refresh(surface)
 
         Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: hide/show + size toggle completed")
@@ -2180,6 +2218,130 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         return "cursor=(\(Int(x)),\(Int(y))) altScreen=\(altScreen) grid=\(size.columns)x\(size.rows)"
     }
 
+    // MARK: - Another Device's Size
+
+    /// The grid another device attached to this pane gave it (a laptop that's being typed
+    /// on), or nil while it's this phone's. The terminal is then drawn at that grid and
+    /// scaled down to fit, instead of piling the other device's long lines into this
+    /// view's last column.
+    private(set) var otherDeviceGrid: (rows: UInt16, columns: UInt16)?
+
+    /// Take the pane back from the other device (a tap while it has it)
+    var onUseHere: (() -> Void)?
+
+    /// Output that arrived while the terminal resizes for a grid change from rtach, and
+    /// the grid it waits for. The size message comes before the program's redraw for the
+    /// new size, but the terminal resizes about 25ms after set_size, on the termio thread:
+    /// written meanwhile, the redraw would land in the old grid.
+    private var heldOutput: [Data]?
+    private var heldOutputGrid: (rows: UInt16, columns: UInt16)?
+
+    /// Draw the terminal at another device's grid (nil: this view's own again)
+    func setOtherDeviceGrid(_ grid: (rows: UInt16, columns: UInt16)?) {
+        guard grid?.rows != otherDeviceGrid?.rows || grid?.columns != otherDeviceGrid?.columns else { return }
+        Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: other device's grid \(grid.map { "\($0.columns)x\($0.rows)" } ?? "none")")
+        otherDeviceGrid = grid
+        // Selection and right-click points would land elsewhere in the scaled terminal
+        for recognizer in gestureRecognizers ?? [] {
+            if recognizer is UILongPressGestureRecognizer {
+                recognizer.isEnabled = grid == nil
+            } else if let tap = recognizer as? UITapGestureRecognizer, tap.numberOfTouchesRequired == 2 {
+                tap.isEnabled = grid == nil
+            }
+        }
+        if grid != nil { clearSelection() }
+        otherDevicePill.isHidden = grid == nil
+
+        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+        sizeDidChange(CGSize(width: bounds.width, height: bounds.height - accessoryBarReserve))
+
+        // Hold output until the terminal has the new grid (if it changes at all)
+        let target = terminalSize
+        if let applied = appliedTerminalSize, applied == target { return }
+        heldOutputGrid = target
+        if heldOutput == nil { heldOutput = [] }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, let held = self.heldOutputGrid, held == target else { return }
+            Logger.clauntty.debugOnly("TAB_SWITCH[\(self.sessionId)]: resize to \(target.columns)x\(target.rows) not seen, writing held output")
+            self.releaseHeldOutput(resizedTo: nil)
+        }
+    }
+
+    /// Write the output held for a resize, once the terminal has the grid it waited for
+    /// (nil: write it anyway)
+    fileprivate func releaseHeldOutput(resizedTo grid: (rows: UInt16, columns: UInt16)?) {
+        guard let held = heldOutput, let expected = heldOutputGrid else { return }
+        if let grid, grid != expected { return }
+        heldOutput = nil
+        heldOutputGrid = nil
+        held.forEach(writeSSHOutput)
+    }
+
+    /// Says another device has the pane, under the terminal scaled down for it. Touches go
+    /// through to the terminal, where a tap takes the pane back.
+    private lazy var otherDevicePill: UIView = {
+        let pill = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+        pill.layer.cornerRadius = 16
+        pill.clipsToBounds = true
+        pill.isUserInteractionEnabled = false
+        pill.isHidden = true
+
+        let icon = UIImageView(image: UIImage(systemName: "laptopcomputer"))
+        icon.tintColor = .white
+        icon.contentMode = .scaleAspectFit
+        let label = UILabel()
+        label.text = "In use on another device"
+        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.textColor = .white
+        let hint = UILabel()
+        hint.text = "Tap to use here"
+        hint.font = .systemFont(ofSize: 14)
+        hint.textColor = UIColor.white.withAlphaComponent(0.6)
+
+        let stack = UIStackView(arrangedSubviews: [icon, label, hint])
+        stack.spacing = 8
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        pill.contentView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: pill.contentView.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: pill.contentView.trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: pill.contentView.topAnchor, constant: 7),
+            stack.bottomAnchor.constraint(equalTo: pill.contentView.bottomAnchor, constant: -7),
+        ])
+        addSubview(pill)
+        return pill
+    }()
+
+    /// Put the pill under the terminal's scaled content (`contentHeight` points tall),
+    /// inside the view's terminal area (`size`)
+    private func layoutOtherDevicePill(below contentHeight: CGFloat, in size: CGSize) {
+        guard otherDeviceGrid != nil else { return }
+        let pill = otherDevicePill
+        let fitting = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        let width = min(fitting.width, size.width - 24)
+        let y = min(contentHeight + 16, size.height - fitting.height - 12)
+        pill.frame = CGRect(x: (size.width - width) / 2, y: max(12, y), width: width, height: fitting.height)
+        bringSubviewToFront(pill)
+    }
+
+    /// The surface's pixel size for a view of the given pixels: the view's, or for another
+    /// device's grid that grid's cells plus this view's padding. Plus how much to scale it
+    /// down to fit the view.
+    private func surfacePixelSize(_ surface: ghostty_surface_t, fitting width: UInt32, _ height: UInt32) -> (UInt32, UInt32, CGFloat) {
+        guard let grid = otherDeviceGrid else { return (width, height, 1) }
+        let current = ghostty_surface_size(surface)
+        guard current.cell_width_px > 0, current.cell_height_px > 0 else { return (width, height, 1) }
+        // What the current size has around its cells: the padding, plus less than a cell
+        // left over. The same around the new grid gives exactly that grid.
+        let extraWidth = Int(current.width_px) - Int(current.columns) * Int(current.cell_width_px)
+        let extraHeight = Int(current.height_px) - Int(current.rows) * Int(current.cell_height_px)
+        let gridWidth = UInt32(Int(grid.columns) * Int(current.cell_width_px) + max(0, extraWidth))
+        let gridHeight = UInt32(Int(grid.rows) * Int(current.cell_height_px) + max(0, extraHeight))
+        let fit = min(1, CGFloat(width) / CGFloat(gridWidth), CGFloat(height) / CGFloat(gridHeight))
+        return (gridWidth, gridHeight, fit)
+    }
+
     // MARK: - SSH Data Flow
 
     /// Write SSH output to the terminal for display
@@ -2190,6 +2352,10 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// that mailbox, calling from main thread would deadlock.
     func writeSSHOutput(_ data: Data) {
         Logger.clauntty.verbose("DATA_FLOW[\(self.sessionId)]: writeSSHOutput called with \(data.count) bytes")
+        if heldOutput != nil {
+            heldOutput?.append(data)
+            return
+        }
         guard let surface = self.surface else {
             Logger.clauntty.warning("DATA_FLOW[\(self.sessionId)]: writeSSHOutput FAILED - no surface")
             return

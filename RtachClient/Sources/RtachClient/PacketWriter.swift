@@ -158,4 +158,12 @@ public enum PacketWriter {
         packet.append(0)
         return packet
     }
+
+    /// Create want_size packet (no payload)
+    public static func wantSize() -> Data {
+        var packet = Data(capacity: ProtocolConstants.clientHeaderSize)
+        packet.append(MessageType.wantSize.rawValue)
+        packet.append(0)
+        return packet
+    }
 }

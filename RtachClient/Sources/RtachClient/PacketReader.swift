@@ -20,6 +20,8 @@ public enum RtachResponse: Sendable, Equatable {
     case idle
     /// Protocol handshake
     case handshake(Handshake)
+    /// The PTY's size and whether it's this client's
+    case ptySize(PtySize)
 }
 
 /// Frame parser state machine for rtach server responses
@@ -209,6 +211,12 @@ public final class PacketReader {
                 return nil
             }
             return .handshake(handshake)
+
+        case .ptySize:
+            guard let size = PtySize(from: payload) else {
+                return nil
+            }
+            return .ptySize(size)
         }
     }
 }

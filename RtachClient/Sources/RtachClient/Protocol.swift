@@ -29,6 +29,9 @@ public enum MessageType: UInt8, Sendable {
     /// Request a page of history before a stream position (masters with
     /// ProtocolConstants.handshakeFlagHistory only)
     case requestHistory = 11
+    /// Ask to be told the PTY's size (ptySize), from now on (masters with
+    /// ProtocolConstants.handshakeFlagPtySize only)
+    case wantSize = 12
 }
 
 // MARK: - Server → Client Response Types
@@ -49,6 +52,8 @@ public enum ResponseType: UInt8, Sendable {
     case handshake = 5
     /// Page of scrollback history with HistoryPageMeta
     case historyPage = 6
+    /// The PTY's size and whether it's this client's (PtySize)
+    case ptySize = 7
 }
 
 // MARK: - Protocol Constants
@@ -92,6 +97,12 @@ public enum ProtocolConstants {
 
     /// Handshake flag: the master supports request_history
     public static let handshakeFlagHistory: UInt16 = 1 << 0
+
+    /// Handshake flag: the master answers wantSize
+    public static let handshakeFlagPtySize: UInt16 = 1 << 1
+
+    /// PTY size payload size (rows: u16, cols: u16, flags: u8)
+    public static let ptySizeSize: Int = 5
 
     /// request_history `before` meaning "where my attach replay started"
     public static let historyBeforeReplay: UInt64 = .max
@@ -186,6 +197,30 @@ public struct HistoryPageMeta: Sendable, Equatable {
 
     /// No older history is stored
     public var reachedOldest: Bool { start <= oldest }
+}
+
+// MARK: - PTY Size
+
+/// The PTY's size, and whether it's this client's. When it isn't, another client (a
+/// laptop attached to the same session) is in use, and the output is drawn for its size.
+public struct PtySize: Sendable, Equatable {
+    public let rows: UInt16
+    public let cols: UInt16
+    public let yours: Bool
+
+    public init(rows: UInt16, cols: UInt16, yours: Bool) {
+        self.rows = rows
+        self.cols = cols
+        self.yours = yours
+    }
+
+    public init?(from data: Data) {
+        guard data.count >= ProtocolConstants.ptySizeSize else { return nil }
+        let bytes = [UInt8](data.prefix(ProtocolConstants.ptySizeSize))
+        self.rows = UInt16(bytes[0]) | (UInt16(bytes[1]) << 8)
+        self.cols = UInt16(bytes[2]) | (UInt16(bytes[3]) << 8)
+        self.yours = bytes[4] & 1 != 0
+    }
 }
 
 // MARK: - Window Size

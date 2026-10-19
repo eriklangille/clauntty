@@ -181,6 +181,17 @@ final class PacketReaderTests: XCTestCase {
         }
     }
 
+    func testPtySizeResponse() {
+        // rows 50, cols 200, the size isn't this client's; then 30x100, its own
+        let responses = reader.process(makeFrame(type: .ptySize, payload: Data([50, 0, 200, 0, 0]))
+            + makeFrame(type: .ptySize, payload: Data([30, 0, 100, 0, 1])))
+
+        XCTAssertEqual(responses, [
+            .ptySize(PtySize(rows: 50, cols: 200, yours: false)),
+            .ptySize(PtySize(rows: 30, cols: 100, yours: true)),
+        ])
+    }
+
     func testScrollbackResponse() {
         let payload = Data([0x1B, 0x5B, 0x48]) // ESC[H
         let frame = makeFrame(type: .scrollback, payload: payload)

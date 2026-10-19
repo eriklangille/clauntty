@@ -26,10 +26,15 @@ public protocol RtachSessionDelegate: AnyObject {
 
     /// Called when framed mode is established (after handshake)
     func rtachSessionDidEnterFramedMode(_ session: RtachSession)
+
+    /// Called when the PTY's size, or whether it's this client's, changes (masters with
+    /// handshakeFlagPtySize; asked for on entering framed mode)
+    func rtachSession(_ session: RtachSession, didReceivePtySize size: PtySize)
 }
 
 public extension RtachSessionDelegate {
     func rtachSession(_ session: RtachSession, didReceiveHistoryPage meta: HistoryPageMeta, data: Data) {}
+    func rtachSession(_ session: RtachSession, didReceivePtySize size: PtySize) {}
 }
 
 /// State machine managing rtach protocol communication
@@ -87,6 +92,12 @@ public final class RtachSession {
     public var supportsHistory: Bool {
         guard let h = handshake, h.isValid else { return false }
         return h.flags & ProtocolConstants.handshakeFlagHistory != 0
+    }
+
+    /// Whether the master tells clients the PTY's size (wantSize)
+    public var supportsPtySize: Bool {
+        guard let h = handshake, h.isValid else { return false }
+        return h.flags & ProtocolConstants.handshakeFlagPtySize != 0
     }
 
     /// Protocol version string (e.g., "2.0")
@@ -222,6 +233,12 @@ public final class RtachSession {
         // Switch to framed mode
         state = .framedMode(version: version)
 
+        // Ask to be told the PTY's size, so a pane another device is using can be drawn
+        // at that device's size
+        if supportsPtySize {
+            delegate?.rtachSession(self, sendData: PacketWriter.wantSize())
+        }
+
         // Notify delegate that framed mode is now active
         delegate?.rtachSessionDidEnterFramedMode(self)
     }
@@ -250,6 +267,9 @@ public final class RtachSession {
         case .handshake(let h):
             // Handshake in framed mode - shouldn't happen but handle gracefully
             handleHandshake(h)
+
+        case .ptySize(let size):
+            delegate?.rtachSession(self, didReceivePtySize: size)
         }
     }
 

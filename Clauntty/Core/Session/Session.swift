@@ -308,6 +308,17 @@ class Session: ObservableObject, Identifiable {
     /// Called when data is received from SSH (to display in terminal)
     var onDataReceived: ((Data) -> Void)?
 
+    /// The pane's size and whether it's this phone's, from rtach (2.26.0+; nil before it
+    /// says, or from older masters). When it isn't, another device attached to the pane
+    /// (a laptop) is in use and its output is drawn for that device's size.
+    @Published private(set) var ptySize: RtachClient.PtySize?
+
+    /// Another device has the pane: the terminal is drawn at its size, scaled to fit
+    var inUseElsewhere: Bool { ptySize.map { !$0.yours } ?? false }
+
+    /// Called with ptySize when it changes, in order with the terminal data around it
+    var onPtySizeChanged: ((RtachClient.PtySize?) -> Void)?
+
     /// Called when session state changes
     var onStateChanged: ((State) -> Void)?
 
@@ -466,6 +477,7 @@ class Session: ObservableObject, Identifiable {
         rtachProtocol.expectsRtach = expectsRtach
         rtachProtocol.delegate = self
         rtachProtocol.connect()
+        setPtySize(nil)
 
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): channel attached, channelHandler is set")
     }
@@ -835,6 +847,12 @@ class Session: ObservableObject, Identifiable {
     /// Send window size change
     func sendWindowChange(rows: UInt16, columns: UInt16) {
         Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange called \(columns)x\(rows)")
+        // While another device has the pane, the terminal is sized to its grid: that isn't
+        // this phone's size. The phone's goes out again when the terminal sizes back.
+        if inUseElsewhere {
+            Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange SKIPPED (in use on another device)")
+            return
+        }
         lastWindowSize = (rows, columns)
         guard let channel = sshChannel else {
             // Expected during connection setup - size will be sent after channel is established
@@ -981,6 +999,12 @@ class Session: ObservableObject, Identifiable {
         // since then every tab switch appended a copy of the history.
         rtachProtocol.sendResume()
         Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SENT resume to rtach")
+    }
+
+    private func setPtySize(_ size: RtachClient.PtySize?) {
+        guard size != ptySize else { return }
+        ptySize = size
+        onPtySizeChanged?(size)
     }
 
     /// Claim active client for window size and command routing
@@ -1211,6 +1235,13 @@ extension Session: RtachClient.RtachSessionDelegate {
             // Restore the latest real size (a resize may have happened in between)
             let rows = current.rows == size.rows - 1 && current.columns == size.columns ? size.rows : current.rows
             self.sendWindowChange(rows: rows, columns: current.columns)
+        }
+    }
+
+    nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceivePtySize size: RtachClient.PtySize) {
+        Task { @MainActor in
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pty size \(size.cols)x\(size.rows), yours=\(size.yours)")
+            self.setPtySize(size)
         }
     }
 

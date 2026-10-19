@@ -242,6 +242,14 @@ Send the SSH window change from the resize callback, not after `ghostty_surface_
 resizes about 25ms later on the termio thread, so telling the remote earlier lets a full-screen app's redraw
 for the new size land in the old one (half-drawn Claude Code after rotating).
 
+**A pane another device is using** (a laptop attached to the same rtach session, typed on last): rtach
+2.26.0+ sends `pty_size` with the PTY's size and whether it's this client's (`Session.ptySize`). When it
+isn't, `TerminalSurfaceView.setOtherDeviceGrid` sizes the surface to that grid (its cells plus this view's
+padding), scales Ghostty's layer down to fit from the top left, and shows "In use on another device ·
+Tap to use here" under it. A tap claims the pane back. Window changes aren't sent meanwhile (the grid isn't
+the phone's), and output is held until the terminal has actually resized, so the program's redraw for
+the new size doesn't land in the old grid.
+
 ## Current Status
 
 **Working:**
