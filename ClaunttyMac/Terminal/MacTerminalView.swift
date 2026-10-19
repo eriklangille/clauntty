@@ -16,6 +16,8 @@ final class MacTerminalView: NSView, NSTextInputClient {
     var onResize: ((_ columns: UInt16, _ rows: UInt16) -> Void)?
     /// Scrolled to within `nearTopRows` of the oldest line: time to load older history.
     var onScrollNearTop: (() -> Void)?
+    /// Took the keyboard (clicked, or made first responder). Main thread.
+    var onFocus: (() -> Void)?
     private let nearTopRows: UInt = 100
 
     /// Program output goes through here: ghostty_surface_write_pty_output can
@@ -140,6 +142,8 @@ final class MacTerminalView: NSView, NSTextInputClient {
 
     override func becomeFirstResponder() -> Bool {
         if let surface { ghostty_surface_set_focus(surface, true) }
+        // Not during the SwiftUI update that may have made us first responder
+        DispatchQueue.main.async { [weak self] in self?.onFocus?() }
         return true
     }
 
@@ -150,8 +154,8 @@ final class MacTerminalView: NSView, NSTextInputClient {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        // Which pane gets the keyboard is TerminalContainer's call
         guard let window else { return }
-        window.makeFirstResponder(self)
         updateScale()
         if let surface,
            let id = window.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {

@@ -15,6 +15,8 @@ struct SessionGroup: Identifiable, Equatable {
     var title: String
     /// In display order: tabs in order, then panes in layout order
     var panes: [TabPane]
+    /// Each tab's split layout, in tab order (from the host; empty until it's listed)
+    var layouts: [PaneLayout] = []
     /// The pane the tab shows
     var activePaneId: String
     /// Panes shown before, newest first
@@ -59,7 +61,7 @@ extension SessionManager {
 
     /// The session for a pane, created disconnected if needed. It connects when shown.
     @discardableResult
-    private func paneSession(for group: SessionGroup, paneId: String, config: SavedConnection) -> Session? {
+    func paneSession(for group: SessionGroup, paneId: String, config: SavedConnection) -> Session? {
         if let existing = sessions.first(where: { $0.groupId == group.id && $0.pane?.paneId == paneId }) {
             return existing
         }
@@ -343,11 +345,18 @@ extension SessionManager {
 
     private func updateGroup(id groupId: UUID, workspace: RemoteWorkspace, panes: [TabPane], config: SavedConnection) {
         let paneIds = Set(panes.map(\.id))
+        // A tab's panes side by side if the host didn't say how they're split
+        let layouts = workspace.tabs.map { tab in
+            tab.layout ?? tab.panes.dropFirst().reduce(PaneLayout.pane(tab.panes.first?.id ?? "")) {
+                .split(vertical: false, ratio: 0.5, first: $0, second: .pane($1.id))
+            }
+        }
         var group: SessionGroup
         if let index = sessionGroups.firstIndex(where: { $0.id == groupId }) {
             group = sessionGroups[index]
             group.title = workspace.name
             group.panes = panes
+            group.layouts = layouts
             group.recentPaneIds.removeAll { !paneIds.contains($0) }
             if !paneIds.contains(group.activePaneId) {
                 group.activePaneId = group.recentPaneIds.first ?? panes[0].id
@@ -355,7 +364,7 @@ extension SessionManager {
             sessionGroups[index] = group
         } else {
             group = SessionGroup(id: groupId, connectionId: config.id, workspaceId: workspace.id,
-                                 title: workspace.name, panes: panes, activePaneId: panes[0].id)
+                                 title: workspace.name, panes: panes, layouts: layouts, activePaneId: panes[0].id)
             sessionGroups.append(group)
             if !tabOrder.contains(groupId) {
                 tabOrder.append(groupId)
@@ -422,10 +431,11 @@ extension SessionManager {
               let config = currentSession(of: group)?.connectionConfig else { return }
         do {
             switch action {
-            case .split:
+            case .split, .splitDown:
                 let created = try await withHost(config) { connection in
                     try await RtachDeployer(connection: connection)
-                        .workspaceCommand(["split", group.activePaneId, "--quiet"], as: WorkspaceCreated.self)
+                        .workspaceCommand(["split", group.activePaneId, action == .splitDown ? "-v" : "-h", "--quiet"],
+                                          as: WorkspaceCreated.self)
                 }
                 await refreshWorkspaces(for: config)
                 selectPane(groupId: groupId, paneId: created.pane)

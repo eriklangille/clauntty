@@ -6,6 +6,7 @@ struct ClaunttyMacApp: App {
     @StateObject private var ghostty: MacGhosttyApp
     @StateObject private var sessionManager = SessionManager()
     @StateObject private var hosts = MacHosts(store: ConnectionStore())
+    @StateObject private var switcher = PaneSwitcherState()
 
     init() {
         // Ghostty's global state (allocator, logging) must exist before any config or app.
@@ -26,13 +27,14 @@ struct ClaunttyMacApp: App {
             }
             .environmentObject(sessionManager)
             .environmentObject(hosts)
+            .environmentObject(switcher)
             .frame(minWidth: 640, minHeight: 360)
             // Dark like the terminal and the phone app
             .preferredColorScheme(.dark)
             .task { await start() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                // Back at the Mac: the pane on screen takes its size back from the phone
-                sessionManager.activeSession?.claimActive()
+                // Back at the Mac: the panes on screen take their size back from the phone
+                sessionManager.showSplitPanes()
             }
             // Remember the pane you're on, so a relaunch (or a crash) comes back to it
             .onChange(of: sessionManager.activeSessionId) { _, _ in
@@ -40,7 +42,7 @@ struct ClaunttyMacApp: App {
             }
         }
         .commands {
-            PaneCommands(sessionManager: sessionManager, hosts: hosts)
+            PaneCommands(sessionManager: sessionManager, hosts: hosts, switcher: switcher)
             CommandGroup(after: .toolbar) {
                 Button("Bigger") { ghostty.terminalViews?.adjustFontSize(by: 1) }
                     .keyboardShortcut("=")
@@ -72,15 +74,23 @@ struct ClaunttyMacApp: App {
 struct PaneCommands: Commands {
     @ObservedObject var sessionManager: SessionManager
     @ObservedObject var hosts: MacHosts
+    @ObservedObject var switcher: PaneSwitcherState
 
     var body: some Commands {
         CommandMenu("Pane") {
-            Button("New Pane") { newPane() }
-                .keyboardShortcut("t")
-                .disabled(activeGroup == nil)
+            Button("Go to Pane…") { switcher.shown.toggle() }
+                .keyboardShortcut("k")
+                .disabled(sessionManager.sessionGroups.isEmpty)
+            Divider()
             Button("New Workspace") { newWorkspace() }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .keyboardShortcut("t")
                 .disabled(activeConnection == nil)
+            Button("Split Right") { split(.split) }
+                .keyboardShortcut("d")
+                .disabled(activeGroup == nil)
+            Button("Split Down") { split(.splitDown) }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .disabled(activeGroup == nil)
             Button("Close Pane…") { closePane() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(activeGroup == nil)
@@ -119,9 +129,10 @@ struct PaneCommands: Commands {
         }
     }
 
-    private func newPane() {
+    /// A new pane beside or below the one you're in, as `clauntty ws split [-v]` makes
+    private func split(_ action: PaneAction) {
         guard let group = activeGroup else { return }
-        Task { await sessionManager.performPaneAction(.split, groupId: group.id) }
+        Task { await sessionManager.performPaneAction(action, groupId: group.id) }
     }
 
     private func newWorkspace() {

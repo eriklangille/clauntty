@@ -21,10 +21,58 @@ struct TabPane: Equatable {
     var group: Int
 }
 
+/// A tab's split layout, as rtach keeps it: a pane, or two halves side by side
+/// (`"split":"h"`) or stacked (`"v"`), the first taking `ratio` of the space.
+indirect enum PaneLayout: Equatable, Decodable {
+    case pane(String)
+    case split(vertical: Bool, ratio: Double, first: PaneLayout, second: PaneLayout)
+
+    private enum Keys: String, CodingKey { case split, ratio, a, b }
+
+    init(from decoder: Decoder) throws {
+        if let id = try? decoder.singleValueContainer().decode(String.self) {
+            self = .pane(id)
+            return
+        }
+        let container = try decoder.container(keyedBy: Keys.self)
+        self = .split(
+            vertical: try container.decode(String.self, forKey: .split) == "v",
+            ratio: try container.decodeIfPresent(Double.self, forKey: .ratio) ?? 0.5,
+            first: try container.decode(PaneLayout.self, forKey: .a),
+            second: try container.decode(PaneLayout.self, forKey: .b)
+        )
+    }
+
+    /// Pane ids left to right, top to bottom
+    var paneIds: [String] {
+        switch self {
+        case .pane(let id): return [id]
+        case .split(_, _, let first, let second): return first.paneIds + second.paneIds
+        }
+    }
+
+    /// Without some panes, a split's other half taking its place; nil if none are left
+    func without(_ ids: Set<String>) -> PaneLayout? {
+        switch self {
+        case .pane(let id):
+            return ids.contains(id) ? nil : self
+        case .split(let vertical, let ratio, let first, let second):
+            switch (first.without(ids), second.without(ids)) {
+            case let (first?, second?): return .split(vertical: vertical, ratio: ratio, first: first, second: second)
+            case let (first?, nil): return first
+            case let (nil, second?): return second
+            case (nil, nil): return nil
+            }
+        }
+    }
+}
+
 /// Session menu actions on a workspace tab
 enum PaneAction {
     /// A new pane next to the one shown (a split on the desktop)
     case split
+    /// A new pane below the one shown
+    case splitDown
     /// A new workspace (tab) on the same host
     case newWorkspace
     /// End the pane shown; the last one takes its workspace along

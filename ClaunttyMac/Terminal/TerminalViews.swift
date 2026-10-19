@@ -17,6 +17,15 @@ final class TerminalViews {
         weak var session: Session?
     }
 
+    /// The containers showing each session, oldest first. When a split changes shape,
+    /// SwiftUI makes a new container for a pane before it removes the old one, and both
+    /// update: the newest gets the view, or the old one takes it along when it goes.
+    private var containers: [UUID: [WeakContainer]] = [:]
+
+    private struct WeakContainer {
+        weak var view: NSView?
+    }
+
     /// Points; 0 is Ghostty's default. Every pane uses it, and it's remembered.
     private(set) var fontSize: Float = UserDefaults.standard.float(forKey: "fontSize")
     private static let defaultFontSize: Float = 13
@@ -48,11 +57,46 @@ final class TerminalViews {
         return view
     }
 
+    /// Give the session's view the keyboard, if it's on screen
+    func focus(_ session: Session) {
+        guard let view = views[session.id]?.view, let window = view.window else { return }
+        window.makeFirstResponder(view)
+    }
+
+    /// Show the session in `container`, unless a newer container shows it. Returns its view.
+    @discardableResult
+    func show(_ session: Session, in container: NSView) -> MacTerminalView {
+        var list = containers[session.id, default: []].filter { $0.view != nil }
+        if !list.contains(where: { $0.view === container }) { list.append(WeakContainer(view: container)) }
+        containers[session.id] = list
+        let size = container.bounds.size == .zero ? CGSize(width: 900, height: 600) : container.bounds.size
+        let view = view(for: session, size: size)
+        place(view, of: session.id)
+        return view
+    }
+
+    /// A container is going away: the view moves to the newest one left, if any.
+    func remove(_ container: NSView, showing sessionId: UUID) {
+        containers[sessionId] = containers[sessionId]?.filter { $0.view != nil && $0.view !== container }
+        guard let view = views[sessionId]?.view else { return }
+        if view.superview === container { view.removeFromSuperview() }
+        place(view, of: sessionId)
+    }
+
+    private func place(_ view: MacTerminalView, of sessionId: UUID) {
+        guard let container = containers[sessionId]?.last?.view, view.superview !== container else { return }
+        view.removeFromSuperview()
+        view.frame = container.bounds
+        view.autoresizingMask = [.width, .height]
+        container.addSubview(view)
+    }
+
     /// Drop views whose sessions are gone (closed panes, ended workspaces).
     func prune(keeping ids: Set<UUID>) {
         for id in views.keys where !ids.contains(id) {
             views[id]?.view.removeFromSuperview()
             views[id] = nil
+            containers[id] = nil
         }
     }
 
@@ -82,10 +126,21 @@ final class TerminalViews {
     }
 }
 
-/// Shows the active session's terminal, filling the detail area.
+/// Shows a pane's terminal. The focused one gets the keyboard; clicking another
+/// one calls `onFocus`.
 struct TerminalContainer: NSViewRepresentable {
     let session: Session
     let views: TerminalViews
+    let focused: Bool
+    let onFocus: () -> Void
+
+    final class Coordinator {
+        var wasFocused = false
+        var sessionId: UUID?
+        var views: TerminalViews?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -94,16 +149,31 @@ struct TerminalContainer: NSViewRepresentable {
     }
 
     func updateNSView(_ container: NSView, context: Context) {
-        let size = container.bounds.size == .zero ? CGSize(width: 900, height: 600) : container.bounds.size
-        let view = views.view(for: session, size: size)
-        guard view.superview !== container else { return }
-        container.subviews.forEach { $0.removeFromSuperview() }
-        view.frame = container.bounds
-        view.autoresizingMask = [.width, .height]
-        container.addSubview(view)
-        view.window?.makeFirstResponder(view)
-        // Showing a pane is using it: it takes this window's size, as on the phone
-        session.claimActive()
+        let coordinator = context.coordinator
+        if let previous = coordinator.sessionId, previous != session.id {
+            views.remove(container, showing: previous)
+        }
+        coordinator.sessionId = session.id
+        coordinator.views = views
+        let wasHere = container.subviews.first is MacTerminalView
+        let view = views.show(session, in: container)
+        view.onFocus = onFocus
+        let added = !wasHere && view.superview === container
+        // Only when it becomes the focused pane: on every update it would take the
+        // keyboard back from the switcher's search field
+        let takeKeyboard = focused && (added || !coordinator.wasFocused)
+        context.coordinator.wasFocused = focused
+        guard takeKeyboard else { return }
+        // Not in the window yet, maybe: once it is
+        DispatchQueue.main.async { [weak view] in
+            guard let view, let window = view.window, window.firstResponder !== view else { return }
+            window.makeFirstResponder(view)
+        }
+    }
+
+    static func dismantleNSView(_ container: NSView, coordinator: Coordinator) {
+        guard let sessionId = coordinator.sessionId else { return }
+        coordinator.views?.remove(container, showing: sessionId)
     }
 }
 

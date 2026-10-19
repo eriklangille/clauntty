@@ -11,6 +11,7 @@ struct PaneSelection: Hashable {
 struct MainView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
+    @EnvironmentObject private var switcher: PaneSwitcherState
     let views: TerminalViews
 
     var body: some View {
@@ -21,9 +22,29 @@ struct MainView: View {
             detail
         }
         .navigationTitle(title)
+        .overlay(alignment: .top) {
+            if switcher.shown {
+                ZStack(alignment: .top) {
+                    // A click anywhere else closes it
+                    Color.black.opacity(0.001)
+                        .onTapGesture { switcher.shown = false }
+                    PaneSwitcher()
+                        .padding(.top, 70)
+                }
+            }
+        }
+        // Closed: typing goes back to the pane you're in
+        .onChange(of: switcher.shown) { _, shown in
+            if !shown, let session = sessionManager.activeSession {
+                DispatchQueue.main.async { views.focus(session) }
+            }
+        }
         .onChange(of: sessionManager.sessions.map(\.id)) { _, ids in
             views.prune(keeping: Set(ids))
         }
+        // Another pane, or a split from the host: every pane in the tab runs
+        .onChange(of: sessionManager.activeSessionId) { _, _ in sessionManager.showSplitPanes() }
+        .onChange(of: shownLayout) { _, _ in sessionManager.showSplitPanes() }
         .alert("Clauntty", isPresented: workspaceMessageShown) {
             Button("OK") { sessionManager.workspaceMessage = nil }
         } message: {
@@ -33,14 +54,9 @@ struct MainView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let session = sessionManager.activeSession {
-            ZStack {
-                TerminalContainer(session: session, views: views)
-                TerminalStatusOverlay(session: session) {
-                    Task { try? await sessionManager.reconnect(session: session) }
-                }
-            }
-            .background(ThemeColors.background)
+        if let session = sessionManager.activeSession, let group = sessionManager.sessionGroup(for: session) {
+            SplitPanes(group: group, views: views)
+                .background(ThemeColors.background)
         } else if hosts.opened.isEmpty {
             HostPicker()
         } else {
@@ -48,6 +64,10 @@ struct MainView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private var shownLayout: PaneLayout? {
+        sessionManager.activeSession.flatMap { sessionManager.sessionGroup(for: $0) }?.shownLayout
     }
 
     private var title: String {

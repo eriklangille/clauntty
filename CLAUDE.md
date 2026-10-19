@@ -364,6 +364,12 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   goes over. With no key, auth falls back to "none", which is all Tailscale SSH needs.
 - **Sessions:** the shared `SessionManager` (workspaces, panes, reconnects) drives the
   sidebar; `TerminalViews` keeps one terminal view per session object.
+- **Splits:** the detail shows the whole tab the active pane is in, laid out from rtach's
+  split tree (`SessionGroup.layouts`, from `ws list --json`). `showSplitPanes()` keeps every
+  pane on screen streaming (`SessionManager.shownTogether` stops `switchTo` pausing them) and
+  claims their size only while the app is in front. A pane can briefly have two containers
+  when the tree changes shape; `TerminalViews.show(_:in:)` gives the view to the newest.
+  Cmd+D / Cmd+Shift+D split (`ws split -h|-v`), Cmd+K is the pane switcher.
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
 - **Testing:** `scripts/mac.sh` is the counterpart of `sim.sh`: `run`, `shot`, `click`, `drag`,

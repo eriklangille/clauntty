@@ -1,0 +1,134 @@
+import SwiftUI
+
+/// Whether the switcher is open; Cmd+K toggles it.
+@MainActor
+final class PaneSwitcherState: ObservableObject {
+    @Published var shown = false
+}
+
+/// Cmd+K: type part of a pane, workspace or host name, Enter goes there. Arrows
+/// move, Esc closes.
+struct PaneSwitcher: View {
+    @EnvironmentObject private var sessionManager: SessionManager
+    @EnvironmentObject private var hosts: MacHosts
+    @EnvironmentObject private var state: PaneSwitcherState
+    @State private var query = ""
+    @State private var selected = 0
+    @FocusState private var fieldFocused: Bool
+
+    private struct Item: Identifiable {
+        let id: PaneSelection
+        let title: String
+        /// Workspace, and host when there's more than one
+        let place: String
+        let status: PaneStatus
+        let isShown: Bool
+    }
+
+    /// Every pane in sidebar order, those matching every word of the query
+    private var items: [Item] {
+        let words = query.lowercased().split(separator: " ")
+        let shownPane = sessionManager.activeSession?.pane?.paneId
+        return PaneCommands.groups(sessionManager, hosts).flatMap { group -> [Item] in
+            let host = hosts.opened.count > 1 ? hosts.opened.first { $0.id == group.connectionId }?.name : nil
+            let place = [group.panes.count > 1 ? group.title : nil, host].compactMap { $0 }.joined(separator: " · ")
+            return group.panes.map { pane in
+                Item(id: PaneSelection(groupId: group.id, paneId: pane.id),
+                     title: group.panes.count > 1 ? pane.title : group.title,
+                     place: place, status: pane.status, isShown: pane.id == shownPane)
+            }
+        }
+        .filter { item in
+            let text = "\(item.title) \(item.place)".lowercased()
+            return words.allSatisfy { text.contains($0) }
+        }
+    }
+
+    var body: some View {
+        let items = items
+        VStack(spacing: 0) {
+            TextField("Go to pane", text: $query)
+                .textFieldStyle(.plain)
+                .font(.title3)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .focused($fieldFocused)
+                .onSubmit { choose(items) }
+                .onKeyPress(.downArrow) { move(1, in: items); return .handled }
+                .onKeyPress(.upArrow) { move(-1, in: items); return .handled }
+                .onKeyPress(.escape) { state.shown = false; return .handled }
+            Divider()
+            if items.isEmpty {
+                Text("No panes match")
+                    .foregroundStyle(.secondary)
+                    .padding(16)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                                row(item, highlighted: index == selected)
+                                    .onTapGesture {
+                                        selected = index
+                                        choose(items)
+                                    }
+                            }
+                        }
+                        .padding(6)
+                    }
+                    .frame(maxHeight: 340)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onChange(of: selected) { _, index in
+                        if items.indices.contains(index) { proxy.scrollTo(items[index].id) }
+                    }
+                }
+            }
+        }
+        .frame(width: 520)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        // After the terminal has let go of the keyboard
+        .onAppear { DispatchQueue.main.async { fieldFocused = true } }
+        .onChange(of: query) { _, _ in selected = 0 }
+    }
+
+    private func row(_ item: Item, highlighted: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: item.status.symbolName)
+                .foregroundStyle(item.status.color)
+                .frame(width: 18)
+            Text(item.title)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if !item.place.isEmpty {
+                Text(item.place)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if !item.status.label.isEmpty {
+                Text(item.status.label)
+                    .font(.caption)
+                    .foregroundStyle(item.status.color)
+            } else if item.isShown {
+                Text("Shown")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(highlighted ? Color.accentColor.opacity(0.35) : .clear, in: .rect(cornerRadius: 8))
+        .contentShape(Rectangle())
+    }
+
+    private func move(_ offset: Int, in items: [Item]) {
+        guard !items.isEmpty else { return }
+        selected = (selected + offset + items.count) % items.count
+    }
+
+    private func choose(_ items: [Item]) {
+        guard items.indices.contains(selected) else { return }
+        state.shown = false
+        MainView.show(items[selected].id, sessionManager)
+    }
+}

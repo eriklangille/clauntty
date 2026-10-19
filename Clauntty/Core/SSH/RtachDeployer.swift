@@ -862,6 +862,8 @@ struct RemoteWorkspace: Decodable, Equatable {
         let name: String
         /// In layout order
         let panes: [Pane]
+        /// How they're split (every rtach with `ws` lists it)
+        let layout: PaneLayout?
     }
 
     struct Pane: Decodable, Equatable {
@@ -876,7 +878,7 @@ struct RemoteWorkspace: Decodable, Equatable {
     func without(_ paneIds: Set<String>) -> RemoteWorkspace? {
         let kept = tabs.compactMap { tab -> Tab? in
             let panes = tab.panes.filter { !paneIds.contains($0.id) }
-            return panes.isEmpty ? nil : Tab(id: tab.id, name: tab.name, panes: panes)
+            return panes.isEmpty ? nil : Tab(id: tab.id, name: tab.name, panes: panes, layout: tab.layout?.without(paneIds))
         }
         return kept.isEmpty ? nil : RemoteWorkspace(id: id, name: name, cwd: cwd, tabs: kept)
     }

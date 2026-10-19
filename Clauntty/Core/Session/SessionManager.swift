@@ -96,6 +96,11 @@ class SessionManager: ObservableObject {
         return nil
     }
 
+    /// Sessions on screen together (the Mac shows a tab's split panes side by side).
+    /// Switching between them doesn't pause the one left; whoever sets this pauses
+    /// those that leave the screen.
+    var shownTogether: Set<UUID> = []
+
     /// Legacy compatibility - active session ID
     var activeSessionId: UUID? {
         get {
@@ -730,7 +735,8 @@ class SessionManager: ObservableObject {
         }
 
         // Pause the previous active session (battery optimization)
-        if let previousSession = activeSession, previousSession.id != session.id {
+        if let previousSession = activeSession, previousSession.id != session.id,
+           !shownTogether.contains(previousSession.id) {
             Logger.clauntty.debugOnly("TAB_TAP: pausing previous session '\(previousSession.title.prefix(20))'")
             previousSession.pauseOutput()
         }

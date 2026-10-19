@@ -80,7 +80,7 @@ case "$cmd" in
         # CLAUNTTY_SSH_CONFIG points the app at another ssh config (tests use a scratch one)
         env_args=()
         [ -n "${CLAUNTTY_SSH_CONFIG:-}" ] && env_args=(--env "CLAUNTTY_SSH_CONFIG=$CLAUNTTY_SSH_CONFIG")
-        open -n "${env_args[@]}" "$APP" --args "$@"
+        open -n ${env_args[@]+"${env_args[@]}"} "$APP" --args "$@"
         for _ in $(seq 1 40); do
             curl -sf "$DRIVER/windows?app=$BUNDLE_ID" 2>/dev/null | grep -q '"window"' && { echo "Running."; exit 0; }
             sleep 0.25
