@@ -1,0 +1,375 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AC0000000000000000000001 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000002 /* GhosttyKit.xcframework */; };
+		AC0000000000000000000003 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000004 /* NIOSSH */; };
+		AC0000000000000000000005 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000006 /* NIOCore */; };
+		AC0000000000000000000007 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000008 /* NIOPosix */; };
+		AC0000000000000000000009 /* RtachClient in Frameworks */ = {isa = PBXBuildFile; productRef = AC000000000000000000000A /* RtachClient */; };
+		AC000000000000000000000B /* rtach in Resources */ = {isa = PBXBuildFile; fileRef = AC000000000000000000000C /* rtach */; };
+		AC000000000000000000000D /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = AC000000000000000000000E /* Themes */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AC000000000000000000000F /* Clauntty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC0000000000000000000002 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = GhosttyKit.xcframework; path = Frameworks/GhosttyKit.xcframework; sourceTree = "<group>"; };
+		AC000000000000000000000C /* rtach */ = {isa = PBXFileReference; lastKnownFileType = folder; name = rtach; path = Clauntty/Resources/rtach; sourceTree = "<group>"; };
+		AC000000000000000000000E /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Themes; path = Clauntty/Resources/Themes; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		AC0000000000000000000010 /* Exceptions for "Clauntty/Core" folder in "ClaunttyMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Notifications/NotificationManager.swift",
+				"Notifications/PushNotifications.swift",
+				"Power/PowerManager.swift",
+				"SSH/PortForwardingManager.swift",
+				"SSH/PortScanner.swift",
+				"Session/PersistedWebTab.swift",
+				"Session/SessionManager+Groups.swift",
+				"Session/SessionManager.swift",
+				"Session/WebTab.swift",
+				"Speech/SpeechManager.swift",
+				"Tailscale/TailscaleManager.swift",
+				"Terminal/GhosttyApp.swift",
+				"Terminal/GhosttyBridge.swift",
+				"Terminal/TerminalSurface.swift",
+				"Voice/VoiceAgent.swift",
+				"Voice/VoiceAudio.swift",
+				"Voice/VoiceClaude.swift",
+				"Voice/VoiceSettings.swift",
+				"Voice/VoiceText.swift",
+				"Voice/XAIRealtimeSocket.swift",
+			);
+			target = AC0000000000000000000011 /* ClaunttyMac */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		AC0000000000000000000012 /* ClaunttyMac */ = {isa = PBXFileSystemSynchronizedRootGroup; path = ClaunttyMac; sourceTree = "<group>"; };
+		AC0000000000000000000013 /* Clauntty/Core */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AC0000000000000000000010 /* Exceptions for "Clauntty/Core" folder in "ClaunttyMac" target */, ); path = Clauntty/Core; sourceTree = "<group>"; };
+		AC0000000000000000000014 /* Clauntty/Models */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Clauntty/Models; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AC0000000000000000000015 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AC0000000000000000000001 /* GhosttyKit.xcframework in Frameworks */,
+				AC0000000000000000000003 /* NIOSSH in Frameworks */,
+				AC0000000000000000000005 /* NIOCore in Frameworks */,
+				AC0000000000000000000007 /* NIOPosix in Frameworks */,
+				AC0000000000000000000009 /* RtachClient in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AC0000000000000000000016 = {
+			isa = PBXGroup;
+			children = (
+				AC0000000000000000000012 /* ClaunttyMac */,
+				AC0000000000000000000017 /* Shared with iOS */,
+				AC0000000000000000000018 /* Frameworks */,
+				AC0000000000000000000019 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AC0000000000000000000017 /* Shared with iOS */ = {
+			isa = PBXGroup;
+			children = (
+				AC0000000000000000000013 /* Clauntty/Core */,
+				AC0000000000000000000014 /* Clauntty/Models */,
+				AC000000000000000000000C /* rtach */,
+				AC000000000000000000000E /* Themes */,
+			);
+			name = "Shared with iOS";
+			sourceTree = "<group>";
+		};
+		AC0000000000000000000018 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				AC0000000000000000000002 /* GhosttyKit.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		AC0000000000000000000019 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AC000000000000000000000F /* Clauntty.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AC0000000000000000000011 /* ClaunttyMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AC000000000000000000001A /* Build configuration list for PBXNativeTarget "ClaunttyMac" */;
+			buildPhases = (
+				AC000000000000000000001B /* Sources */,
+				AC0000000000000000000015 /* Frameworks */,
+				AC000000000000000000001C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AC0000000000000000000012 /* ClaunttyMac */,
+				AC0000000000000000000013 /* Clauntty/Core */,
+				AC0000000000000000000014 /* Clauntty/Models */,
+			);
+			name = ClaunttyMac;
+			packageProductDependencies = (
+				AC0000000000000000000004 /* NIOSSH */,
+				AC0000000000000000000006 /* NIOCore */,
+				AC0000000000000000000008 /* NIOPosix */,
+				AC000000000000000000000A /* RtachClient */,
+			);
+			productName = ClaunttyMac;
+			productReference = AC000000000000000000000F /* Clauntty.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AC000000000000000000001D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+			};
+			buildConfigurationList = AC000000000000000000001E /* Build configuration list for PBXProject "ClaunttyMac" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AC0000000000000000000016;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AC000000000000000000001F /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
+				AC0000000000000000000020 /* XCRemoteSwiftPackageReference "swift-nio" */,
+				AC0000000000000000000021 /* XCLocalSwiftPackageReference "RtachClient" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AC0000000000000000000019 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AC0000000000000000000011 /* ClaunttyMac */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AC000000000000000000001C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AC000000000000000000000B /* rtach in Resources */,
+				AC000000000000000000000D /* Themes in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AC000000000000000000001B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AC0000000000000000000022 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = macosx;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AC0000000000000000000023 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = macosx;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		AC0000000000000000000024 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 65533RB4LC;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Clauntty;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = (
+					"-lc++",
+					"-framework",
+					Carbon,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.octerm.clauntty.mac;
+				PRODUCT_NAME = Clauntty;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AC0000000000000000000025 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 65533RB4LC;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Clauntty;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = (
+					"-lc++",
+					"-framework",
+					Carbon,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.octerm.clauntty.mac;
+				PRODUCT_NAME = Clauntty;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AC000000000000000000001E /* Build configuration list for PBXProject "ClaunttyMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AC0000000000000000000022 /* Debug */,
+				AC0000000000000000000023 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AC000000000000000000001A /* Build configuration list for PBXNativeTarget "ClaunttyMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AC0000000000000000000024 /* Debug */,
+				AC0000000000000000000025 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AC0000000000000000000021 /* XCLocalSwiftPackageReference "RtachClient" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = RtachClient;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AC000000000000000000001F /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio-ssh.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
+		AC0000000000000000000020 /* XCRemoteSwiftPackageReference "swift-nio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.62.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AC0000000000000000000004 /* NIOSSH */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AC000000000000000000001F /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
+			productName = NIOSSH;
+		};
+		AC0000000000000000000006 /* NIOCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AC0000000000000000000020 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			productName = NIOCore;
+		};
+		AC0000000000000000000008 /* NIOPosix */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AC0000000000000000000020 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			productName = NIOPosix;
+		};
+		AC000000000000000000000A /* RtachClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RtachClient;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = AC000000000000000000001D /* Project object */;
+}

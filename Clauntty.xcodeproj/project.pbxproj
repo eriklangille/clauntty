@@ -58,6 +58,8 @@
 		C00000A3 /* SSHAuthPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A3 /* SSHAuthPrompts.swift */; };
 		C0000015 /* KeyboardAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000015 /* KeyboardAccessoryView.swift */; };
 		C0000016 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000016 /* Session.swift */; };
+		AC0000000000000000000001 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000001 /* Platform.swift */; };
+		AC0000000000000000000002 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000002 /* Log.swift */; };
 		C0000017 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000017 /* SessionManager.swift */; };
 		58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */; };
 		C0000018 /* SessionTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000018 /* SessionTabBar.swift */; };
@@ -171,6 +173,8 @@
 		C10000A3 /* SSHAuthPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthPrompts.swift; sourceTree = "<group>"; };
 		C1000015 /* KeyboardAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessoryView.swift; sourceTree = "<group>"; };
 		C1000016 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		AC1000000000000000000001 /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
+		AC1000000000000000000002 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		C1000017 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Groups.swift"; sourceTree = "<group>"; };
 		C1000018 /* SessionTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTabBar.swift; sourceTree = "<group>"; };
@@ -321,6 +325,8 @@
 				F3A00001 /* Voice */,
 				B2C48404F3C2AD63C8301557 /* Theme */,
 				7A200001 /* Tailscale */,
+				AC1000000000000000000001 /* Platform.swift */,
+				AC1000000000000000000002 /* Log.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -655,6 +661,8 @@
 				C0000019 /* RtachDeployer.swift in Sources */,
 				C0000015 /* KeyboardAccessoryView.swift in Sources */,
 				C0000016 /* Session.swift in Sources */,
+				AC0000000000000000000001 /* Platform.swift in Sources */,
+				AC0000000000000000000002 /* Log.swift in Sources */,
 				C0000017 /* SessionManager.swift in Sources */,
 				58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */,
 				C0000018 /* SessionTabBar.swift in Sources */,

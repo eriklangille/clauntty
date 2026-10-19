@@ -1,8 +1,12 @@
 import Foundation
 import NIOCore
 import NIOSSH
-import UIKit
 import os.log
+#if canImport(UIKit)
+import UIKit
+#else
+import AppKit
+#endif
 
 /// Passes the server's user-auth banner and auth success up from the NIO pipeline.
 /// Tailscale SSH in check mode sends its sign-in link as a banner, then holds
@@ -32,8 +36,9 @@ final class SSHAuthBannerHandler: ChannelInboundHandler, @unchecked Sendable {
 }
 
 /// Sign-in prompts from SSH banners that carry a link (Tailscale SSH check mode).
-/// Connections waiting on the same host share one alert. It's a UIKit alert on the
-/// topmost view controller so it shows over sheets like New Tab.
+/// Connections waiting on the same host share one alert. On iOS it's a UIKit alert on
+/// the topmost view controller so it shows over sheets like New Tab; on macOS a sheet
+/// on the key window.
 @MainActor
 final class SSHAuthPrompts {
     static let shared = SSHAuthPrompts()
@@ -48,11 +53,17 @@ final class SSHAuthPrompts {
     /// Waiting connections, in arrival order
     private var pending: [(id: ObjectIdentifier, prompt: Prompt)] = []
     private var shownId: ObjectIdentifier?
+    #if canImport(UIKit)
     private weak var alert: UIAlertController?
+    private static let didBecomeActive = UIApplication.didBecomeActiveNotification
+    #else
+    private var alert: NSAlert?
+    private static let didBecomeActive = NSApplication.didBecomeActiveNotification
+    #endif
 
     private init() {
         NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+            forName: Self.didBecomeActive, object: nil, queue: .main
         ) { _ in
             // Back from Safari: give a finished sign-in a moment to arrive before asking again
             Task { @MainActor in
@@ -86,7 +97,7 @@ final class SSHAuthPrompts {
         guard pending.contains(where: { $0.id == id }) else { return }
         pending.removeAll { $0.id == id }
         if shownId == id {
-            alert?.dismiss(animated: true)
+            dismissAlert()
             shownId = nil
             // Another connection may still be waiting; let it settle first in case one
             // sign-in let it through too
@@ -97,6 +108,29 @@ final class SSHAuthPrompts {
         }
     }
 
+    private func openLoginPage(_ prompt: Prompt) {
+        shownId = nil
+        #if canImport(UIKit)
+        UIApplication.shared.open(prompt.url)
+        #else
+        NSWorkspace.shared.open(prompt.url)
+        #endif
+    }
+
+    private func cancel(_ prompt: Prompt) {
+        shownId = nil
+        // Stop every connection waiting on this host
+        let waiting = pending.filter { $0.prompt.host == prompt.host }
+        pending.removeAll { $0.prompt.host == prompt.host }
+        waiting.forEach { $0.prompt.cancel() }
+        // Wait for this alert to finish dismissing before showing another host's
+        Task {
+            try? await Task.sleep(for: .seconds(0.5))
+            self.presentNext()
+        }
+    }
+
+    #if canImport(UIKit)
     private func presentNext() {
         guard alert == nil, let (id, prompt) = pending.first,
               UIApplication.shared.applicationState == .active,
@@ -109,25 +143,50 @@ final class SSHAuthPrompts {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Open Login Page", style: .default) { _ in
-            self.shownId = nil
-            UIApplication.shared.open(prompt.url)
+            self.openLoginPage(prompt)
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
-            self.shownId = nil
-            // Stop every connection waiting on this host
-            let waiting = self.pending.filter { $0.prompt.host == prompt.host }
-            self.pending.removeAll { $0.prompt.host == prompt.host }
-            waiting.forEach { $0.prompt.cancel() }
-            // Wait for this alert to finish dismissing before showing another host's
-            Task {
-                try? await Task.sleep(for: .seconds(0.5))
-                self.presentNext()
-            }
+            self.cancel(prompt)
         })
         shownId = id
         self.alert = alert
         presenter.present(alert, animated: true)
     }
+
+    private func dismissAlert() {
+        alert?.dismiss(animated: true)
+    }
+    #else
+    private func presentNext() {
+        guard alert == nil, let (id, prompt) = pending.first, NSApp.isActive else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Sign in to reach \(prompt.host)"
+        alert.informativeText = Self.readable(prompt.message)
+        alert.addButton(withTitle: "Open Login Page")
+        alert.addButton(withTitle: "Cancel")
+        shownId = id
+        self.alert = alert
+        let done: (NSApplication.ModalResponse) -> Void = { response in
+            self.alert = nil
+            switch response {
+            case .alertFirstButtonReturn: self.openLoginPage(prompt)
+            case .alertSecondButtonReturn: self.cancel(prompt)
+            default: break  // dismissed by resolve()
+            }
+        }
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: done)
+        } else {
+            done(alert.runModal())
+        }
+    }
+
+    private func dismissAlert() {
+        guard let sheet = alert?.window, let parent = sheet.sheetParent else { return }
+        parent.endSheet(sheet, returnCode: .abort)
+    }
+    #endif
 
     /// Banner text without Tailscale's leading "# " comment markers
     private static func readable(_ message: String) -> String {
@@ -138,6 +197,7 @@ final class SSHAuthPrompts {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    #if canImport(UIKit)
     private static func topViewController() -> UIViewController? {
         let window = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -149,4 +209,5 @@ final class SSHAuthPrompts {
         }
         return top
     }
+    #endif
 }

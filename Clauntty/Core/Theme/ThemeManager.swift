@@ -54,7 +54,7 @@ extension Color {
 
     /// Returns true if this is a light color (useful for determining theme type)
     var isLight: Bool {
-        guard let components = UIColor(self).cgColor.components else { return false }
+        guard let components = PlatformColor(self).cgColor.components else { return false }
         let r = components[0]
         let g = components.count > 1 ? components[1] : r
         let b = components.count > 2 ? components[2] : r
@@ -122,10 +122,15 @@ class ThemeManager: ObservableObject {
         return false
     }
 
+    #if canImport(UIKit)
     /// Get the default theme based on system appearance
     func defaultTheme(for userInterfaceStyle: UIUserInterfaceStyle) -> Theme? {
-        let preferDark = userInterfaceStyle != .light
+        defaultTheme(dark: userInterfaceStyle != .light)
+    }
+    #endif
 
+    /// The default dark or light theme
+    func defaultTheme(dark preferDark: Bool) -> Theme? {
         if preferDark {
             return themes.first { $0.id == "andromeda" }
                 ?? themes.first { !$0.isLight }

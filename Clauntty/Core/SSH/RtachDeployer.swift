@@ -334,12 +334,15 @@ class RtachDeployer {
     /// This phone's line in the host's push file (PushNotifications), or none when
     /// notifications are off
     func updatePushFile() async {
+        // Push notifications are iOS-only for now.
+        #if os(iOS)
         guard let command = await PushNotifications.shared.hostCommand() else { return }
         do {
             _ = try await connection.executeCommand(command)
         } catch {
             Logger.clauntty.warning("Push: couldn't update \(self.connection.host)'s push file: \(error.localizedDescription)")
         }
+        #endif
     }
 
     /// On macOS hosts, check whether spawnd is installed. spawnd runs its own copy of

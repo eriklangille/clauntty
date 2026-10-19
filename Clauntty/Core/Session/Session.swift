@@ -3,7 +3,6 @@ import NIOCore
 import NIOSSH
 import os.log
 import RtachClient
-import UIKit
 
 /// Represents a single terminal session (one tab)
 /// Each session has its own SSH channel and terminal surface
@@ -71,7 +70,7 @@ class Session: ObservableObject, Identifiable {
 
     /// Cached screenshot for the tab selector, captured when switching away or opening
     /// the selector. Kept on disk so cards still have previews after a relaunch.
-    var cachedScreenshot: UIImage? {
+    var cachedScreenshot: PlatformImage? {
         get {
             if !hasLoadedScreenshot {
                 hasLoadedScreenshot = true
@@ -85,7 +84,7 @@ class Session: ObservableObject, Identifiable {
             TabThumbnailStore.save(newValue, id: id)
         }
     }
-    private var storedScreenshot: UIImage?
+    private var storedScreenshot: PlatformImage?
     private var hasLoadedScreenshot = false
 
     /// Font size for this session (nil = use global default)
@@ -182,11 +181,13 @@ class Session: ObservableObject, Identifiable {
         pendingNotificationCheck = false
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): checking pending notification, isClaudeSession=\(self.isClaudeSession)")
 
+        #if os(iOS)
         if NotificationManager.shared.shouldNotify(for: self) {
             Task {
                 await NotificationManager.shared.scheduleInputReady(session: self)
             }
         }
+        #endif
     }
 
     // MARK: - Input Detection
@@ -754,9 +755,11 @@ class Session: ObservableObject, Identifiable {
             // A pane's push notice (`<pane>;<kind>;<title>;<body>`), passed on by an older
             // master that doesn't send pushes: the app is here, so it notifies itself
             let notice = parts.count > 1 ? parts[1].split(separator: ";", maxSplits: 3, omittingEmptySubsequences: false) : []
+            #if os(iOS)
             if notice.count == 4 {
                 Task { await NotificationManager.shared.schedulePaneAttention(title: String(notice[2]), body: String(notice[3]), paneId: String(notice[0])) }
             }
+            #endif
         case "workspace":
             // "workspace;<ws>/<pane>" shows a new pane, "workspace;" only refreshes
             let target = parts.count > 1 ? parts[1].split(separator: "/", maxSplits: 1) : []
@@ -808,11 +811,13 @@ class Session: ObservableObject, Identifiable {
         // If we have title info, check notification immediately
         if dynamicTitle != nil || _isClaudeSession {
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): checking notification, isClaudeSession=\(self.isClaudeSession)")
+            #if os(iOS)
             if NotificationManager.shared.shouldNotify(for: self) {
                 Task {
                     await NotificationManager.shared.scheduleInputReady(session: self)
                 }
             }
+            #endif
         } else {
             // No title yet - wait for title to be set
             pendingNotificationCheck = true
@@ -881,14 +886,14 @@ class Session: ObservableObject, Identifiable {
 
     /// Upload an image to the remote server for pasting (e.g., into Claude Code)
     /// - Returns: The image's path on the remote host, or nil if the upload failed
-    func uploadImage(_ image: UIImage) async -> String? {
+    func uploadImage(_ image: PlatformImage) async -> String? {
         guard let connection = sshConnection else {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): cannot upload image, no SSH connection")
             return nil
         }
 
         // Convert image to PNG data
-        guard let imageData = image.pngData() else {
+        guard let imageData = image.platformPNGData() else {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): failed to convert image to PNG")
             return nil
         }
@@ -1293,15 +1298,15 @@ enum TabThumbnailStore {
         directory.appendingPathComponent("\(id.uuidString).jpg")
     }
 
-    static func load(id: UUID) -> UIImage? {
-        UIImage(contentsOfFile: url(for: id).path)
+    static func load(id: UUID) -> PlatformImage? {
+        PlatformImage(contentsOfFile: url(for: id).path)
     }
 
     /// Writes the preview in the background, or deletes it when `image` is nil
-    static func save(_ image: UIImage?, id: UUID) {
+    static func save(_ image: PlatformImage?, id: UUID) {
         let url = url(for: id)
         queue.async {
-            if let data = image?.jpegData(compressionQuality: 0.7) {
+            if let data = image?.platformJPEGData(quality: 0.7) {
                 try? data.write(to: url, options: .atomic)
             } else {
                 try? FileManager.default.removeItem(at: url)
@@ -1314,4 +1319,82 @@ enum TabThumbnailStore {
 struct PaneRef: Equatable {
     let paneId: String
     var groupTitle: String
+}
+
+// MARK: - Image Inbox
+
+/// `clauntty show` leaves each image in ~/.clauntty/inbox/<id> on the remote host (rtach's
+/// inbox.zig). The app deletes an entry once it has shown the image and checks the inbox
+/// when it connects, so images sent while it was in the background still arrive.
+enum ImageInbox {
+    struct Entry: Equatable {
+        let id: String
+        let path: String
+        /// The pane that sent it (rtach 2.21+, from inside an rtach session)
+        var pane: String? = nil
+    }
+
+    /// Entries older than this are skipped (rtach's inbox.max_age_ms)
+    static let maxAge: TimeInterval = 6 * 60 * 60
+
+    /// Prints `<id>\t<path>\t<pane>` per entry (an entry is its path, then the pane on a
+    /// second line). sh, not the login shell (which may be fish); the script has no
+    /// single quotes
+    static let listCommand = #"sh -c 'cd ~/.clauntty/inbox 2>/dev/null || exit 0; for f in [0-9]*; do [ -f "$f" ] && printf "%s\t%s\t%s\n" "$f" "$(sed -n 1p "$f")" "$(sed -n 2p "$f")"; done; exit 0'"#
+
+    static func removeCommand(_ ids: [String]) -> String? {
+        let valid = ids.filter(isValidId)
+        guard !valid.isEmpty else { return nil }
+        return "rm -f " + valid.map { "~/.clauntty/inbox/\($0)" }.joined(separator: " ")
+    }
+
+    /// `<unix ms>-<pid>-<index>`, all digits, so safe to put in a shell command
+    static func isValidId(_ id: String) -> Bool {
+        let parts = id.split(separator: "-", omittingEmptySubsequences: false)
+        return parts.count == 3 && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }
+    }
+
+    static func createdAt(_ id: String) -> Date? {
+        guard isValidId(id), let ms = Int64(id.prefix { $0 != "-" }) else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+    }
+
+    /// Argument of an `image` command: `<id>;<pane>;<path>` from rtach 2.21+ (the pane
+    /// empty outside rtach), `<id>;<path>` from 2.10+, or just `<path>`. The path is
+    /// absolute, so after the id a `/` means there's no pane.
+    static func parseImageArgument(_ arg: String) -> (path: String, id: String?, pane: String?) {
+        let parts = arg.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, isValidId(String(parts[0])) else { return (arg, nil, nil) }
+        let id = String(parts[0])
+        let rest = parts[1]
+        if rest.hasPrefix("/") { return (String(rest), id, nil) }
+        let fields = rest.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        guard fields.count == 2 else { return (String(rest), id, nil) }
+        return (String(fields[1]), id, fields[0].isEmpty ? nil : String(fields[0]))
+    }
+
+    static func parseList(_ output: String) -> [Entry] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard fields.count >= 2, isValidId(String(fields[0])), !fields[1].isEmpty else { return nil }
+            let pane = fields.count == 3 && !fields[2].isEmpty ? String(fields[2]) : nil
+            return Entry(id: String(fields[0]), path: String(fields[1]), pane: pane)
+        }
+    }
+}
+
+// MARK: - Errors
+
+enum SessionError: Error, LocalizedError {
+    case notConnected
+    case fileTooLarge
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            return "SSH connection not established"
+        case .fileTooLarge:
+            return "File is too large"
+        }
+    }
 }

@@ -342,9 +342,28 @@ bun run load-test.ts    # Performance: ~16K msg/sec
 ## iOS Support in the Ghostty Fork
 
 - **Build**: upstream dropped iOS from the full library in Aug 2026. Two patches bring it back: a revert of `7a171895d`, and `-fblocks` for iOS in `pkg/macos/build.zig`. Upstream no longer builds iOS, so an upgrade may need more fixes like these.
-- **termio `manual` backend** (`src/termio/Manual.zig`): iOS can't spawn processes, so the surface uses a backend with no process or pty. It passes resizes to the embedder and sets `shell_redraws_prompt = .false`, since a remote shell doesn't redraw its prompt after a resize.
+- **termio `manual` backend** (`src/termio/Manual.zig`): iOS can't spawn processes, so the surface uses a backend with no process or pty. Other platforms opt in with the surface config's `manual_io` (the macOS app). It passes resizes to the embedder and sets `shell_redraws_prompt = .false`, since a remote shell doesn't redraw its prompt after a resize.
 - **Rendering**: Ghostty adds its Metal layer to the view's layer directly; the app adopts and sizes it (`adoptGhosttySublayer`).
 - **Sentry is off** (`-Dsentry=false`): its crash handlers broke the app's own handling.
+
+## macOS App (in progress)
+
+`ClaunttyMac/` is the desktop app (plan: `plans/2026-10-19-clauntty-macos-app.md`). It shares
+`Clauntty/Core` and `Clauntty/Models` with the iOS app through synchronized folders in
+`ClaunttyMac.xcodeproj`, minus the iOS-only files listed in `scripts/gen-mac-project.py`. New
+shared files need no project change; to change what's excluded, packages or settings, edit
+that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit the Mac pbxproj.
+
+- **Shared code:** platform differences go behind `#if os(iOS)` / `canImport(UIKit)` seams;
+  `Core/Platform.swift` has `PlatformImage`/`PlatformColor`. A new file under `Clauntty/Core`
+  must still be added to `Clauntty.xcodeproj` for iOS (it lists files explicitly).
+- **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
+  for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
+- **Testing:** `scripts/mac.sh` is the counterpart of `sim.sh`: `run`, `shot`, `click`, `drag`,
+  `scroll`, `type`, `key cmd+t`, `size W H`, `logs`. Input and screenshots go through
+  mac-driver (sim-stream repo), which holds Screen Recording and Accessibility. Test against
+  the SSH container, e.g. `./scripts/mac.sh run -- --host <container ip> --user testuser
+  --password testpass` (spike args, until connections come from `~/.ssh/config`).
 
 ## Key Info
 

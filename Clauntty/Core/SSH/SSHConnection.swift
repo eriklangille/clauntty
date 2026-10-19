@@ -134,12 +134,17 @@ class SSHConnection: ObservableObject {
 
             // Connect
             let channel: Channel
+            #if os(iOS)
             if useTailscale {
                 let fd = try await TailscaleManager.shared.dial(host: host, port: port)
                 channel = try await bootstrap.withConnectedSocket(fd).get()
             } else {
                 channel = try await bootstrap.connect(host: host, port: port).get()
             }
+            #else
+            // A Mac reaches the tailnet through the system's Tailscale.
+            channel = try await bootstrap.connect(host: host, port: port).get()
+            #endif
             self.channel = channel
             Logger.clauntty.debugOnly("SSH TCP connection established")
 
@@ -164,7 +169,9 @@ class SSHConnection: ObservableObject {
     /// (Tailscale SSH check mode) and is holding authentication until they do
     private func authBannerReceived(_ message: String) {
         Logger.clauntty.debugOnly("SSH banner from \(self.host): \(message)")
+        #if os(iOS)
         TailscaleDebugLog.note("ssh banner from \(host): \(message.replacingOccurrences(of: "\n", with: " "))")
+        #endif
         guard !authSucceeded, let url = SSHAuthPrompts.link(in: message) else { return }
         SSHAuthPrompts.shared.show(for: self, host: host, message: message, url: url) { [weak self] in
             self?.disconnect()
@@ -173,7 +180,9 @@ class SSHConnection: ObservableObject {
 
     private func authSucceededReceived() {
         authSucceeded = true
+        #if os(iOS)
         TailscaleDebugLog.note("ssh auth succeeded for \(host)")
+        #endif
         SSHAuthPrompts.shared.resolve(self)
     }
 
