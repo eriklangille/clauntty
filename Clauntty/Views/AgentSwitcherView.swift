@@ -912,6 +912,7 @@ struct AgentSwitcherView: View {
         let web = webShown(in: tabId)
         return SwitcherWindow(
             session: session,
+            paneSessions: session.groupId.map { group in sessionManager.sessions.filter { $0.groupId == group } } ?? [session],
             title: panes.indices.contains(activeIndex) ? panes[activeIndex].title : session.title,
             workspace: session.pane?.groupTitle ?? session.connectionConfig.displayName,
             panes: panes,
@@ -1205,6 +1206,10 @@ struct SwitcherWindow: View {
     @EnvironmentObject var sessionManager: SessionManager
     @EnvironmentObject var appState: AppState
     @ObservedObject var session: Session
+    /// Every session of the workspace's panes shown this run, the current one included:
+    /// each keeps its terminal (hidden and paused when not shown), so swiping back to a
+    /// pane finds its screen and history as they were
+    let paneSessions: [Session]
     let title: String
     let workspace: String
     let panes: [TabPane]
@@ -1348,12 +1353,20 @@ struct SwitcherWindow: View {
             // doesn't reach
             ClipHost(passesTouches: !isFullscreen, contentSize: terminalSize, scale: placement.scale,
                      origin: CGPoint(x: placement.x, y: placement.y)) {
-                TerminalView(session: session, isTabSelectorPresented: !isFocused, isVisible: true)
-                    .id(session.id)
-                    .frame(width: terminalSize.width, height: terminalSize.height)
-                    .environmentObject(ghosttyApp)
-                    .environmentObject(sessionManager)
-                    .environmentObject(appState)
+                // One list, so a pane's terminal keeps its identity as it's shown and hidden
+                ZStack(alignment: .topLeading) {
+                    ForEach(paneSessions.contains { $0.id == session.id } ? paneSessions : paneSessions + [session]) { pane in
+                        let shown = pane.id == session.id
+                        TerminalView(session: pane, isTabSelectorPresented: !shown || !isFocused, isVisible: shown)
+                            .id(pane.id)
+                            .frame(width: terminalSize.width, height: terminalSize.height)
+                            .opacity(shown ? 1 : 0)
+                            .allowsHitTesting(shown)
+                    }
+                }
+                .environmentObject(ghosttyApp)
+                .environmentObject(sessionManager)
+                .environmentObject(appState)
             }
             // Showing a page, the terminal stays (live, keeping its place) under it
             .opacity(web == nil ? 1 : 0)
