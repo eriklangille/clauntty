@@ -92,6 +92,15 @@ extension SessionGroup {
 }
 
 extension SessionManager {
+    /// The shown tab's split layout comes from listing the host's workspaces. If that
+    /// failed (no network yet at launch, Local Network not allowed yet), list them again
+    /// once its pane has connected, or the tab shows just that pane.
+    func refreshLayoutIfMissing() {
+        guard let active = activeSession, active.state == .connected,
+              let group = sessionGroup(for: active), group.layouts.isEmpty else { return }
+        Task { await refreshWorkspaces(for: active.connectionConfig) }
+    }
+
     /// Every pane in the shown tab streams, not just the active one, and while you're
     /// at the Mac they take this window's size. Panes that left the screen pause, as a
     /// tab you leave on the phone does.

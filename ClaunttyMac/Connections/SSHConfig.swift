@@ -19,6 +19,17 @@ struct SSHConfig {
 
         var id: String { alias }
 
+        /// A git forge (GitHub, GitLab...): ssh there only runs git, there's no shell to open.
+        /// Forges use the user `git`; the well-known ones are caught without it too.
+        var isGitOnly: Bool {
+            user == "git" || Self.gitForges.contains(hostName.lowercased())
+        }
+
+        private static let gitForges: Set<String> = [
+            "github.com", "ssh.github.com", "gitlab.com", "altssh.gitlab.com", "bitbucket.org",
+            "altssh.bitbucket.org", "ssh.dev.azure.com", "vs-ssh.visualstudio.com", "codeberg.org",
+        ]
+
         /// The first key file that exists, else ssh's default keys
         var keyFile: String? {
             let fm = FileManager.default

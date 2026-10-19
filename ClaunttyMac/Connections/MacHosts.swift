@@ -6,7 +6,7 @@ import Foundation
 @MainActor
 final class MacHosts: ObservableObject {
     let store: ConnectionStore
-    /// Every host in ~/.ssh/config
+    /// The hosts in ~/.ssh/config you can open a shell on (not git forges)
     @Published private(set) var configHosts: [SSHConfig.Host] = []
 
     init(store: ConnectionStore) {
@@ -26,7 +26,7 @@ final class MacHosts: ObservableObject {
     /// Re-read ~/.ssh/config and refresh the opened hosts from it
     func reload() {
         let config = SSHConfig()
-        configHosts = config.hosts
+        configHosts = config.hosts.filter { !$0.isGitOnly }
         for connection in store.connections {
             let fresh = Self.connection(for: config.resolve(connection.name), lastConnected: connection.lastConnected)
             if fresh != connection { store.update(fresh) }

@@ -33,8 +33,12 @@ struct ClaunttyMacApp: App {
             .preferredColorScheme(.dark)
             .task { await start() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                // Back at the Mac: the panes on screen take their size back from the phone
+                // Back at the Mac: the panes on screen take their size back from the phone,
+                // and workspaces changed elsewhere show up (the phone does this on foreground)
                 sessionManager.showSplitPanes()
+                Task {
+                    for connection in hosts.opened { await sessionManager.refreshWorkspaces(for: connection) }
+                }
             }
             // Remember the pane you're on, so a relaunch (or a crash) comes back to it
             .onChange(of: sessionManager.activeSessionId) { _, _ in

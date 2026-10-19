@@ -49,6 +49,7 @@ struct MainView: View {
         // Another pane, or a split from the host: every pane in the tab runs
         .onChange(of: sessionManager.activeSessionId) { _, _ in sessionManager.showSplitPanes() }
         .onChange(of: shownLayout) { _, _ in sessionManager.showSplitPanes() }
+        .onChange(of: sessionManager.sessionStateVersion) { _, _ in sessionManager.refreshLayoutIfMissing() }
         .alert("Clauntty", isPresented: workspaceMessageShown) {
             Button("OK") { sessionManager.workspaceMessage = nil }
         } message: {
