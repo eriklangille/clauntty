@@ -102,6 +102,8 @@ def main():
         "SWIFT_COMPILATION_MODE": "wholemodule",
     }
     target = {
+        # ClaunttyMac/Assets.xcassets, made from the iOS icon by scripts/make-mac-icon.swift
+        "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
         # Signed with the Apple Development identity, no provisioning profile:
         # the app uses no entitlements that need one.
         "CODE_SIGN_IDENTITY": '"Apple Development"',

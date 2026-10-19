@@ -5,6 +5,8 @@
 #
 # Usage:
 #   ./scripts/mac.sh build                 # Debug build
+#   ./scripts/mac.sh release               # Release build (arm64 + x86_64), zipped to build/mac/Clauntty.zip,
+#                                          # and the command that installs it on another Mac
 #   ./scripts/mac.sh run [-- app args]     # build, quit the running app, launch
 #                                          # (CLAUNTTY_SSH_CONFIG=file: another ssh config)
 #   ./scripts/mac.sh quit
@@ -66,12 +68,36 @@ quit_app() {
     for _ in $(seq 1 20); do pgrep -f "$APP/Contents/MacOS/Clauntty" >/dev/null || return 0; sleep 0.1; done
 }
 
+RELEASE_APP="$DERIVED/Build/Products/Release/Clauntty.app"
+RELEASE_ZIP="$DERIVED/Clauntty.zip"
+
+release() {
+    xcodebuild -project "$PROJECT_DIR/ClaunttyMac.xcodeproj" -scheme ClaunttyMac -configuration Release \
+        -derivedDataPath "$DERIVED" -destination 'generic/platform=macOS' build 2>&1 \
+        | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+    [ -x "$RELEASE_APP/Contents/MacOS/Clauntty" ]
+    codesign --verify --deep --strict "$RELEASE_APP"
+    rm -f "$RELEASE_ZIP"
+    # ditto keeps the signature and bundle structure intact
+    ditto -c -k --keepParent "$RELEASE_APP" "$RELEASE_ZIP"
+}
+
 cmd="${1:-help}"
 shift || true
 
 case "$cmd" in
     build)
         build
+        ;;
+    release)
+        release
+        version=$(defaults read "$RELEASE_APP/Contents/Info.plist" CFBundleShortVersionString)
+        echo "Clauntty $version: $RELEASE_ZIP ($(du -h "$RELEASE_ZIP" | cut -f1), $(lipo -archs "$RELEASE_APP/Contents/MacOS/Clauntty"))"
+        echo
+        echo "Install on another Mac (HOST: this Mac's ssh name there). Copied over ssh, it has no"
+        echo "quarantine flag, so the development signature is enough:"
+        echo
+        echo "  ssh HOST cat '$RELEASE_ZIP' > /tmp/Clauntty.zip && { pkill -f /Applications/Clauntty.app/Contents/MacOS/Clauntty; rm -rf /Applications/Clauntty.app && ditto -x -k /tmp/Clauntty.zip /Applications && open /Applications/Clauntty.app; }"
         ;;
     run)
         [ "${1:-}" = "--" ] && shift

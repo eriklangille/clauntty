@@ -378,6 +378,11 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
+- **Release:** `./scripts/mac.sh release` builds Release for arm64 and x86_64, zips it to
+  `build/mac/Clauntty.zip` and prints the command that installs it on another Mac over ssh.
+  Signed with Apple Development (there's no Developer ID); copied over ssh it has no
+  quarantine flag, so Gatekeeper doesn't check it. The icon is the iOS one in the macOS
+  grid: `swift scripts/make-mac-icon.swift` regenerates `ClaunttyMac/Assets.xcassets`.
 - **Testing:** `scripts/mac.sh` is the counterpart of `sim.sh`: `run`, `shot`, `click`, `drag`,
   `scroll`, `type`, `key cmd+t`, `size W H`, `logs`. Input and screenshots go through
   mac-driver (sim-stream repo), which holds Screen Recording and Accessibility; it refuses
