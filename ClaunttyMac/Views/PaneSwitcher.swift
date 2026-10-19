@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// Whether the switcher is open; Cmd+K toggles it.
+/// The window's own state: the switcher (Cmd+K) and a zoomed pane.
 @MainActor
-final class PaneSwitcherState: ObservableObject {
-    @Published var shown = false
+final class WindowState: ObservableObject {
+    @Published var switcherShown = false
+    /// A pane shown alone in its split (Cmd+Shift+Return); the host's layout is unchanged
+    @Published var zoomedPane: String?
 }
 
 /// Cmd+K: type part of a pane, workspace or host name, Enter goes there. Arrows
@@ -11,7 +13,7 @@ final class PaneSwitcherState: ObservableObject {
 struct PaneSwitcher: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
-    @EnvironmentObject private var state: PaneSwitcherState
+    @EnvironmentObject private var window: WindowState
     @State private var query = ""
     @State private var selected = 0
     @FocusState private var fieldFocused: Bool
@@ -56,7 +58,7 @@ struct PaneSwitcher: View {
                 .onSubmit { choose(items) }
                 .onKeyPress(.downArrow) { move(1, in: items); return .handled }
                 .onKeyPress(.upArrow) { move(-1, in: items); return .handled }
-                .onKeyPress(.escape) { state.shown = false; return .handled }
+                .onKeyPress(.escape) { window.switcherShown = false; return .handled }
             Divider()
             if items.isEmpty {
                 Text("No panes match")
@@ -128,7 +130,7 @@ struct PaneSwitcher: View {
 
     private func choose(_ items: [Item]) {
         guard items.indices.contains(selected) else { return }
-        state.shown = false
+        window.switcherShown = false
         MainView.show(items[selected].id, sessionManager)
     }
 }

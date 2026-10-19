@@ -11,7 +11,7 @@ struct PaneSelection: Hashable {
 struct MainView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
-    @EnvironmentObject private var switcher: PaneSwitcherState
+    @EnvironmentObject private var window: WindowState
     let views: TerminalViews
 
     var body: some View {
@@ -23,11 +23,11 @@ struct MainView: View {
         }
         .navigationTitle(title)
         .overlay(alignment: .top) {
-            if switcher.shown {
+            if window.switcherShown {
                 ZStack(alignment: .top) {
                     // A click anywhere else closes it
                     Color.black.opacity(0.001)
-                        .onTapGesture { switcher.shown = false }
+                        .onTapGesture { window.switcherShown = false }
                     PaneSwitcher()
                         .padding(.top, 70)
                 }
@@ -37,7 +37,7 @@ struct MainView: View {
             ImageViewer(content: $sessionManager.imageViewer)
         }
         // Closed: typing goes back to the pane you're in
-        .onChange(of: switcher.shown) { _, shown in
+        .onChange(of: window.switcherShown) { _, shown in
             if !shown { refocus() }
         }
         .onChange(of: sessionManager.imageViewer == nil) { _, closed in
@@ -164,6 +164,20 @@ extension MainView {
         } else if groups.isEmpty {
             await sessionManager.newWorkspace(on: connection, folder: "~")
         }
+    }
+
+    /// Close a pane after asking: whatever runs in it ends, on every device.
+    static func closePane(_ selection: PaneSelection, title: String, _ sessionManager: SessionManager) {
+        show(selection, sessionManager)
+        let alert = NSAlert()
+        alert.messageText = "Close “\(title)”?"
+        alert.informativeText = "Whatever runs in it ends, on every device."
+        alert.addButton(withTitle: "Close Pane")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // It's the workspace's pane again in case something moved it while asking
+        show(selection, sessionManager)
+        Task { await sessionManager.performPaneAction(.close, groupId: selection.groupId) }
     }
 
     /// Show a pane: make it its workspace's pane, then switch to it.

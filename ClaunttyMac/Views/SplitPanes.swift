@@ -1,14 +1,18 @@
 import SwiftUI
 
-/// The tab the shown pane is in, its panes split as rtach keeps them. The pane you
-/// type into is the active session; the others are dimmed, and clicking one moves
-/// there.
+/// The tab the shown pane is in, its panes split as rtach keeps them, each under a
+/// title bar with its actions (as in Rex). The pane you type into is the active
+/// session; clicking another moves there. A zoomed pane fills the tab by itself.
 struct SplitPanes: View {
+    @EnvironmentObject private var window: WindowState
     let group: SessionGroup
     let views: TerminalViews
 
     var body: some View {
-        LayoutNode(layout: group.shownLayout, group: group, views: views)
+        let layout = group.shownLayout
+        let zoomed = window.zoomedPane == group.activePaneId && layout.paneIds.count > 1
+        LayoutNode(layout: zoomed ? .pane(group.activePaneId) : layout, group: group, views: views,
+                   showsHeaders: layout.paneIds.count > 1, zoomed: zoomed)
     }
 }
 
@@ -16,30 +20,36 @@ private struct LayoutNode: View {
     let layout: PaneLayout
     let group: SessionGroup
     let views: TerminalViews
+    let showsHeaders: Bool
+    let zoomed: Bool
 
     var body: some View {
         switch layout {
         case .pane(let paneId):
-            PaneTile(group: group, paneId: paneId, views: views)
+            PaneTile(group: group, paneId: paneId, views: views, showsHeader: showsHeaders, zoomed: zoomed)
         case .split(let vertical, let ratio, let first, let second):
             GeometryReader { geometry in
                 let total = vertical ? geometry.size.height : geometry.size.width
                 let firstSize = max(0, (total - SplitDivider.thickness) * min(max(ratio, 0.1), 0.9))
                 if vertical {
                     VStack(spacing: 0) {
-                        LayoutNode(layout: first, group: group, views: views).frame(height: firstSize)
+                        node(first).frame(height: firstSize)
                         SplitDivider(vertical: true)
-                        LayoutNode(layout: second, group: group, views: views)
+                        node(second)
                     }
                 } else {
                     HStack(spacing: 0) {
-                        LayoutNode(layout: first, group: group, views: views).frame(width: firstSize)
+                        node(first).frame(width: firstSize)
                         SplitDivider(vertical: false)
-                        LayoutNode(layout: second, group: group, views: views)
+                        node(second)
                     }
                 }
             }
         }
+    }
+
+    private func node(_ layout: PaneLayout) -> LayoutNode {
+        LayoutNode(layout: layout, group: group, views: views, showsHeaders: showsHeaders, zoomed: zoomed)
     }
 }
 
@@ -60,27 +70,102 @@ private struct PaneTile: View {
     let group: SessionGroup
     let paneId: String
     let views: TerminalViews
+    let showsHeader: Bool
+    let zoomed: Bool
 
     var body: some View {
-        if let session = sessionManager.sessions.first(where: { $0.groupId == group.id && $0.pane?.paneId == paneId }) {
-            let focused = paneId == group.activePaneId
-            ZStack {
-                TerminalContainer(session: session, views: views, focused: focused) {
-                    MainView.show(PaneSelection(groupId: group.id, paneId: paneId), sessionManager)
+        let focused = paneId == group.activePaneId
+        let selection = PaneSelection(groupId: group.id, paneId: paneId)
+        VStack(spacing: 0) {
+            if showsHeader, let pane = group.panes.first(where: { $0.id == paneId }) {
+                PaneHeader(pane: pane, selection: selection, focused: focused, zoomed: zoomed)
+            }
+            if let session = sessionManager.sessions.first(where: { $0.groupId == group.id && $0.pane?.paneId == paneId }) {
+                ZStack {
+                    TerminalContainer(session: session, views: views, focused: focused) {
+                        MainView.show(selection, sessionManager)
+                    }
+                    TerminalStatusOverlay(session: session) {
+                        Task { try? await sessionManager.reconnect(session: session) }
+                    }
+                    if !focused {
+                        // The title bar marks the pane you're in; this just recedes the others
+                        Color.black.opacity(0.15)
+                            .allowsHitTesting(false)
+                    }
                 }
-                TerminalStatusOverlay(session: session) {
-                    Task { try? await sessionManager.reconnect(session: session) }
+                .clipped()
+            } else {
+                ThemeColors.background
+            }
+        }
+        .background(ThemeColors.background)
+    }
+}
+
+/// Over a pane in a split: what's running in it, and its actions.
+private struct PaneHeader: View {
+    @EnvironmentObject private var sessionManager: SessionManager
+    @EnvironmentObject private var window: WindowState
+    let pane: TabPane
+    let selection: PaneSelection
+    let focused: Bool
+    let zoomed: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            StatusGlyph(status: pane.status)
+                .font(.callout)
+            Text(pane.title)
+                .font(.callout.weight(focused ? .semibold : .regular))
+                .foregroundStyle(focused ? .primary : .secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if !pane.status.label.isEmpty {
+                Text(pane.status.label)
+                    .font(.caption)
+                    .foregroundStyle(pane.status.color)
+            }
+            Spacer(minLength: 8)
+            Group {
+                button("rectangle.split.2x1", help: "Split Right (⌘D)") { split(.split) }
+                button("rectangle.split.1x2", help: "Split Down (⇧⌘D)") { split(.splitDown) }
+                button(zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                       help: zoomed ? "Show All Panes (⇧⌘↩)" : "Zoom Pane (⇧⌘↩)") {
+                    MainView.show(selection, sessionManager)
+                    window.zoomedPane = zoomed ? nil : selection.paneId
                 }
-                if !focused {
-                    Color.black.opacity(0.3)
-                        .allowsHitTesting(false)
+                button("xmark", help: "Close Pane (⇧⌘W)") {
+                    MainView.closePane(selection, title: pane.title, sessionManager)
                 }
             }
-            .background(ThemeColors.background)
-            .clipped()
-        } else {
-            ThemeColors.background
+            .foregroundStyle(focused ? .secondary : .tertiary)
         }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(focused ? Color.white.opacity(0.07) : Color.white.opacity(0.02))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { MainView.show(selection, sessionManager) }
+    }
+
+    private func button(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.callout)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// Split this pane, not the one you were in
+    private func split(_ action: PaneAction) {
+        MainView.show(selection, sessionManager)
+        Task { await sessionManager.performPaneAction(action, groupId: selection.groupId) }
     }
 }
 

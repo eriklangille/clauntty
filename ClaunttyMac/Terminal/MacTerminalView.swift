@@ -18,6 +18,8 @@ final class MacTerminalView: NSView, NSTextInputClient {
     var onScrollNearTop: (() -> Void)?
     /// Took the keyboard (clicked, or made first responder). Main thread.
     var onFocus: (() -> Void)?
+    /// Images pasted or dropped: uploaded to the host, then `pasteText` their paths
+    var onPasteImages: (([NSImage]) -> Void)?
     private let nearTopRows: UInt = 100
 
     /// Program output goes through here: ghostty_surface_write_pty_output can
@@ -45,6 +47,7 @@ final class MacTerminalView: NSView, NSTextInputClient {
 
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         wantsLayer = true
+        registerForDraggedTypes([.fileURL, .png, .tiff])
 
         Self.registryLock.lock()
         Self.registry[registryID] = Weak(view: self)
@@ -225,6 +228,15 @@ final class MacTerminalView: NSView, NSTextInputClient {
         return true
     }
 
+    /// Leaving the window with the keyboard doesn't resign it: the cursor would stay
+    /// drawn as focused
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, window?.firstResponder === self, let surface {
+            ghostty_surface_set_focus(surface, false)
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         // Which pane gets the keyboard is TerminalContainer's call
@@ -300,6 +312,15 @@ final class MacTerminalView: NSView, NSTextInputClient {
         guard event.type == .keyDown, window?.firstResponder === self,
               event.modifierFlags.contains(.control), !event.modifierFlags.contains(.command) else {
             return false
+        }
+        // Ctrl+V is how Claude Code pastes an image; the image is on this Mac, not the host.
+        // Only with nothing but an image on the clipboard: otherwise it's the program's ^V.
+        if event.charactersIgnoringModifiers == "v",
+           event.modifierFlags.intersection([.shift, .option]).isEmpty,
+           NSPasteboard.general.string(forType: .string) == nil,
+           let images = Self.images(on: NSPasteboard.general) {
+            onPasteImages?(images)
+            return true
         }
         keyDown(with: event)
         return true
@@ -505,8 +526,53 @@ final class MacTerminalView: NSView, NSTextInputClient {
     // MARK: Edit menu
 
     @objc func copy(_ sender: Any?) { perform("copy_to_clipboard") }
-    @objc func paste(_ sender: Any?) { perform("paste_from_clipboard") }
+
+    /// Text goes through Ghostty (bracketed paste). Images can't: they're uploaded to the
+    /// host and their paths pasted, which Claude Code attaches, as on the phone.
+    @objc func paste(_ sender: Any?) {
+        if let images = Self.images(on: NSPasteboard.general) {
+            onPasteImages?(images)
+        } else {
+            perform("paste_from_clipboard")
+        }
+    }
+
     @IBAction override func selectAll(_ sender: Any?) { perform("select_all") }
+
+    /// Paste text as Ghostty does, wrapped in bracketed paste when the program asked
+    /// for it: Claude Code tells a pasted image path from a typed one by that.
+    func pasteText(_ text: String) {
+        guard let surface else { return }
+        text.withCString { ghostty_surface_text(surface, $0, UInt(strlen($0))) }
+    }
+
+    /// Images to paste: image files (copied in Finder), else an image with no text
+    /// (a screenshot copied to the clipboard). Nil when it's text.
+    static func images(on pasteboard: NSPasteboard) -> [NSImage]? {
+        let files = (pasteboard.readObjects(forClasses: [NSURL.self],
+                                            options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let imageFiles = files.filter { (try? $0.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.conforms(to: .image) == true }
+        if !imageFiles.isEmpty {
+            let images = imageFiles.compactMap { NSImage(contentsOf: $0) }
+            return images.isEmpty ? nil : images
+        }
+        guard files.isEmpty, pasteboard.string(forType: .string) == nil,
+              let image = NSImage(pasteboard: pasteboard) else { return nil }
+        return [image]
+    }
+
+    // MARK: Drop
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        Self.images(on: sender.draggingPasteboard) == nil ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let images = Self.images(on: sender.draggingPasteboard) else { return false }
+        window?.makeFirstResponder(self)
+        onPasteImages?(images)
+        return true
+    }
 }
 
 extension MacTerminalView: NSMenuItemValidation {
@@ -515,7 +581,7 @@ extension MacTerminalView: NSMenuItemValidation {
         case #selector(copy(_:)):
             return surface.map { ghostty_surface_has_selection($0) } ?? false
         case #selector(paste(_:)):
-            return NSPasteboard.general.string(forType: .string) != nil
+            return NSPasteboard.general.string(forType: .string) != nil || Self.images(on: NSPasteboard.general) != nil
         default:
             return true
         }

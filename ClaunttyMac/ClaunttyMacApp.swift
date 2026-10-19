@@ -6,7 +6,7 @@ struct ClaunttyMacApp: App {
     @StateObject private var ghostty: MacGhosttyApp
     @StateObject private var sessionManager = SessionManager()
     @StateObject private var hosts = MacHosts(store: ConnectionStore())
-    @StateObject private var switcher = PaneSwitcherState()
+    @StateObject private var window = WindowState()
 
     init() {
         // Ghostty's global state (allocator, logging) must exist before any config or app.
@@ -27,7 +27,7 @@ struct ClaunttyMacApp: App {
             }
             .environmentObject(sessionManager)
             .environmentObject(hosts)
-            .environmentObject(switcher)
+            .environmentObject(window)
             .frame(minWidth: 640, minHeight: 360)
             // Dark like the terminal and the phone app
             .preferredColorScheme(.dark)
@@ -46,7 +46,7 @@ struct ClaunttyMacApp: App {
             }
         }
         .commands {
-            PaneCommands(sessionManager: sessionManager, hosts: hosts, switcher: switcher)
+            PaneCommands(sessionManager: sessionManager, hosts: hosts, window: window)
             CommandGroup(after: .toolbar) {
                 Button("Bigger") { ghostty.terminalViews?.adjustFontSize(by: 1) }
                     .keyboardShortcut("=")
@@ -80,11 +80,11 @@ struct ClaunttyMacApp: App {
 struct PaneCommands: Commands {
     @ObservedObject var sessionManager: SessionManager
     @ObservedObject var hosts: MacHosts
-    @ObservedObject var switcher: PaneSwitcherState
+    @ObservedObject var window: WindowState
 
     var body: some Commands {
         CommandMenu("Pane") {
-            Button("Go to Pane…") { switcher.shown.toggle() }
+            Button("Go to Pane…") { window.switcherShown.toggle() }
                 .keyboardShortcut("k")
                 .disabled(sessionManager.sessionGroups.isEmpty)
             Divider()
@@ -100,6 +100,9 @@ struct PaneCommands: Commands {
             Button(sessionManager.activeWebTab == nil ? "Close Pane…" : "Close Page") { closePane() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(activeGroup == nil && sessionManager.activeWebTab == nil)
+            Button(window.zoomedPane == nil ? "Zoom Pane" : "Show All Panes") { toggleZoom() }
+                .keyboardShortcut(.return, modifiers: [.command, .shift])
+                .disabled(activeGroup.map { $0.shownLayout.paneIds.count < 2 } ?? true)
             Divider()
             Button("Next Pane") { move(by: 1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
@@ -154,13 +157,12 @@ struct PaneCommands: Commands {
         }
         guard let group = activeGroup,
               let pane = group.panes.first(where: { $0.id == group.activePaneId }) else { return }
-        let alert = NSAlert()
-        alert.messageText = "Close “\(pane.title)”?"
-        alert.informativeText = "Whatever runs in it ends, on every device."
-        alert.addButton(withTitle: "Close Pane")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        Task { await sessionManager.performPaneAction(.close, groupId: group.id) }
+        MainView.closePane(PaneSelection(groupId: group.id, paneId: pane.id), title: pane.title, sessionManager)
+    }
+
+    private func toggleZoom() {
+        guard let group = activeGroup else { return }
+        window.zoomedPane = window.zoomedPane == group.activePaneId ? nil : group.activePaneId
     }
 
     private func move(by offset: Int) {

@@ -373,6 +373,12 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
 - **Another device's size:** when rtach says the PTY isn't ours (`Session.ptySize`), the
   terminal is drawn at that grid and `PaneHostView` scales it down from the top left; a
   click takes the pane back. Output waits for the resize, as on the phone.
+- **Sidebar:** one row per workspace (what runs in its shown pane, the phone's status
+  glyph for its most pressing pane, its pane dots); panes are in the split, each under a
+  title bar with split, zoom and close. Zoom (`WindowState.zoomedPane`) is local only.
+- **Pasting images:** Cmd+V, Ctrl+V (only with nothing but an image on the clipboard) and
+  dropping image files upload to the host's /tmp (`Session.uploadImage`) and paste the
+  path, as the phone does, so Claude Code attaches it.
 - **Images and pages:** `clauntty show` fills the shared `imageViewer`, shown by
   `ImageViewer` over the window. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).

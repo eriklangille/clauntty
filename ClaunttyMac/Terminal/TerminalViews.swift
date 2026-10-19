@@ -85,9 +85,17 @@ final class TerminalViews {
 
     private func place(_ view: MacTerminalView, of sessionId: UUID) {
         guard let container = containers[sessionId]?.last?.view, view.superview !== container else { return }
+        // Removing the view that has the keyboard leaves it with the window: it keeps it
+        let hadKeyboard = view.window?.firstResponder === view
         view.removeFromSuperview()
         container.addSubview(view)
         container.needsLayout = true
+        if hadKeyboard {
+            DispatchQueue.main.async { [weak view] in
+                guard let view, let window = view.window else { return }
+                window.makeFirstResponder(view)
+            }
+        }
     }
 
     /// Drop views whose sessions are gone (closed panes, ended workspaces).
@@ -118,6 +126,16 @@ final class TerminalViews {
             session?.sendWindowChange(rows: rows, columns: columns)
         }
         view.onUseHere = { [weak session] in session?.claimActive() }
+        // Uploaded to the host's /tmp, then their paths pasted, as the phone does
+        view.onPasteImages = { [weak session, weak view] images in
+            Task { @MainActor in
+                var paths: [String] = []
+                for image in images {
+                    if let path = await session?.uploadImage(image) { paths.append(path) }
+                }
+                if !paths.isEmpty { view?.pasteText(paths.joined(separator: " ")) }
+            }
+        }
         // Another device has the pane: draw it at that device's grid. Ours again (we
         // took it back, or the other device let go): back to this pane's size, which
         // wasn't sent meanwhile.
@@ -169,11 +187,14 @@ struct TerminalContainer: NSViewRepresentable {
         // keyboard back from the switcher's search field
         let takeKeyboard = focused && (added || !coordinator.wasFocused)
         context.coordinator.wasFocused = focused
-        guard takeKeyboard else { return }
-        // Not in the window yet, maybe: once it is
+        guard focused else { return }
+        // Not in the window yet, maybe: once it is. Also when nothing has the keyboard
+        // (the window itself does, after a split moved views around).
         DispatchQueue.main.async { [weak view] in
             guard let view, let window = view.window, window.firstResponder !== view else { return }
-            window.makeFirstResponder(view)
+            if takeKeyboard || window.firstResponder === window || window.firstResponder == nil {
+                window.makeFirstResponder(view)
+            }
         }
     }
 
