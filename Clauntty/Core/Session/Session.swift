@@ -766,10 +766,16 @@ class Session: ObservableObject, Identifiable {
         settleTimer = nil
         guard settling else { return }
         settling = false
+        // The program didn't redraw after the nudge: once more, or the pane stays blank
+        let missedRedraw = awaitingRedraw
         awaitingRedraw = false
         let held = settleHeld
         settleHeld = Data()
         if !held.isEmpty { writeToTerminal(held) }
+        if missedRedraw {
+            Logger.clauntty.warning("Session \(self.id.uuidString.prefix(8)): no redraw after the repaint nudge, nudging again")
+            forceRemoteRepaint()
+        }
     }
 
     /// Forward output to the terminal and keep the bookkeeping that goes with it
@@ -1370,7 +1376,11 @@ extension Session: RtachClient.RtachSessionDelegate {
 
     /// Make the remote program repaint by briefly changing the terminal size by one row
     private func forceRemoteRepaint() {
-        guard let size = lastWindowSize, size.rows > 2 else {
+        // Before the view has sent a size (a pane's first attach after launch), the size
+        // the channel opened at: the PTY's from this attach. Skipping the nudge then left
+        // the pane blank.
+        let size = lastWindowSize ?? (UInt16(clamping: attachSize.rows), UInt16(clamping: attachSize.columns))
+        guard size.rows > 2 else {
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): no size yet, skipping repaint nudge")
             return
         }
