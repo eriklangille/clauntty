@@ -88,6 +88,8 @@ final class VoiceAgent: ObservableObject {
     /// Notes for the model, held until no one is talking
     private var pendingNotes: [String] = []
     private var userSpeaking = false
+    /// Prompts sent during the current response, so a duplicate call doesn't send twice
+    private var promptsThisResponse: Set<String> = []
 
     private init() {}
 
@@ -110,6 +112,7 @@ final class VoiceAgent: ObservableObject {
         checking = false
         pendingNotes = []
         userSpeaking = false
+        promptsThisResponse = []
         openedAt = nil
         sentConfig = false
         configured = false
@@ -301,6 +304,7 @@ final class VoiceAgent: ObservableObject {
             }
 
         case "response.created":
+            promptsThisResponse = []
             responseActive = true
             lastActivity = Date()
             if phase != .speaking {
@@ -751,8 +755,14 @@ final class VoiceAgent: ObservableObject {
     private func sendPrompt(_ args: [String: Any]) async -> [String: Any] {
         let text = (args["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return ["error": "Give the text to send"] }
+        // The model has issued the same send twice in one reply, to different targets
+        let key = text.lowercased()
+        guard !promptsThisResponse.contains(key) else {
+            return ["error": "Not sent: you already sent this text in this reply. Send each message once."]
+        }
+        promptsThisResponse.insert(key)
         let target: Target
-        switch await resolveTarget(args, fresh: true) {
+        switch await resolveTarget(args, fresh: true, acting: true) {
         case .success(let found): target = found
         case .failure(let error): return error.output
         }
@@ -813,7 +823,7 @@ final class VoiceAgent: ObservableObject {
             return ["error": "Give one to ten keys, e.g. \"1\" or \"down enter\""]
         }
         let target: Target
-        switch await resolveTarget(args, fresh: true) {
+        switch await resolveTarget(args, fresh: true, acting: true) {
         case .success(let found): target = found
         case .failure(let error): return error.output
         }
@@ -929,7 +939,9 @@ final class VoiceAgent: ObservableObject {
         var title: String { agent?.title ?? tab.title }
     }
 
-    private func resolveTarget(_ args: [String: Any], fresh: Bool = false) async -> Result<Target, ToolError> {
+    /// `acting`: the call changes something (sends a prompt, presses keys), so in a tab
+    /// with several conversations it must name one rather than get the one on screen
+    private func resolveTarget(_ args: [String: Any], fresh: Bool = false, acting: Bool = false) async -> Result<Target, ToolError> {
         let query = (args["tab"] as? Int).map(String.init) ?? args["tab"] as? String ?? ""
         let tabs = voiceTabs()
         let tab: VoiceTab
@@ -962,7 +974,7 @@ final class VoiceAgent: ObservableObject {
         guard !scan.agents.isEmpty else {
             return .success(Target(tab: tab, session: session, scan: scan, agent: nil, number: 0))
         }
-        switch pickConversation(args, from: scan.agents, tab: tab) {
+        switch pickConversation(args, from: scan.agents, tab: tab, acting: acting) {
         case .success(let agent):
             let number = (scan.agents.firstIndex(of: agent) ?? 0) + 1
             return .success(Target(tab: tab, session: session, scan: scan, agent: agent, number: number))
@@ -973,11 +985,19 @@ final class VoiceAgent: ObservableObject {
 
     /// The conversation a tool call means: one Claude in the tab, or the one the
     /// `conversation` argument names (a number from list_tabs, or part of its title)
-    private func pickConversation(_ args: [String: Any], from agents: [ClaudeAgent], tab: VoiceTab) -> Result<ClaudeAgent, ToolError> {
+    private func pickConversation(_ args: [String: Any], from agents: [ClaudeAgent], tab: VoiceTab, acting: Bool = false) -> Result<ClaudeAgent, ToolError> {
         let query = ((args["conversation"] as? Int).map(String.init) ?? args["conversation"] as? String ?? "")
             .trimmingCharacters(in: .whitespaces).lowercased()
         if query.isEmpty {
             if agents.count == 1 { return .success(agents[0]) }
+            // Guessing wrong here types into the wrong Claude
+            if acting {
+                return .failure(ToolError([
+                    "tab": tab.number,
+                    "error": "Nothing was done: this tab has \(agents.count) Claude conversations. Call again with conversation set to the one you mean.",
+                    "conversations": agents.enumerated().map { Self.describe($1, number: $0 + 1) },
+                ]))
+            }
             // The one the multiplexer is showing
             if let focused = agents.first(where: \.focused) { return .success(focused) }
             return .failure(ToolError([
@@ -1221,6 +1241,9 @@ final class VoiceAgent: ObservableObject {
     Acting for the user:
     - Act only when the user asks. Never send a prompt, answer a menu or press keys on \
     your own initiative, even when the next step seems obvious; suggest it instead.
+    - Send each message once, to one conversation: one send_prompt call, never two for \
+    the same message. In a tab with several conversations, actions must name the \
+    conversation, by its number from read_tab or list_tabs.
     - Everything the user says is said to you, not to Claude. Call send_prompt only \
     when they explicitly ask you to pass something on: "tell it...", "send...", \
     "reply...", "ask it...", "say to Claude...". A remark that sounds like an answer \
@@ -1235,7 +1258,12 @@ final class VoiceAgent: ObservableObject {
     Claude I'm heading out" becomes "I'm heading out", "ask it to run the tests" \
     becomes "Run the tests", "ask Claude how it would fix the title" becomes "How \
     would you fix the title?", and "tell it you're testing it" becomes "The voice \
-    assistant is testing this right now". If you wrote the text yourself (the user said "tell it \
+    assistant is testing this right now". Claude hasn't heard your conversation with \
+    the user, so when their words point at something only the two of you know about \
+    ("this issue", "what we just talked about", "that error"), spell it out so the \
+    message makes sense on its own: "tell it to check the logs for this issue" becomes \
+    "Check the voice log: my 'commit it' was sent to two conversations and the wrong \
+    one committed". Say what you sent. If you wrote the text yourself (the user said "tell it \
     what you think" or similar), read it back first and send it only after they agree.
     - Claude's menus and questions (a permission prompt, a numbered choice) are answered \
     with press_keys, usually a number, or enter on the highlighted option. Read the \
