@@ -13,7 +13,6 @@ enum SidebarItem: Hashable {
 struct Sidebar: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
-    @EnvironmentObject private var window: WindowState
 
     var body: some View {
         List(selection: selection) {
@@ -41,16 +40,16 @@ struct Sidebar: View {
         .listStyle(.sidebar)
         // In the row of the window's buttons, where the toolbar was
         .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: 0) {
+                SidebarToggle()
+                    .padding(.leading, SidebarToggle.leading)
                 Spacer()
-                Button { window.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
-                    .help("Hide Sidebar (⌃⌘S)")
                 AddHostMenu()
                     .fixedSize()
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
+            .padding(.trailing, 12)
             .frame(height: PaneHeader.height)
         }
         // The window has no title bar: that row is ours
@@ -105,6 +104,26 @@ struct Sidebar: View {
                 }
             }
         )
+    }
+}
+
+/// Shows or hides the sidebar. In the same place either way, just past the window's
+/// buttons: in the sidebar when it's shown, else in the top-left title bar.
+struct SidebarToggle: View {
+    @EnvironmentObject private var window: WindowState
+    /// From the window's left edge
+    static let leading: CGFloat = 78
+
+    var body: some View {
+        Button { window.toggleSidebar() } label: {
+            Image(systemName: "sidebar.left")
+                .font(.callout)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(window.sidebar == .detailOnly ? "Show Sidebar (⌃⌘S)" : "Hide Sidebar (⌃⌘S)")
     }
 }
 

@@ -114,6 +114,7 @@ struct PaneHeader: View {
     @EnvironmentObject private var window: WindowState
     /// The window's title bar height, so the window's buttons sit in the top one
     static let height: CGFloat = 28
+    private static let padding: CGFloat = 10
     let pane: TabPane
     let selection: PaneSelection
     let focused: Bool
@@ -126,10 +127,8 @@ struct PaneHeader: View {
         let active = focused || !split
         HStack(spacing: 8) {
             if topLeft && window.sidebar == .detailOnly {
-                // Clear of the window's buttons
-                Color.clear.frame(width: 64, height: 1)
-                button("sidebar.left", help: "Show Sidebar (⌃⌘S)") { window.toggleSidebar() }
-                    .foregroundStyle(.secondary)
+                SidebarToggle()
+                    .padding(.leading, SidebarToggle.leading - Self.padding)
             }
             Group {
                 StatusGlyph(status: pane.status)
@@ -158,7 +157,7 @@ struct PaneHeader: View {
             }
             .foregroundStyle(active ? .secondary : .tertiary)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Self.padding)
         .frame(height: Self.height)
         .background {
             ZStack {

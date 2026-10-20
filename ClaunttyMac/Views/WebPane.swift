@@ -34,10 +34,8 @@ struct WebPane: View {
     private var bar: some View {
         HStack(spacing: 14) {
             if window.sidebar == .detailOnly {
-                // Clear of the window's buttons
-                Color.clear.frame(width: 54, height: 1)
-                Button { window.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
-                    .help("Show Sidebar (⌃⌘S)")
+                SidebarToggle()
+                    .padding(.leading, SidebarToggle.leading - 14)
             }
             Button { webTab.goBack() } label: { Image(systemName: "chevron.left") }
                 .disabled(!webTab.canGoBack)
