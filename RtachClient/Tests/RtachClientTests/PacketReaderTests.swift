@@ -355,6 +355,12 @@ final class PacketReaderTests: XCTestCase {
         return frame
     }
 
+    func testReady() {
+        // Empty, after an attach (rtach 2.30.0)
+        XCTAssertEqual(reader.process(makeFrame(type: .ready, payload: Data())), [.ready])
+        XCTAssertFalse(reader.lostSync)
+    }
+
     func testCompressedPayloadOver8xItsSize() {
         // A repaint of mostly spaces compresses far more than 8x; it used to come out cut short
         let original = Data(repeating: 0x20, count: 1_000_000)

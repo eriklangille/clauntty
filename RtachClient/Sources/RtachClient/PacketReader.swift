@@ -22,6 +22,8 @@ public enum RtachResponse: Sendable, Equatable {
     case handshake(Handshake)
     /// The PTY's size and whether it's this client's
     case ptySize(PtySize)
+    /// The screen is ready to show after an attach
+    case ready
 }
 
 /// Frame parser state machine for rtach server responses
@@ -240,6 +242,9 @@ public final class PacketReader {
                 return nil
             }
             return .ptySize(size)
+
+        case .ready:
+            return .ready
         }
     }
 }

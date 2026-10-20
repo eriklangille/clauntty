@@ -31,6 +31,11 @@ public protocol RtachSessionDelegate: AnyObject {
     /// handshakeFlagPtySize; asked for on entering framed mode)
     func rtachSession(_ session: RtachSession, didReceivePtySize size: PtySize)
 
+    /// Called after an attach when the screen is ready to show (masters with
+    /// handshakeFlagReady): after the replay, or for a program on the alternate screen,
+    /// before its redraw at the real size
+    func rtachSessionDidReceiveReady(_ session: RtachSession)
+
     /// Called once when the stream from rtach lost its place (PacketReader.lostSync):
     /// nothing more comes through until the session attaches again
     func rtachSessionLostSync(_ session: RtachSession)
@@ -38,6 +43,7 @@ public protocol RtachSessionDelegate: AnyObject {
 
 public extension RtachSessionDelegate {
     func rtachSessionLostSync(_ session: RtachSession) {}
+    func rtachSessionDidReceiveReady(_ session: RtachSession) {}
     func rtachSession(_ session: RtachSession, didReceiveHistoryPage meta: HistoryPageMeta, data: Data) {}
     func rtachSession(_ session: RtachSession, didReceivePtySize size: PtySize) {}
 }
@@ -103,6 +109,12 @@ public final class RtachSession {
     public var supportsPtySize: Bool {
         guard let h = handshake, h.isValid else { return false }
         return h.flags & ProtocolConstants.handshakeFlagPtySize != 0
+    }
+
+    /// Whether the master sends `ready` after an attach (rtach 2.30.0+)
+    public var supportsReady: Bool {
+        guard let h = handshake, h.isValid else { return false }
+        return h.flags & ProtocolConstants.handshakeFlagReady != 0
     }
 
     /// Protocol version string (e.g., "2.0")
@@ -279,6 +291,9 @@ public final class RtachSession {
 
         case .ptySize(let size):
             delegate?.rtachSession(self, didReceivePtySize: size)
+
+        case .ready:
+            delegate?.rtachSessionDidReceiveReady(self)
         }
     }
 

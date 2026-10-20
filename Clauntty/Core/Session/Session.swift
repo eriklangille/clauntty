@@ -702,7 +702,7 @@ class Session: ObservableObject, Identifiable {
             scrollbackBuffer.removeAll()
             // A program on the alternate screen gets no replay, only a redraw, and only
             // for a real size change (Node ignores a SIGWINCH at the same size)
-            if data.range(of: Self.altScreenEnter) != nil {
+            if !expectingReady, data.range(of: Self.altScreenEnter) != nil {
                 forceRemoteRepaint()
                 nudgedSinceAttach = true
             }
@@ -735,15 +735,20 @@ class Session: ObservableObject, Identifiable {
     private var nudgedSize: (rows: UInt16, columns: UInt16)?
     /// The repaint nudge went out for this attach
     private var nudgedSinceAttach = false
+    /// The master sends `ready` (rtach 2.30.0+): output is held until then, and it does
+    /// the repaint nudge itself. Older masters get the app's nudge and quiet window.
+    private var expectingReady = false
     /// No more output for this long: it has settled
     private static let settleQuiet: TimeInterval = 0.05
-    /// Held no longer than this after the attach, however busy the program
-    private static let settleLimit: TimeInterval = 1.0
+    /// Held no longer than this after the attach, however busy the program (the
+    /// master's nudge gives up after 0.5-1s)
+    private static let settleLimit: TimeInterval = 1.5
 
     private func beginSettling() {
         settleTimer?.cancel()
         settling = true
         nudgedSinceAttach = false
+        expectingReady = false
         awaitingRedraw = false
         settleHeld = Data()
         settleDeadline = Date().addingTimeInterval(Self.settleLimit)
@@ -757,8 +762,10 @@ class Session: ObservableObject, Identifiable {
         guard remaining > 0 else { return finishSettling() }
         let item = DispatchWorkItem { [weak self] in
             guard let self, self.settling else { return }
-            // Still waiting on the program's redraw for the real size
-            if self.awaitingRedraw, self.settleDeadline.timeIntervalSinceNow > 0 {
+            // Still waiting on the program's redraw for the real size, on `ready`, or on
+            // rtach at all (what came was from before its handshake: a login banner)
+            if self.awaitingRedraw || self.expectingReady || !self.rtachProtocol.isFramedMode,
+               self.settleDeadline.timeIntervalSinceNow > 0 {
                 return self.scheduleSettle(after: self.settleDeadline.timeIntervalSinceNow)
             }
             self.finishSettling()
@@ -773,9 +780,12 @@ class Session: ObservableObject, Identifiable {
         guard settling else { return }
         settling = false
         // The program didn't redraw after the nudge: once more, or the pane stays blank
-        // Or it's on the alternate screen and no nudge went out at all
-        let missedRedraw = awaitingRedraw || (!nudgedSinceAttach && settleHeld.range(of: Self.altScreenEnter) != nil)
+        // Or it's on the alternate screen and no nudge went out at all (the master does it
+        // when it sends `ready`)
+        let missedRedraw = !expectingReady && !rtachProtocol.supportsReady
+            && (awaitingRedraw || (!nudgedSinceAttach && settleHeld.range(of: Self.altScreenEnter) != nil))
         awaitingRedraw = false
+        expectingReady = false
         let held = settleHeld
         settleHeld = Data()
         if !held.isEmpty { writeToTerminal(held) }
@@ -1255,6 +1265,14 @@ extension Session: RtachClient.RtachSessionDelegate {
         }
     }
 
+    /// The screen is ready to show: write what's been held, and from now on as it comes
+    nonisolated func rtachSessionDidReceiveReady(_ session: RtachClient.RtachSession) {
+        onMain {
+            self.expectingReady = false
+            self.finishSettling()
+        }
+    }
+
     /// The stream from rtach lost its place (bytes missing or out of order): nothing more
     /// would show. Closing the channel attaches again with a fresh stream (onChannelInactive).
     nonisolated func rtachSessionLostSync(_ session: RtachClient.RtachSession) {
@@ -1429,8 +1447,12 @@ extension Session: RtachClient.RtachSessionDelegate {
                 self.pauseOutput()
             }
 
-            // A program on the alternate screen gets a repaint nudge once rtach's first
-            // output shows it's there (processTerminalData)
+            // The master says when the screen is ready (and nudges full-screen programs
+            // itself); with an older one, a program on the alternate screen gets the app's
+            // nudge once rtach's first output shows it's there (processTerminalData)
+            if self.settling, self.rtachProtocol.supportsReady {
+                self.expectingReady = true
+            }
 
             if self.pendingActiveClaim {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): applying deferred active claim")
