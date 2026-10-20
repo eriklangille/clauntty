@@ -31,6 +31,11 @@ forwards use the host's first connection. sshd allows 10 sessions per connection
 back when its channel closes. Closing a pane closes only its channel. Only one connect per host runs
 at a time (`connectingHosts`); the task records the new connection itself, so waiters find it.
 `connect()` opens no shell: an unread login shell used to sit on the host for every connection.
+rtach is checked once per host per launch (`hostDeployer`): one command for the binary's version
+(deployed, and old sessions upgraded, only when it isn't this version); the rest of the deploy
+(`finishDeploy`: helper scripts, the Claude hook, cleanup, spawnd) runs after, without holding up
+panes. Data that reaches a session before `attach()` (the handshake can) is held for it
+(`expectAttach`/`handleChannelData`).
 Idle panes let their channel go (`releaseIdlePanes`, 2s after switching or attaching settles): each
 host keeps the panes on screen, its 8 most recently shown (`Session.lastShownAt`) and busy agents'
 panes; the rest `rest()`, keeping their terminal, and attach again when shown, without a Connecting
