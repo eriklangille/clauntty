@@ -10,6 +10,8 @@ struct ContentView: View {
   @State private var showingFullTabSelector = false
   /// Settings → Agent Mode: the agent switcher instead of the tab bar
   @AppStorage("agentMode") private var agentMode = false
+  /// Debug: the voice button starts a pretend session (no xAI), to work on its look
+  @AppStorage("fakeVoice") private var fakeVoice = false
   @State private var portsSheetSession: Session?
   @State private var hasCheckedAutoConnect = false
   @State private var showingSpeechModelDownload = false
@@ -142,9 +144,14 @@ struct ContentView: View {
         .sheet(isPresented: $showingVoiceSettings) {
           VoiceSettingsSheet()
         }
+        // Agent view: the voice session as a sheet (the tab bar drops a panel instead)
+        .sheet(isPresented: Binding(get: { agentMode && showingVoicePanel }, set: { showingVoicePanel = $0 })) {
+          VoiceSessionSheet()
+        }
         .onReceive(VoiceAgent.shared.$lastSession.dropFirst()) { summary in
-          // Show how a session ended and what it cost
-          if summary != nil {
+          // Show how a session ended and what it cost (agent view shows it in the key
+          // bar, if it was open there)
+          if summary != nil && !agentMode {
             showingVoicePanel = true
           }
         }
@@ -233,6 +240,10 @@ struct ContentView: View {
     let agent = VoiceAgent.shared
     if agent.isActive {
       showingVoicePanel.toggle()
+    } else if fakeVoice {
+      #if DEBUG
+      agent.startFake(sessionManager: sessionManager)
+      #endif
     } else if !VoiceSettings.hasAPIKey {
       showingVoiceSettings = true
     } else {

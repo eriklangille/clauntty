@@ -43,6 +43,9 @@ final class VoiceAgent: ObservableObject {
     @Published private(set) var log: [LogEntry] = []
     /// The last finished session, shown in the panel and Settings
     @Published private(set) var lastSession: Summary?
+    /// The session (pane) the agent is looking at: the one its last tool call was about,
+    /// else the one on screen when it started. Agent view puts its eyes there.
+    @Published private(set) var lookingAt: UUID?
 
     var isActive: Bool { phase != .idle }
 
@@ -101,6 +104,7 @@ final class VoiceAgent: ObservableObject {
         self.sessionManager = sessionManager
 
         phase = .connecting
+        lookingAt = sessionManager.activeSession?.id
         cost = VoiceCost()
         remaining = Self.maxDuration
         log = []
@@ -175,8 +179,47 @@ final class VoiceAgent: ObservableObject {
         updateClock()
         lastSession = Summary(cost: cost, reason: reason)
         phase = .idle
+        lookingAt = nil
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
+
+    #if DEBUG
+    /// A pretend session, to work on how it looks without calling xAI (the `fakeVoice`
+    /// default): it moves between the tabs and through listening, thinking and speaking.
+    func startFake(sessionManager: SessionManager) {
+        guard phase == .idle else { return }
+        self.sessionManager = sessionManager
+        phase = .listening
+        cost = VoiceCost()
+        remaining = Self.maxDuration
+        log = []
+        lookingAt = sessionManager.activeSession?.id
+        append(.user, "What are my agents up to?")
+        append(.agent, "Two are working and one finished. Want me to read the finished one?")
+        append(.tool, "read tab 2")
+        append(.user, "Tell it to run the tests")
+        append(.tool, "sent to Release build for the laptop: Run the tests")
+        append(.agent, "Sent. It's running them now.")
+        var step = 0
+        let timer = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.phase != .idle else { return }
+                step += 1
+                self.remaining = max(0, self.remaining - 2.5)
+                self.phase = [.listening, .thinking, .speaking][step % 3]
+                // A new tab every other step
+                let tabs = self.voiceTabs()
+                if step % 2 == 0, !tabs.isEmpty {
+                    let index = (tabs.firstIndex { $0.session.id == self.lookingAt } ?? -1) + 1
+                    self.lookingAt = tabs[index % tabs.count].session.id
+                    self.append(.tool, "read tab \(index % tabs.count + 1)")
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+    #endif
 
     // MARK: - Socket
 
@@ -959,6 +1002,7 @@ final class VoiceAgent: ObservableObject {
         switch resolution {
         case .found(let index):
             (tab, session) = tabs[index]
+            lookingAt = session.id
         case .notFound:
             return .failure(ToolError(["error": "No tab matches \"\(query)\". Call list_tabs to see them."]))
         case .ambiguous(let indices):

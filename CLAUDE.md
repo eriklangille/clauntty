@@ -129,6 +129,15 @@ with rtach turned off. To try it in the simulator, run `rtach ws new demo` and `
 test container, then open the tab's menu. Fake panes for every terminal tab, without a host:
 `xcrun simctl spawn booted defaults write com.octerm.clauntty fakeTabPanes -bool YES` (`NO` to turn off).
 
+**Voice in agent view:** the pane the voice agent is looking at (`VoiceAgent.lookingAt`, its last
+tool call's pane) has its eyes (`VoiceEyes`) in its window's pill, looking down, and on the rail,
+looking left; its border is a little whiter. The eyes show the pane's status and teleport between
+windows (`teleportingEyes`). During a session the overview's voice button is the eyes (it opens
+`VoiceSessionSheet`), and the key bar's mic becomes a transcript button: the bar grows upward
+around `VoiceTranscriptPanel` (its keys fade out; the handle closes it). To work on the look
+without xAI, `defaults write com.octerm.clauntty fakeVoice -bool YES` (Debug builds): the voice
+button then starts a pretend session that moves between the tabs.
+
 ## IPA / TestFlight
 
 ```bash

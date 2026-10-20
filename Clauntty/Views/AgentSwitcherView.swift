@@ -146,6 +146,7 @@ struct AgentSwitcherView: View {
 
     @EnvironmentObject private var ghosttyApp: GhosttyApp
     @ObservedObject private var themeManager = ThemeManager.shared
+    @ObservedObject private var voice = VoiceAgent.shared
 
     /// The terminal's background, behind and around the windows
     private var background: Color {
@@ -282,9 +283,10 @@ struct AgentSwitcherView: View {
             .simultaneousGesture(fullscreen ? nil : pager(count: ids.count, heights: laidOut, items: items, loose: loose, maxScroll: maxScroll))
             .overlay(alignment: .trailing) {
                 if focused != nil && !fullscreen {
-                    // A last slot, a plus, for the controls
+                    // A last slot, a plus, for the controls. A voice session: the window the
+                    // agent is looking at has its eyes.
                     StatusRail(statuses: items.map { attentionStatus($0.session) }, webSlots: loose.count,
-                               current: atControls ? ids.count : current) { target in
+                               current: atControls ? ids.count : current, looking: voiceWindow(items)) { target in
                         jump(to: target, count: ids.count)
                     } onScrubEnd: { target in
                         commitFocus(target, items: items, loose: loose)
@@ -912,9 +914,10 @@ struct AgentSwitcherView: View {
         let activeIndex = info?.activeIndex ?? 0
         let webPanes = webPanes(of: tabId)
         let web = webShown(in: tabId)
+        let paneSessions = session.groupId.map { group in sessionManager.sessions.filter { $0.groupId == group } } ?? [session]
         return SwitcherWindow(
             session: session,
-            paneSessions: session.groupId.map { group in sessionManager.sessions.filter { $0.groupId == group } } ?? [session],
+            paneSessions: paneSessions,
             title: panes.indices.contains(activeIndex) ? panes[activeIndex].title : session.title,
             workspace: session.pane?.groupTitle ?? session.connectionConfig.displayName,
             panes: panes,
@@ -950,8 +953,22 @@ struct AgentSwitcherView: View {
             images: sessionManager.windowImages[tabId],
             imagesZoom: imagesZoom,
             onImages: { openImages = OpenImages(id: tabId) },
-            onClearImages: { clearImages(tabId) }
+            onClearImages: { clearImages(tabId) },
+            voice: voiceLooks(at: paneSessions) ? voice.phase : nil
         )
+    }
+
+    /// The voice agent is looking at one of these panes
+    private func voiceLooks(at sessions: [Session]) -> Bool {
+        guard voice.isActive, let id = voice.lookingAt else { return false }
+        return sessions.contains { $0.id == id }
+    }
+
+    /// The window the voice agent is looking at, by its place
+    private func voiceWindow(_ items: [(id: UUID, session: Session)]) -> Int? {
+        guard voice.isActive, let id = voice.lookingAt,
+              let looked = sessionManager.sessions.first(where: { $0.id == id }) else { return nil }
+        return items.firstIndex { $0.session.id == id || (looked.groupId != nil && $0.session.groupId == looked.groupId) }
     }
 
     /// Clear a window's images: swiped away from its corner, or seen in the viewer
@@ -1137,7 +1154,13 @@ struct AgentSwitcherView: View {
     /// Voice and a new tab, after the windows
     private var controls: some View {
         HStack(spacing: 14) {
-            GlassCircle(systemName: "waveform", size: 44, action: onVoice)
+            // During a session, the agent's eyes: tap for the conversation and End
+            if voice.isActive {
+                VoiceSessionButton(size: 44, action: onVoice)
+                    .transition(.scale.combined(with: .opacity))
+            } else {
+                GlassCircle(systemName: "waveform", size: 44, action: onVoice)
+            }
             GlassCircle(systemName: "plus", size: 44, action: onNewTab)
         }
         .padding(.top, 6)
@@ -1252,6 +1275,8 @@ struct SwitcherWindow: View {
     let imagesZoom: Namespace.ID
     let onImages: () -> Void
     let onClearImages: () -> Void
+    /// The voice agent is looking here, and what it's doing: its eyes and border
+    var voice: VoiceAgent.Phase? = nil
 
     enum Mode: Equatable {
         /// The last couple of lines: what the agent said, or the shell's prompt
@@ -1457,6 +1482,7 @@ struct SwitcherWindow: View {
         .overlay(
             RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous)
                 .strokeBorder(borderColor, lineWidth: status == .blocked || isFocused ? 1.5 : 1)
+                .animation(.easeInOut(duration: 0.5), value: voice != nil)
         )
         .overlay(alignment: .top) { header }
         .offset(y: pullDown)
@@ -1490,7 +1516,7 @@ struct SwitcherWindow: View {
                  room: menuRoom - 8, trailing: floatsPill, onOpen: { onMenu(true) }, onClose: { onMenu(false) },
                  onTap: { if !isFullscreen { onTap() } }) {
             PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex,
-                     web: web, webPanes: webPanes, activeWeb: activeWeb, glass: false)
+                     web: web, webPanes: webPanes, activeWeb: activeWeb, glass: false, eyes: voice != nil)
         }
         .gesture(isFullscreen ? pullGesture : nil)
         .simultaneousGesture(isFullscreen ? nil : swipeGesture)
@@ -1575,6 +1601,8 @@ struct SwitcherWindow: View {
     private var borderColor: Color {
         if isFullscreen { return .clear }
         if status == .blocked { return Color(uiColor: PaneStatus.blocked.tint).opacity(0.55) }
+        // The voice agent's eyes are here: a little whiter
+        if voice != nil { return Color.white.opacity(isFocused ? 0.5 : 0.22) }
         return Color.white.opacity(isFocused ? 0.35 : 0.08)
     }
 }
@@ -1933,14 +1961,26 @@ private struct PanePill: View {
     var activeWeb: Int? = nil
     /// Off when its menu draws the glass
     var glass = true
+    /// The voice agent is looking here: its eyes in place of the glyph
+    var eyes = false
 
     var body: some View {
         HStack(spacing: 7) {
             if let web {
                 WebPillLabel(webTab: web)
             } else {
-                StatusGlyph(status: status)
-                    .frame(width: 9, height: 9)
+                // The eyes teleport here from the window they left
+                ZStack {
+                    if eyes {
+                        VoiceEyes(status: status, size: 12, gaze: CGSize(width: 0, height: 1))
+                            .teleportingEyes()
+                    } else {
+                        StatusGlyph(status: status)
+                            .frame(width: 9, height: 9)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeIn(duration: 0.12), value: eyes)
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
@@ -1995,6 +2035,8 @@ private struct StatusRail: View {
     /// Web tabs with windows of their own, after the terminals
     var webSlots = 0
     let current: Int
+    /// The window the voice agent is looking at: its eyes in place of the dot
+    var looking: Int? = nil
     let onSelect: (Int) -> Void
     let onScrubEnd: (Int) -> Void
 
@@ -2008,11 +2050,18 @@ private struct StatusRail: View {
                         Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
                             .frame(width: 14, height: 14)
                     }
-                    if status == .none || status == .idle {
-                        Circle().fill(Color.white.opacity(0.35)).frame(width: 6, height: 6)
-                    } else {
-                        StatusGlyph(status: status).frame(width: 8, height: 8)
+                    if i == looking {
+                        VoiceEyes(status: status, size: 8, gaze: CGSize(width: -1, height: 0))
+                            .teleportingEyes()
                     }
+                    Group {
+                        if status == .none || status == .idle {
+                            Circle().fill(Color.white.opacity(0.35)).frame(width: 6, height: 6)
+                        } else {
+                            StatusGlyph(status: status).frame(width: 8, height: 8)
+                        }
+                    }
+                    .opacity(i == looking ? 0 : 1)
                 }
                 .frame(width: 24, height: Self.pitch)
             }
@@ -2039,6 +2088,8 @@ private struct StatusRail: View {
             }
             .frame(width: 24, height: Self.pitch)
         }
+        // The voice agent's eyes teleport from window to window
+        .animation(.easeIn(duration: 0.12), value: looking)
         .padding(.vertical, 8)
         .glass(in: Capsule())
         .contentShape(Capsule())

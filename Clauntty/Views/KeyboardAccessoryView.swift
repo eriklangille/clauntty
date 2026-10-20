@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 import os.log
 import Combine
 
@@ -64,12 +65,28 @@ class KeyboardAccessoryView: UIView {
         }
     }
 
-    /// A voice agent session owns the audio session; dictation waits until it ends
+    /// A voice agent session owns the audio session; dictation waits until it ends, and
+    /// the mic's place opens the session's transcript instead
     private var isVoiceSessionActive = false {
         didSet {
             updateMicButtonAppearance()
         }
     }
+
+    /// The bar grown upward around the voice session's transcript and End
+    private var isTranscriptOpen = false {
+        didSet { updateMicButtonAppearance() }
+    }
+    /// How far the bar grows for it, above its own frame (the terminal keeps its size)
+    private var transcriptRoom: CGFloat { isTranscriptOpen ? (isCompact ? 150 : 250) : 0 }
+    private lazy var transcriptHost: UIHostingController<VoiceTranscriptPanel> = {
+        let host = UIHostingController(rootView: VoiceTranscriptPanel { [weak self] in self?.setTranscriptOpen(false) })
+        host.view.backgroundColor = .clear
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        host.view.alpha = 0
+        return host
+    }()
+    private var transcriptHeightConstraint: NSLayoutConstraint?
 
     /// Track if speech model is ready
     private(set) var isSpeechModelReady = false {
@@ -550,10 +567,7 @@ class KeyboardAccessoryView: UIView {
         guard compact != isCompact else { return }
         isCompact = compact
         let c = compactConstraints!
-        c.shadowTop.constant = topPadding
-        c.containerTop.constant = topPadding
-        c.shadowHeight.constant = barHeight
-        c.containerHeight.constant = barHeight
+        applyBarHeight()
         c.handleTop.constant = dragHandleTopOffset
         c.nippleBottom.constant = -nippleBottomOffset
         glowLayer.cornerRadius = barHeight / 2
@@ -561,6 +575,55 @@ class KeyboardAccessoryView: UIView {
         containerEffectView.layer.cornerRadius = barHeight / 2
         invalidateIntrinsicContentSize()
         onHeightChange?()
+    }
+
+    /// The bar's height and top, grown upward by the transcript's room when it's open
+    private func applyBarHeight() {
+        guard let c = compactConstraints else { return }
+        c.shadowTop.constant = topPadding - transcriptRoom
+        c.containerTop.constant = topPadding - transcriptRoom
+        c.shadowHeight.constant = barHeight + transcriptRoom
+        c.containerHeight.constant = barHeight + transcriptRoom
+        // The keys go while it's open: it has the bar's own height too, below the handle
+        transcriptHeightConstraint?.constant = isTranscriptOpen
+            ? transcriptRoom + barHeight - dragHandleTopOffset - dragHandleHeight - 8 - bottomPadding
+            : 0
+    }
+
+    /// Open or close the voice session's transcript: the bar grows up from where it is
+    private func setTranscriptOpen(_ open: Bool) {
+        guard open != isTranscriptOpen else { return }
+        if open, transcriptHost.view.superview == nil {
+            containerEffectView.contentView.addSubview(transcriptHost.view)
+            let height = transcriptHost.view.heightAnchor.constraint(equalToConstant: 0)
+            transcriptHeightConstraint = height
+            NSLayoutConstraint.activate([
+                transcriptHost.view.topAnchor.constraint(equalTo: dragHandle.bottomAnchor, constant: 8),
+                transcriptHost.view.leadingAnchor.constraint(equalTo: containerEffectView.contentView.leadingAnchor, constant: 18),
+                transcriptHost.view.trailingAnchor.constraint(equalTo: containerEffectView.contentView.trailingAnchor, constant: -18),
+                height,
+            ])
+            layoutIfNeeded()
+        }
+        isTranscriptOpen = open
+        applyBarHeight()
+        for keys in [leftStackView, rightStackView, nippleContainerView] {
+            keys.isUserInteractionEnabled = !open
+        }
+        UIView.animate(withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) {
+            self.transcriptHost.view.alpha = open ? 1 : 0
+            for keys in [self.leftStackView, self.rightStackView, self.nippleContainerView] {
+                keys.alpha = open ? 0 : 1
+            }
+            self.layoutIfNeeded()
+            self.glowLayer.frame = self.shadowHostView.bounds
+        }
+    }
+
+    /// Open, the bar reaches above its frame: touches there are its own
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if isTranscriptOpen, containerEffectView.frame.contains(point) { return true }
+        return super.point(inside: point, with: event)
     }
 
     override func safeAreaInsetsDidChange() {
@@ -666,9 +729,10 @@ class KeyboardAccessoryView: UIView {
         } else if isSpeechModelDownloading {
             iconName = "mic.fill"
             tintColor = .systemBlue  // Blue while downloading
-        } else if isVoiceSessionActive {
-            iconName = "mic.fill"
-            tintColor = .tertiaryLabel
+        } else if isVoiceSessionActive || isTranscriptOpen {
+            // The voice session's transcript
+            iconName = isTranscriptOpen ? "text.bubble.fill" : "text.bubble"
+            tintColor = .label
         } else {
             iconName = "mic.fill"
             tintColor = isSpeechModelReady ? .label : .secondaryLabel
@@ -797,6 +861,8 @@ class KeyboardAccessoryView: UIView {
     }
 
     @objc private func handleDragHandleTap() {
+        // The voice transcript open: the handle closes it
+        if isTranscriptOpen { return setTranscriptOpen(false) }
         if isKeyboardShown {
             Logger.clauntty.debugOnly("[AccessoryBar] drag handle tap to dismiss")
             onDismissKeyboard?()
@@ -807,6 +873,7 @@ class KeyboardAccessoryView: UIView {
     }
 
     @objc private func handleSwipeToDismiss(_ gesture: UISwipeGestureRecognizer) {
+        if isTranscriptOpen { return setTranscriptOpen(false) }
         Logger.clauntty.debugOnly("[AccessoryBar] swipe down to dismiss")
         onDismissKeyboard?()
     }
@@ -819,6 +886,12 @@ class KeyboardAccessoryView: UIView {
     @objc private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
         let translation = gesture.translation(in: self)
         let velocity = gesture.velocity(in: self)
+
+        // The voice transcript open: pulled down, it closes; the keyboard stays
+        if isTranscriptOpen {
+            if gesture.state == .ended, translation.y > 20 || velocity.y > 300 { setTranscriptOpen(false) }
+            return
+        }
 
         switch gesture.state {
         case .changed:
@@ -900,9 +973,8 @@ class KeyboardAccessoryView: UIView {
         micHoldTimer?.invalidate()
         micHoldTimer = nil
 
-        if isVoiceSessionActive {
-            showTooltip(above: micButton, text: "Voice session active")
-            hideTooltipAfterDelay(delay: 1.5)
+        if isVoiceSessionActive || isTranscriptOpen {
+            setTranscriptOpen(!isTranscriptOpen)
             return
         }
 
