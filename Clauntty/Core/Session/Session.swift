@@ -470,6 +470,7 @@ class Session: ObservableObject, Identifiable {
 
         // Reset scrollback tracking state for reconnects
         // rtach will send scrollback when we reconnect to an existing session
+        resetBeforeReplay = expectsRtach
         historyBefore = ProtocolConstants.historyBeforeReplay
         emptyHistoryPages = 0
         scrollbackFullyLoaded = false
@@ -662,8 +663,20 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
+    /// The next output starts the terminal over: rtach replays the screen and recent
+    /// scrollback on every attach, and on top of what's already here it showed twice
+    private var resetBeforeReplay = false
+
     /// Process terminal data (forward to terminal and track scrollback)
     private func processTerminalData(_ data: Data) {
+        var data = data
+        if resetBeforeReplay {
+            resetBeforeReplay = false
+            // A full reset (ESC c) clears the screen and scrollback, in the same write as
+            // the replay so nothing draws in between. Older history pages in on scroll.
+            data = Data([0x1b, 0x63]) + data
+            scrollbackBuffer.removeAll()
+        }
         let sessionTitle = self.title.prefix(15)
         let hasCallback = self.onDataReceived != nil
         Logger.clauntty.verbose("DATA_FLOW[\(self.id.uuidString.prefix(8))] '\(sessionTitle)': \(data.count) bytes, callback=\(hasCallback)")
