@@ -26,7 +26,7 @@ struct Sidebar: View {
                                 .tag(SidebarItem.workspace(group.id))
                         case .web(let webTab, let nested):
                             WebTabRow(webTab: webTab)
-                                .padding(.leading, nested ? 26 : 0)
+                                .padding(.leading, nested ? WorkspaceRow.titleInset : 0)
                                 // They go with their workspace
                                 .moveDisabled(true)
                         }
@@ -181,23 +181,25 @@ extension SessionManager {
 /// pressing status, and a dot per pane as on the phone's tab.
 private struct WorkspaceRow: View {
     let group: SessionGroup
+    private static let glyphSpacing: CGFloat = 9
+    /// Where the title starts, for the rows nested under it
+    static let titleInset = StatusGlyph.defaultSize + glyphSpacing
 
     var body: some View {
         let (title, subtitle) = group.sidebarTitles
         // One line, so every row is the same height; what runs in a named workspace is
         // in its pane's title bar, and in the tooltip
-        HStack(spacing: 10) {
+        HStack(spacing: Self.glyphSpacing) {
             StatusGlyph(status: group.mostPressingStatus)
-                .frame(width: 18)
             Text(title)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .lineLimit(1)
             Spacer(minLength: 0)
             if group.panes.count > 1 {
                 PaneDots(panes: group.panes, activeId: group.activePaneId)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 2)
         .help(subtitle.map { "\(title) · \($0)" } ?? title)
     }
 }
@@ -220,8 +222,9 @@ extension SessionGroup {
 /// a pulsing orange dot when it needs you, green when done, a hollow ring when idle, a
 /// small dot for a pane with no agent.
 struct StatusGlyph: View {
+    static let defaultSize: CGFloat = 10
     let status: PaneStatus
-    var size: CGFloat = 10
+    var size: CGFloat = defaultSize
 
     var body: some View {
         Group {
@@ -399,6 +402,8 @@ private struct HostHeader: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+        // In line with the rows' status glyphs
+        .padding(.leading, 2)
         .padding(.top, 6)
     }
 }
