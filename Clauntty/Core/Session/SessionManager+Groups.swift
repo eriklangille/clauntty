@@ -129,7 +129,8 @@ extension SessionManager {
         }
         let dir = Self.directoryName(state.cwd)
         if let fg = state.fg, !fg.isEmpty, !Self.shells.contains(fg) {
-            return dir.isEmpty ? fg : "\(fg) · \(dir)"
+            // At home the directory says nothing
+            return dir.isEmpty || dir == "~" ? fg : "\(fg) · \(dir)"
         }
         return dir.isEmpty ? fallbackTitle : dir
     }

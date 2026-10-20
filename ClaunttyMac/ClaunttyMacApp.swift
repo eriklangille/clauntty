@@ -45,6 +45,8 @@ struct ClaunttyMacApp: App {
                 sessionManager.savePersistence()
             }
         }
+        // A slim title bar: the terminal gets the height
+        .windowToolbarStyle(.unifiedCompact)
         .commands {
             PaneCommands(sessionManager: sessionManager, hosts: hosts, window: window)
             CommandGroup(after: .toolbar) {

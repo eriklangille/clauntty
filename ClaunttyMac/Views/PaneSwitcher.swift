@@ -95,8 +95,7 @@ struct PaneSwitcher: View {
 
     private func row(_ item: Item, highlighted: Bool) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: item.status.symbolName)
-                .foregroundStyle(item.status.color)
+            StatusGlyph(status: item.status)
                 .frame(width: 18)
             Text(item.title)
                 .lineLimit(1)

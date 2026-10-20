@@ -84,56 +84,99 @@ private struct WorkspaceRow: View {
     let group: SessionGroup
 
     var body: some View {
-        let shown = group.panes.first { $0.id == group.activePaneId } ?? group.panes.first
-        let (title, subtitle) = Self.titles(group, shown: shown)
-        HStack(spacing: 10) {
+        let (title, subtitle) = group.sidebarTitles
+        HStack(alignment: .top, spacing: 10) {
+            // Centred on the title's line
             StatusGlyph(status: group.mostPressingStatus)
-                .frame(width: 18)
+                .frame(width: 18, height: 17)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .lineLimit(1)
-                if subtitle != nil || group.panes.count > 1 {
-                    HStack(spacing: 8) {
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        if group.panes.count > 1 {
-                            PaneDots(panes: group.panes, activeId: group.activePaneId)
-                        }
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if group.panes.count > 1 {
+                        PaneDots(panes: group.panes, activeId: group.activePaneId)
                     }
+                }
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
         }
         .padding(.vertical, 5)
     }
+}
 
-    /// The workspace's name and what's running in it. Workspaces named after a folder
-    /// (`~`, a path) take the running thing's name instead.
-    static func titles(_ group: SessionGroup, shown: TabPane?) -> (String, String?) {
+extension SessionGroup {
+    /// The workspace's name and what's running in the pane it shows. Workspaces named
+    /// after a folder (`~`, a path) take the running thing's name instead.
+    var sidebarTitles: (title: String, subtitle: String?) {
+        let shown = panes.first { $0.id == activePaneId } ?? panes.first
         let paneTitle = shown?.title ?? ""
-        let name = group.title
-        guard !name.isEmpty, name != "~", !name.hasPrefix("/") else {
+        guard !title.isEmpty, title != "~", !title.hasPrefix("/") else {
             return (paneTitle.isEmpty || paneTitle == "~" ? "shell" : paneTitle, nil)
         }
         // A shell at home says nothing more than the name
-        return (name, paneTitle == name || paneTitle == "~" || paneTitle.isEmpty ? nil : paneTitle)
+        return (title, paneTitle == title || paneTitle == "~" || paneTitle.isEmpty ? nil : paneTitle)
     }
 }
 
-/// The phone's status glyphs and colours; a quiet terminal for a pane with no agent
+/// The phone's status indicator (`PaneStatusIndicator`): a spinning arc while working,
+/// a pulsing orange dot when it needs you, green when done, a hollow ring when idle, a
+/// small dot for a pane with no agent.
 struct StatusGlyph: View {
     let status: PaneStatus
+    var size: CGFloat = 10
 
     var body: some View {
-        Image(systemName: status.symbolName)
-            .font(status == .none ? .callout : .body)
-            .foregroundStyle(status.color)
-            .symbolEffect(.pulse, isActive: status == .working || status == .blocked)
+        Group {
+            switch status {
+            case .idle:
+                Circle().strokeBorder(status.color, lineWidth: 1.5)
+            case .working:
+                Spinning(color: status.color)
+            case .blocked:
+                Pulsing { Circle().fill(status.color).padding(size * 0.1) }
+            case .done:
+                Circle().fill(status.color).padding(size * 0.1)
+            case .none:
+                Circle().fill(status.color).padding(size * 0.3)
+            }
+        }
+        .frame(width: size, height: size)
+        // A new status starts its own animation
+        .id(status)
+    }
+
+    private struct Spinning: View {
+        let color: Color
+        @State private var turned = false
+
+        var body: some View {
+            Circle()
+                .trim(from: 0, to: 0.7)
+                .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                .padding(0.75)
+                .rotationEffect(.degrees(turned ? 360 : 0))
+                .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: turned)
+                .onAppear { turned = true }
+        }
+    }
+
+    private struct Pulsing<Content: View>: View {
+        @ViewBuilder let content: Content
+        @State private var faded = false
+
+        var body: some View {
+            content
+                .opacity(faded ? 0.3 : 1)
+                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: faded)
+                .onAppear { faded = true }
+        }
     }
 }
 
@@ -196,8 +239,8 @@ extension PaneStatus {
     /// The phone's status colours
     var color: Color {
         switch self {
-        case .none: return .secondary.opacity(0.6)
-        case .idle: return .secondary
+        case .none: return .primary.opacity(0.35)
+        case .idle: return .primary.opacity(0.6)
         case .working: return .cyan
         case .blocked: return .orange
         case .done: return .green

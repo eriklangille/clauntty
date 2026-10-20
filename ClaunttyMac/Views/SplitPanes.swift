@@ -115,7 +115,6 @@ private struct PaneHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             StatusGlyph(status: pane.status)
-                .font(.callout)
             Text(pane.title)
                 .font(.callout.weight(focused ? .semibold : .regular))
                 .foregroundStyle(focused ? .primary : .secondary)

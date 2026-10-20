@@ -84,12 +84,11 @@ struct MainView: View {
 
     private var title: String {
         if let webTab = sessionManager.activeWebTab { return webTab.title }
-        guard let session = sessionManager.activeSession,
-              let group = sessionManager.sessionGroup(for: session),
-              let pane = group.panes.first(where: { $0.id == group.activePaneId }) else {
+        guard let session = sessionManager.activeSession, let group = sessionManager.sessionGroup(for: session) else {
             return "Clauntty"
         }
-        return group.panes.count > 1 ? "\(group.title) · \(pane.title)" : group.title
+        // As in the sidebar; panes in a split have their own title bars
+        return group.sidebarTitles.title
     }
 
     private var workspaceMessageShown: Binding<Bool> {
