@@ -349,7 +349,7 @@ extension SessionGroup {
     }
 }
 
-/// The host's name in small caps, with a chevron: its menu (New Workspace, Refresh,
+/// The host's name in small caps, with a "…": its menu (New Workspace, Refresh,
 /// Remove Host).
 private struct HostHeader: View {
     @EnvironmentObject private var sessionManager: SessionManager
@@ -378,8 +378,9 @@ private struct HostHeader: View {
                 Text(connection.name.uppercased())
                     .font(.caption.weight(.semibold))
                     .tracking(0.6)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
+                // Not a chevron: the section's own folds it, on hover
+                Image(systemName: "ellipsis")
+                    .font(.caption2.weight(.semibold))
             }
             .contentShape(Rectangle())
         }
