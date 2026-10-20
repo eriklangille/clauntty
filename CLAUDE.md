@@ -418,7 +418,7 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   with a photo badge on its sidebar row, until you go there. Closing the viewer clears
   them. It opens out of the pane that ran it (`ImageViewerContent.source`,
   `TerminalViews.frameInWindow`). Zoom, paging, the
-  self-hiding bar and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
+  bar (always shown; each button's label under it on hover) and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.

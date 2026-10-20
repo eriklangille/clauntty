@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 
 /// Images from `clauntty show`, over the workspace whose pane ran it, as the phone shows
 /// them. The image springs out of that pane, over the workspace blurred, and shrinks back
-/// into it on closing. The bar and thumbnails fade away while the mouse rests and come
-/// back when it moves.
+/// into it on closing. The bar and thumbnails stay; each button says what it does on
+/// hover.
 ///
 /// Pinch, double-click or Cmd+= / Cmd+− zoom; scrolling or dragging pans a zoomed
 /// image. A two-finger swipe, the arrow keys, the side arrows or a thumbnail turn the
@@ -28,9 +28,6 @@ struct ImageViewer: View {
     @State private var panStart: CGSize?
     @State private var windowSize: CGSize = .zero
     @State private var pointer: CGPoint?
-    @State private var chromeShown = true
-    @State private var overChrome = false
-    @State private var hideChrome: Task<Void, Never>?
     @State private var scrollMonitor: Any?
     /// A two-finger swipe so far, in points
     @State private var swipe: CGFloat = 0
@@ -92,10 +89,8 @@ struct ImageViewer: View {
                 switch phase {
                 case .active(let location):
                     pointer = location
-                    reveal()
                 case .ended:
                     pointer = nil
-                    reveal(for: .milliseconds(400))
                 }
             }
             .focusable()
@@ -172,7 +167,7 @@ struct ImageViewer: View {
         }
     }
 
-    /// The bar, the side arrows and the thumbnails, faded out while the mouse rests
+    /// The bar, the side arrows (when the mouse comes near) and the thumbnails
     private func chrome(_ content: ImageViewerContent, index: Int, size: CGSize) -> some View {
         let items = content.items
         let nearLeft = (pointer?.x ?? .infinity) < 160 && index > 0
@@ -203,9 +198,6 @@ struct ImageViewer: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.75), value: nearRight)
         }
         .environment(\.colorScheme, .dark)
-        .opacity(chromeShown ? 1 : 0)
-        .offset(y: chromeShown ? 0 : -4)
-        .allowsHitTesting(chromeShown)
     }
 
     private func topBar(_ item: ImageViewerContent.Item, host: String, index: Int, count: Int) -> some View {
@@ -222,23 +214,21 @@ struct ImageViewer: View {
             .padding(.leading, 8)
             Spacer(minLength: 16)
             if let image = item.image {
-                ChromeButton(symbol: "doc.on.doc", help: "Copy (⌘C)") { copy(image) }
-                ChromeButton(symbol: "square.and.arrow.down", help: "Save… (⌘S)") { save(item) }
+                ChromeButton(symbol: "doc.on.doc", label: "Copy (⌘C)") { copy(image) }
+                ChromeButton(symbol: "square.and.arrow.down", label: "Save… (⌘S)") { save(item) }
                 ShareLink(item: Image(nsImage: image), preview: SharePreview(item.name, image: Image(nsImage: image))) {
-                    HoverIcon(symbol: "square.and.arrow.up")
+                    HoverIcon(symbol: "square.and.arrow.up", label: "Share")
                 }
                 .buttonStyle(PressStyle())
-                .help("Share")
-                ChromeButton(symbol: "arrow.up.forward.app", help: "Open in Preview") { openInPreview(item) }
+                ChromeButton(symbol: "arrow.up.forward.app", label: "Open in Preview") { openInPreview(item) }
             }
-            ChromeButton(symbol: "xmark", help: "Close (Esc)") { close() }
+            ChromeButton(symbol: "xmark", label: "Close (Esc)") { close() }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: 680)
         .glass(in: .capsule)
         .padding(.horizontal, 24)
-        .onHover { hovering in overChrome = hovering }
     }
 
     private func thumbnails(_ items: [ImageViewerContent.Item], index: Int) -> some View {
@@ -260,7 +250,6 @@ struct ImageViewer: View {
             }
         }
         .glass(in: .rect(cornerRadius: 16))
-        .onHover { hovering in overChrome = hovering }
     }
 
     // MARK: Layout
@@ -422,14 +411,11 @@ struct ImageViewer: View {
             page = index
             zoom = Zoom()
         }
-        reveal()
     }
 
     private func didOpen() {
         page = content?.selection ?? 0
         zoom = Zoom()
-        chromeShown = true
-        reveal(for: .milliseconds(2500))
         // After the terminal has let go of the keyboard
         DispatchQueue.main.async { focused = true }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
@@ -440,25 +426,11 @@ struct ImageViewer: View {
     private func didClose() {
         if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
         scrollMonitor = nil
-        hideChrome?.cancel()
         pointer = nil
     }
 
     private func close() {
         content = nil
-    }
-
-    /// Show the bar and thumbnails; they fade out again once the mouse rests
-    private func reveal(for duration: Duration = .seconds(2)) {
-        if !chromeShown {
-            withAnimation(.easeOut(duration: 0.2)) { chromeShown = true }
-        }
-        hideChrome?.cancel()
-        hideChrome = Task { @MainActor in
-            try? await Task.sleep(for: duration)
-            guard !Task.isCancelled, !overChrome else { return }
-            withAnimation(.easeInOut(duration: 0.5)) { chromeShown = false }
-        }
     }
 
     // MARK: Actions
@@ -517,10 +489,13 @@ struct ImageViewer: View {
 
 // MARK: - Controls
 
-/// An icon in the bar: a soft circle comes up under it on hover
+/// An icon in the bar: a soft circle comes up under it on hover, and what it does just
+/// below the bar (sooner than a system tooltip)
 private struct HoverIcon: View {
     let symbol: String
+    let label: String
     @State private var hovering = false
+    @State private var labelShown = false
 
     var body: some View {
         Image(systemName: symbol)
@@ -529,21 +504,35 @@ private struct HoverIcon: View {
             .background(Circle().fill(.white.opacity(hovering ? 0.16 : 0)))
             .scaleEffect(hovering ? 1.08 : 1)
             .contentShape(Circle())
+            .overlay(alignment: .top) {
+                if labelShown {
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .fixedSize()
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(.black.opacity(0.8)))
+                        // Under the bar: the icon, the bar's padding, a gap
+                        .offset(y: 30 + 8 + 8)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                }
+            }
             .onHover { hovering in
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { self.hovering = hovering }
+                withAnimation(.easeOut(duration: 0.15).delay(hovering ? 0.25 : 0)) { labelShown = hovering }
             }
     }
 }
 
 private struct ChromeButton: View {
     let symbol: String
-    let help: String
+    let label: String
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) { HoverIcon(symbol: symbol) }
+        Button(action: action) { HoverIcon(symbol: symbol, label: label) }
             .buttonStyle(PressStyle())
-            .help(help)
     }
 }
 
