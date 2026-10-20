@@ -134,7 +134,10 @@ tool call's pane) has its eyes (`VoiceEyes`) in its window's pill, looking down,
 looking left; its border is a little whiter. The eyes show the pane's status and teleport between
 windows (`teleportingEyes`). During a session the overview's voice button is the eyes (it opens
 `VoiceSessionSheet`), and the key bar's mic becomes a transcript button: the bar grows upward
-around `VoiceTranscriptPanel` (its keys fade out; the handle closes it). To work on the look
+around `VoiceTranscriptPanel` (its keys fade out; its chevron, the handle or a swipe down closes
+it). Every pane has its own key bar; the transcript is open or closed in all of them at once
+(`transcriptShown`). The bar's `hitTest` widens the keys' targets, so while the transcript is open
+it hands touches to the panel instead. To work on the look
 without xAI, `defaults write com.octerm.clauntty fakeVoice -bool YES` (Debug builds): the voice
 button then starts a pretend session that moves between the tabs.
 
@@ -142,7 +145,8 @@ button then starts a pretend session that moves between the tabs.
 panes, with the state rtach reports for each (`paneStates`: agent, working/blocked/done, last
 prompt), so `list_tabs` asks nothing of the machines. Tools take `tab` and `pane` (default: the pane
 the tab shows; for tools that need Claude, the tab's only agent). A pane's Claude is found under its
-rtach session (`ClaudeScripts.find`) and read from `~/.claude`; prompts and keys are typed into the
+rtach session (`ClaudeScripts.find`) and read from `~/.claude` (only the last 30MB of a long
+conversation: its file can pass 900MB); prompts and keys are typed into the
 pane's own session, shown or not. "Finished" and "needs you" notes come from rtach's pane states.
 To try a tool without xAI (Debug builds): `xcrun simctl openurl booted
 'clauntty://voice-tool?name=read_tab&args=<url-encoded JSON>'`; the result is in the app container's

@@ -73,6 +73,10 @@ class KeyboardAccessoryView: UIView {
         }
     }
 
+    /// Open in every bar at once: each pane's terminal has its own bar, and the
+    /// transcript is the voice session's, not a pane's
+    private static let transcriptShown = CurrentValueSubject<Bool, Never>(false)
+
     /// The bar grown upward around the voice session's transcript and End
     private var isTranscriptOpen = false {
         didSet { updateMicButtonAppearance() }
@@ -81,6 +85,12 @@ class KeyboardAccessoryView: UIView {
     private var transcriptRoom: CGFloat { isTranscriptOpen ? (isCompact ? 150 : 250) : 0 }
     private lazy var transcriptHost: UIHostingController<VoiceTranscriptPanel> = {
         let host = UIHostingController(rootView: VoiceTranscriptPanel { [weak self] in self?.setTranscriptOpen(false) })
+        host.view.addGestureRecognizer({
+            // Swiped down on it: folds away
+            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(handleTranscriptSwipe))
+            swipe.direction = .down
+            return swipe
+        }())
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
         host.view.alpha = 0
@@ -309,6 +319,14 @@ class KeyboardAccessoryView: UIView {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] phase in
                 self?.isVoiceSessionActive = phase != .idle
+            }
+            .store(in: &cancellables)
+
+        Self.transcriptShown
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] open in
+                self?.applyTranscriptOpen(open)
             }
             .store(in: &cancellables)
     }
@@ -590,8 +608,17 @@ class KeyboardAccessoryView: UIView {
             : 0
     }
 
-    /// Open or close the voice session's transcript: the bar grows up from where it is
+    /// Open or close the voice session's transcript, in every pane's bar
     private func setTranscriptOpen(_ open: Bool) {
+        Self.transcriptShown.send(open)
+    }
+
+    @objc private func handleTranscriptSwipe() {
+        setTranscriptOpen(false)
+    }
+
+    /// The bar grows up from where it is around the transcript, or back down
+    private func applyTranscriptOpen(_ open: Bool) {
         guard open != isTranscriptOpen else { return }
         if open, transcriptHost.view.superview == nil {
             containerEffectView.contentView.addSubview(transcriptHost.view)
@@ -610,7 +637,8 @@ class KeyboardAccessoryView: UIView {
         for keys in [leftStackView, rightStackView, nippleContainerView] {
             keys.isUserInteractionEnabled = !open
         }
-        UIView.animate(withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) {
+        // A bar that isn't on screen just takes the state
+        UIView.animate(withDuration: window == nil ? 0 : 0.45, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) {
             self.transcriptHost.view.alpha = open ? 1 : 0
             for keys in [self.leftStackView, self.rightStackView, self.nippleContainerView] {
                 keys.alpha = open ? 0 : 1
@@ -1260,6 +1288,15 @@ class KeyboardAccessoryView: UIView {
         // Hidden views must not receive touches
         // UIKit normally skips hidden views, but we override hitTest so we must check manually
         guard !isHidden else { return nil }
+
+        // The voice transcript open: no keys, so its handle and the panel get touches as
+        // they are (the widened key targets below would send them to the hidden keys)
+        if isTranscriptOpen {
+            guard containerEffectView.frame.contains(point) else { return nil }
+            let handleFrame = dragHandle.convert(dragHandle.bounds, to: self).insetBy(dx: -25, dy: -10)
+            if handleFrame.contains(point) { return dragHandle }
+            return transcriptHost.view.hitTest(convert(point, to: transcriptHost.view), with: event) ?? containerEffectView
+        }
 
         // Check nipple - it's on top and overlaps the container
         let nippleFrame = nippleContainerView.frame

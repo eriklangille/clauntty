@@ -1154,13 +1154,8 @@ struct AgentSwitcherView: View {
     /// Voice and a new tab, after the windows
     private var controls: some View {
         HStack(spacing: 14) {
-            // During a session, the agent's eyes: tap for the conversation and End
-            if voice.isActive {
-                VoiceSessionButton(size: 44, action: onVoice)
-                    .transition(.scale.combined(with: .opacity))
-            } else {
-                GlassCircle(systemName: "waveform", size: 44, action: onVoice)
-            }
+            // During a session: the conversation and End
+            GlassCircle(systemName: "waveform", size: 44, action: onVoice)
             GlassCircle(systemName: "plus", size: 44, action: onNewTab)
         }
         .padding(.top, 6)

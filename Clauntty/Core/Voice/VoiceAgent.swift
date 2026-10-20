@@ -735,10 +735,18 @@ final class VoiceAgent: ObservableObject {
             return readPlain(target)
         }
         guard let transcript = await transcript(for: agent, in: target.session) else {
-            return target.ids.merging(["error": "Couldn't read the Claude conversation's history"]) { $1 }
+            // The screen still says something
+            return target.ids.merging([
+                "error": "Couldn't read the Claude conversation's history; only its screen",
+                "claude": describe(agent, in: target),
+                "screen_bottom": screenBottom(target.session),
+            ]) { $1 }
         }
         var output = target.ids
         output["claude"] = describe(agent, in: target)
+        if transcript.partial {
+            output["history_note"] = "A long conversation: only its recent turns were read, and turn numbers count from there"
+        }
         if target.tab.panes.count > 1 && args["pane"] == nil {
             output["other_panes"] = target.tab.panes.filter { $0 != target.pane }.map { "\($0.number): \($0.title)" }
         }
@@ -798,6 +806,9 @@ final class VoiceAgent: ObservableObject {
         append(.tool, "searched \(target.title) for \"\(query)\"")
         let result = transcript.search(query)
         var output = target.ids
+        if transcript.partial {
+            output["history_note"] = "A long conversation: only its recent turns were searched"
+        }
         output["total_turns"] = transcript.turns.count
         output["matches"] = result.hits.map { "Turn \($0.turn), \($0.who): \($0.snippet)" }
         if result.total > result.hits.count {
@@ -1238,6 +1249,8 @@ final class VoiceAgent: ObservableObject {
     that one.
     - Before saying what a conversation did or asked, or giving advice, read it with \
     read_tab. Read only the conversations the question is about, not all of them.
+    - Never describe a screen or conversation you haven't read in this session. If a \
+    read fails, say so in a few words; don't guess.
     - For anything older or more detailed, look it up instead of guessing: search_tab \
     finds turns that mention something, read_turn reads one turn in full. If you still \
     can't find it, say you don't know.

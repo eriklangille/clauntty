@@ -93,15 +93,24 @@ enum ClaudeScripts {
     ///   text<TAB>{"text":"..."}
     ///   tool<TAB>{"name":"Bash"}<TAB>{"description":"..."}
     ///   title<TAB>{"aiTitle":"..."}
+    /// and `partial` first when the conversation is long and only its end was read.
     /// Leaves out thinking, tool results and outputs, attachments, skill text, compaction
     /// summaries and subagents. Bash calls carry Claude's description, never the command,
     /// which can hold secrets (a database URL with its password, say).
-    static func extract(sessionId: String) -> String? {
+    /// A long conversation's file runs to hundreds of MB (tool results, screenshots), more
+    /// than can be read in time: only its last `recentBytes` are, from a whole line.
+    static func extract(sessionId: String, recentBytes: Int = 30_000_000) -> String? {
         guard isSafe(sessionId) else { return nil }
         return #"""
         for t in "$HOME"/.claude/projects/*/"\#(sessionId)".jsonl; do
           [ -f "$t" ] || continue
-          awk '
+          long=$([ "$(wc -c < "$t")" -gt \#(recentBytes) ] && echo 1)
+          [ -n "$long" ] && echo partial
+          if [ -n "$long" ]; then
+            tail -c \#(recentBytes) "$t" | sed 1d
+          else
+            cat "$t"
+          fi | grep -v '"type":"tool_result"' | awk '
         \#(grab)
           /"isMeta":true/ || /"isCompactSummary":true/ || /"isSidechain":true/ { next }
           /"type":"ai-title"/ { t = grab("aiTitle"); if (t != "" && t != last) print "title\t" t; last = t; next }
@@ -117,7 +126,7 @@ enum ClaudeScripts {
               d = grab("description"); if (d == "") d = grab("file_path"); if (d == "") d = grab("pattern"); if (d == "") d = grab("query")
               print "tool\t" grab("name") "\t" d
             }
-          }' "$t"
+          }'
           break
         done
         """#
@@ -228,11 +237,17 @@ struct ClaudeTranscript: Equatable {
 
     var title: String?
     var turns: [Turn] = []
+    /// Only the conversation's recent part was read (a long one): turns count from there
+    var partial = false
 
     /// The output of `ClaudeScripts.extract`
     static func parse(_ extracted: String) -> ClaudeTranscript {
         var transcript = ClaudeTranscript()
         for line in extracted.split(separator: "\n") {
+            if line == "partial" {
+                transcript.partial = true
+                continue
+            }
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
             guard parts.count >= 2 else { continue }
             switch parts[0] {

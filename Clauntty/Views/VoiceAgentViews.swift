@@ -493,9 +493,10 @@ struct VoiceSessionSheet: View {
 }
 
 /// The voice session in the key bar, which grows up to hold it in place of its keys (the
-/// mic's place opens it; the handle closes it). The conversation as two sides: yours on
+/// mic's place opens it; its chevron, the handle or a swipe down closes it). The conversation as two sides: yours on
 /// the right, Grok's on the left. Of what Grok did, only actions show (a prompt sent,
-/// keys pressed, a command run); its reads are where its eyes are.
+/// keys pressed, a command run); its reads are where its eyes are. A round red button
+/// hangs up.
 struct VoiceTranscriptPanel: View {
     @ObservedObject var agent = VoiceAgent.shared
     let onClose: () -> Void
@@ -526,6 +527,19 @@ struct VoiceTranscriptPanel: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                // Folds it away (so does the handle, or a swipe down)
+                .overlay(alignment: .trailing) {
+                    Button(action: onClose) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Hide transcript")
+                }
             ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 8) {
@@ -542,18 +556,20 @@ struct VoiceTranscriptPanel: View {
                     withAnimation { scroller.scrollTo(entries.last?.id, anchor: .bottom) }
                 }
             }
-            Group {
-                if agent.isActive {
-                    Button("End", role: .destructive) { agent.end(reason: "Ended") }
-                        .tint(.red)
-                } else {
-                    Button("Close", action: onClose)
-                        .tint(.white)
+            // Hang up, as on a call (afterwards the chevron folds it away)
+            if agent.isActive {
+                Button(role: .destructive) {
+                    agent.end(reason: "Ended")
+                } label: {
+                    Image(systemName: "phone.down.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 46, height: 46)
+                        .background(Circle().fill(Color.red))
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("End voice session")
             }
-            .font(.subheadline.weight(.semibold))
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
         }
         .environment(\.colorScheme, .dark)
     }
