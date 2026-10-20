@@ -373,8 +373,8 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
 - **Another device's size:** when rtach says the PTY isn't ours (`Session.ptySize`), the
   terminal is drawn at that grid and `PaneHostView` scales it down from the top left; a
   click takes the pane back. Output waits for the resize, as on the phone.
-- **Sidebar:** one row per workspace (what runs in its shown pane, the status of its most
-  pressing pane, its pane dots); panes are in the split, each under a title bar with split,
+- **Sidebar:** one single-line row per workspace (its name, or what runs in its shown pane
+  for one named after a folder; the status of its most pressing pane; its pane dots); panes are in the split, each under a title bar with split,
   zoom and close. Zoom (`WindowState.zoomedPane`) is local only. Workspaces drag to
   reorder (the shared `tabOrder`, per device: the phone keeps its own); the host's name
   has a "…" menu (New Workspace, Refresh, Remove Host); the section's own hover chevron

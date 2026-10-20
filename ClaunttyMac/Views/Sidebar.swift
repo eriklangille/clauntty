@@ -177,36 +177,28 @@ extension SessionManager {
     }
 }
 
-/// A workspace: what's running in the pane it shows, its most pressing status, and a
-/// dot per pane as on the phone's tab.
+/// A workspace: its name (or what's running, for one named after a folder), its most
+/// pressing status, and a dot per pane as on the phone's tab.
 private struct WorkspaceRow: View {
     let group: SessionGroup
 
     var body: some View {
         let (title, subtitle) = group.sidebarTitles
-        HStack(alignment: .top, spacing: 10) {
-            // Centred on the title's line
+        // One line, so every row is the same height; what runs in a named workspace is
+        // in its pane's title bar, and in the tooltip
+        HStack(spacing: 10) {
             StatusGlyph(status: group.mostPressingStatus)
-                .frame(width: 18, height: 17)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .medium))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if group.panes.count > 1 {
-                        PaneDots(panes: group.panes, activeId: group.activePaneId)
-                    }
-                }
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                .frame(width: 18)
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            if group.panes.count > 1 {
+                PaneDots(panes: group.panes, activeId: group.activePaneId)
             }
         }
         .padding(.vertical, 5)
+        .help(subtitle.map { "\(title) · \($0)" } ?? title)
     }
 }
 
