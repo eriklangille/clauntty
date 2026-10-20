@@ -285,6 +285,17 @@ struct ClaunttyApp: App {
                 .queryItems?.first(where: { $0.name == "scope" })?.value
             dumpTerminalText(wholeScreen: scope == "screen")
         #if DEBUG
+        case "voice-tool":
+            // clauntty://voice-tool?name=read_tab&args={"tab":"2"}: run a voice agent tool
+            // without xAI; the result goes to tmp/voice_tool.json in the app's container
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let name = items.first { $0.name == "name" }?.value ?? ""
+            let args = items.first { $0.name == "args" }?.value ?? "{}"
+            Task { @MainActor in
+                let result = await VoiceAgent.shared.debugTool(name, arguments: args, sessionManager: sessionManager)
+                let file = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("voice_tool.json")
+                try? result.write(to: file, atomically: true, encoding: .utf8)
+            }
         case "orient":
             // clauntty://orient?to=left|right|portrait: rotate (the simulator has no
             // window to rotate from when it runs headless)

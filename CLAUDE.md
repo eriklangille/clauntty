@@ -138,6 +138,16 @@ around `VoiceTranscriptPanel` (its keys fade out; the handle closes it). To work
 without xAI, `defaults write com.octerm.clauntty fakeVoice -bool YES` (Debug builds): the voice
 button then starts a pretend session that moves between the tabs.
 
+**The voice agent's tools** (`VoiceAgent`) see tabs as workspaces, in the app's order, and their
+panes, with the state rtach reports for each (`paneStates`: agent, working/blocked/done, last
+prompt), so `list_tabs` asks nothing of the machines. Tools take `tab` and `pane` (default: the pane
+the tab shows; for tools that need Claude, the tab's only agent). A pane's Claude is found under its
+rtach session (`ClaudeScripts.find`) and read from `~/.claude`; prompts and keys are typed into the
+pane's own session, shown or not. "Finished" and "needs you" notes come from rtach's pane states.
+To try a tool without xAI (Debug builds): `xcrun simctl openurl booted
+'clauntty://voice-tool?name=read_tab&args=<url-encoded JSON>'`; the result is in the app container's
+`tmp/voice_tool.json` (`name=watch` gives the notes pane changes would make).
+
 ## IPA / TestFlight
 
 ```bash

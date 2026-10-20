@@ -231,12 +231,39 @@ enum TerminalTextDiff {
 
 // MARK: - Tabs
 
-/// A terminal tab as the model sees it. Numbers follow the tab bar, terminals only.
+/// A terminal tab as the model sees it: a workspace (a window in agent view), numbered
+/// in the app's order, terminals only, with its panes
 struct VoiceTab: Equatable {
     let number: Int
     let title: String
     let name: String
     let host: String
+    /// In the workspace's order; one for a tab that isn't a workspace
+    var panes: [VoicePane] = []
+    /// The pane the tab shows
+    var shownPane = 0
+}
+
+/// A pane in a tab: an rtach session, maybe running an agent
+struct VoicePane: Equatable {
+    /// From 1, in the tab
+    let number: Int
+    /// rtach's pane id (the session's name)
+    let id: String
+    let title: String
+}
+
+enum VoicePaneResolver {
+    /// "2", "pane 2", or part of a pane's title → its index; nil when nothing or
+    /// several match
+    static func resolve(_ query: String, in panes: [VoicePane]) -> Int? {
+        var q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        if q.hasPrefix("pane ") { q = String(q.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+        guard !q.isEmpty else { return nil }
+        if let number = Int(q) { return panes.firstIndex { $0.number == number } }
+        let matches = panes.indices.filter { panes[$0].title.lowercased().contains(q) }
+        return matches.count == 1 ? matches[0] : nil
+    }
 }
 
 enum VoiceTabResolver {

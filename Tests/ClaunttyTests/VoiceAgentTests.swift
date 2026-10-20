@@ -153,102 +153,20 @@ final class VoiceAgentTests: XCTestCase {
         XCTAssertNil(ClaudeScripts.find(rtachSessionId: "abc; rm -rf ~"))
         XCTAssertNil(ClaudeScripts.extract(sessionId: "$(whoami)"))
         XCTAssertNotNil(ClaudeScripts.extract(sessionId: "04b4335c-edfc-4373-921f-c92f07b2274f"))
-        XCTAssertNil(ClaudeScripts.herdrPrompt(pane: "w1:p1'; rm -rf ~; '", text: "hi"))
-        XCTAssertNil(ClaudeScripts.herdrKeys(pane: "w1:p1", keys: ["enter", "rm -rf ~"]))
-        XCTAssertNotNil(ClaudeScripts.herdrKeys(pane: "w1:p1", keys: ["1", "enter"]))
     }
 
-    func testPromptTextTravelsEncoded() {
-        // Quotes, backticks and $( ) never reach the shell as code
-        let text = "it's ok? run `ls` $(whoami)"
-        let script = ClaudeScripts.herdrPrompt(pane: "w4:p4", text: text)!
-        XCTAssertFalse(script.contains("whoami"))
-        XCTAssertTrue(script.contains(Data(text.utf8).base64EncodedString()))
-        XCTAssertTrue(script.contains("--wait"))
-        // A slash command doesn't start a turn, so don't wait for one
-        XCTAssertFalse(ClaudeScripts.herdrPrompt(pane: "w4:p4", text: "/rename Voice tests")!.contains("--wait"))
+    func testResolvePane() {
+        let panes = [VoicePane(number: 1, id: "a", title: "api tests"), VoicePane(number: 2, id: "b", title: "web")]
+        XCTAssertEqual(VoicePaneResolver.resolve("2", in: panes), 1)
+        XCTAssertEqual(VoicePaneResolver.resolve("pane 1", in: panes), 0)
+        XCTAssertEqual(VoicePaneResolver.resolve("web", in: panes), 1)
+        XCTAssertNil(VoicePaneResolver.resolve("3", in: panes))
+        XCTAssertNil(VoicePaneResolver.resolve("e", in: panes))
     }
 
-    func testHerdrRoutesAndStatus() {
-        let output = """
-        mux\therdr
-        claude\t{"pid":9106,"sessionId":"aaaa-1","cwd":"/w/api","status":"busy"}
-        claude\t{"pid":884,"sessionId":"bbbb-2","cwd":"/w/web","status":"idle"}
-        herdr\t{"result":{"agents":[{"pane_id":"w4:p4","agent_status":"blocked"},{"pane_id":"w3:p1","agent_status":"idle"}]}}
-        pane\t9106\tw4:p4
-        """
-        let scan = ClaudeScripts.parse(output)
-        XCTAssertEqual(scan.multiplexers, ["herdr"])
-        XCTAssertEqual(scan.agents.map(\.pid), [884, 9106])
-        // 884 has no pane in the list, so it can't be typed into
-        XCTAssertEqual(scan.agents[0].route, .unsupported(multiplexer: "herdr"))
-        XCTAssertEqual(scan.agents[1].route, .herdr(pane: "w4:p4"))
-        XCTAssertEqual(scan.agents[1].statusText, "waiting for the user at a menu or question")
-        // A Claude in the tab itself
-        let direct = ClaudeScripts.parse("claude\t{\"pid\":5,\"sessionId\":\"c-3\",\"cwd\":\"/w\",\"status\":\"idle\"}")
-        XCTAssertEqual(direct.agents.first?.route, .tab)
-        XCTAssertEqual(ClaudeScripts.herdrError(#"{"error":{"code":"agent_blocked","message":"x"},"id":"cli"}"#), "agent_blocked")
-        XCTAssertNil(ClaudeScripts.herdrError(#"{"id":"cli","result":{"ok":true}}"#))
-    }
-
-    func testShowingPaneIsMatchedFromTheTabsScreen() {
-        let statusBar = "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
-        let output = """
-        mux\therdr
-        claude\t{"pid":1,"sessionId":"a-1","cwd":"/w/api","status":"idle"}
-        claude\t{"pid":2,"sessionId":"b-2","cwd":"/w/web","status":"idle"}
-        pane\t1\tw1:p1
-        pane\t2\tw2:p1
-        visible\tw1:p1\t\(Data("❯ fix the login redirect\n⏺ Fixed it in auth.ts and added a test\n\(statusBar)".utf8).base64EncodedString())
-        visible\tw2:p1\t\(Data("❯ /clear\n  (no content)\n\(statusBar)".utf8).base64EncodedString())
-        """
-        var scan = ClaudeScripts.parse(output)
-        // The tab draws Herdr's sidebar beside the pane
-        scan.markShowing(screen: "api  │ ❯ fix the login redirect\nweb  │ ⏺ Fixed it in auth.ts and added a test\n     │\(statusBar)")
-        XCTAssertEqual(scan.agents.map(\.focused), [true, false])
-        scan.markShowing(screen: "     │ ❯ /clear\n     │   (no content)\n     │\(statusBar)")
-        XCTAssertEqual(scan.agents.map(\.focused), [false, true])
-        // Only the shared status bar: no way to tell
-        scan.markShowing(screen: statusBar)
-        XCTAssertEqual(scan.agents.map(\.focused), [false, false])
-    }
-
-    func testWatchReportsFinishedTurnsAndMenus() {
-        typealias O = ClaudeWatch.Observation
-        var watch = ClaudeWatch()
-        // The first check only records where each one stands
-        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 1), "b": O(.idle, changedAt: 1)]), [])
-        // A turn ends
-        XCTAssertEqual(watch.update(["a": O(.idle, changedAt: 2), "b": O(.idle, changedAt: 1)]), [.init(key: "a", change: .finished)])
-        // A turn shorter than the gap between checks: idle both times, but the status changed
-        XCTAssertEqual(watch.update(["a": O(.idle, changedAt: 4), "b": O(.idle, changedAt: 1)]), [.init(key: "a", change: .finished)])
-        // Nothing happened
-        XCTAssertEqual(watch.update(["a": O(.idle, changedAt: 4), "b": O(.idle, changedAt: 1)]), [])
-        // Starting work isn't news; stopping at a menu is, once
-        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 5), "b": O(.blocked, changedAt: 1)]), [.init(key: "b", change: .blocked)])
-        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 5), "b": O(.blocked, changedAt: 1)]), [])
-        // Answered: back to work, then done
-        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 5), "b": O(.working, changedAt: 6)]), [])
-        XCTAssertEqual(watch.update(["a": O(.working, changedAt: 5), "b": O(.idle, changedAt: 7)]), [.init(key: "b", change: .finished)])
-        // A conversation that ends is forgotten; when it comes back it starts over
-        XCTAssertEqual(watch.update(["b": O(.idle, changedAt: 7)]), [])
-        XCTAssertEqual(watch.update(["a": O(.idle, changedAt: 9), "b": O(.idle, changedAt: 7)]), [])
-    }
-
-    func testWatchObservation() {
-        var agent = ClaudeAgent(pid: 1, sessionId: "s", directory: "/w", status: "idle", statusChangedAt: 42)
-        XCTAssertEqual(ClaudeWatch.observe(agent), .init(.idle, changedAt: 42))
-        agent = ClaudeAgent(pid: 1, sessionId: "s", directory: "/w", status: "busy")
-        XCTAssertEqual(ClaudeWatch.observe(agent).state, .working)
-        // Herdr knows about menus; Claude's own status decides working or idle
-        agent.herdrStatus = "blocked"
-        XCTAssertEqual(ClaudeWatch.observe(agent).state, .blocked)
-        agent.herdrStatus = "idle"
-        XCTAssertEqual(ClaudeWatch.observe(agent).state, .working)
+    func testStatusChangedAt() {
         let parsed = ClaudeScripts.parse("claude\t{\"pid\":5,\"sessionId\":\"c-3\",\"cwd\":\"/w\",\"status\":\"idle\",\"statusUpdatedAt\":1791524607368}")
         XCTAssertEqual(parsed.agents.first?.statusChangedAt, 1791524607368)
-        XCTAssertFalse(ClaudeScripts.find(rtachSessionId: "abc", screens: false)!.contains("--source visible"))
-        XCTAssertTrue(ClaudeScripts.find(rtachSessionId: "abc")!.contains("--source visible"))
     }
 
     func testKeys() {

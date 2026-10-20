@@ -76,18 +76,16 @@ final class VoiceAgent: ObservableObject {
     /// The agent line being built from transcript deltas
     private var agentEntryId: UUID?
 
-    /// Each tab's cleaned text as of the model's last read, for "new" reads
+    /// Each pane's cleaned text as of the model's last read, for "new" reads
     private var snapshots: [UUID: [String]] = [:]
-    /// Claudes per tab and conversations per Claude session, briefly, so a search
+    /// Claudes per pane and conversations per Claude session, briefly, so a search
     /// followed by read_turn fetches once
     private var agentCache: [UUID: (at: Date, scan: ClaudeScan)] = [:]
     private var transcriptCache: [String: (at: Date, transcript: ClaudeTranscript)] = [:]
 
-    /// Every conversation's status, checked every few seconds during a session, so the
-    /// model hears when one finishes its turn or stops at a menu
-    private var watch = ClaudeWatch()
-    private var ticks = 0
-    private var checking = false
+    /// Each agent pane's state as of the last tick, so the model hears when one finishes
+    /// its turn or stops at a menu
+    private var paneWatch: [String: String] = [:]
     /// Notes for the model, held until no one is talking
     private var pendingNotes: [String] = []
     private var userSpeaking = false
@@ -111,9 +109,7 @@ final class VoiceAgent: ObservableObject {
         snapshots = [:]
         agentCache = [:]
         transcriptCache = [:]
-        watch = ClaudeWatch()
-        ticks = 0
-        checking = false
+        paneWatch = [:]
         pendingNotes = []
         userSpeaking = false
         promptsThisResponse = []
@@ -448,56 +444,45 @@ final class VoiceAgent: ObservableObject {
             return
         }
 
-        ticks += 1
-        if configured && ticks % 3 == 0 {
-            checkConversations()
+        if configured {
+            watchPanes()
         }
         deliverNotes()
     }
 
     // MARK: - Watching conversations
 
-    /// Check every connected tab's conversations and note the ones that just finished
-    /// or stopped at a menu. Free: it runs over the tabs' SSH connections, not xAI.
-    private func checkConversations() {
-        guard !checking else { return }
-        checking = true
-        Task {
-            var states: [String: ClaudeWatch.Observation] = [:]
-            var labels: [String: String] = [:]
-            for (tab, session) in voiceTabs() where session.state == .connected && session.sshConnection != nil {
-                guard let id = session.rtachSessionId,
-                      let script = ClaudeScripts.find(rtachSessionId: id, screens: false),
-                      let output = await runScript(script, in: session, timeout: 5, quiet: true) else { continue }
-                for agent in ClaudeScripts.parse(output).agents {
-                    // Tabs attached to the same multiplexer list the same Claudes
-                    let key = "\(tab.host) \(agent.pid)"
-                    guard states[key] == nil else { continue }
-                    states[key] = ClaudeWatch.observe(agent)
-                    labels[key] = Self.label(agent, tab: tab)
-                }
-            }
-            checking = false
-            guard phase != .idle else { return }
-            for event in watch.update(states) {
-                let label = labels[event.key] ?? "a Claude conversation"
-                switch event.change {
-                case .finished:
+    /// Note agents that just finished their turn or stopped at a menu, from the pane
+    /// states rtach sends as they change (free: nothing is asked of the machines)
+    private func watchPanes() {
+        guard let sessionManager else { return }
+        for (tab, _) in voiceTabs() {
+            for pane in tab.panes {
+                guard let state = sessionManager.paneStates[pane.id], state.hasAgent else { continue }
+                let now = state.state ?? ""
+                let before = paneWatch[pane.id]
+                paneWatch[pane.id] = now
+                guard let before, before != now else { continue }
+                let label = Self.label(pane, in: tab, task: state.task)
+                switch now {
+                case "done":
                     pendingNotes.append("\(label) just finished its turn and is waiting for the user.")
-                case .blocked:
-                    pendingNotes.append("\(label) is waiting for the user at a menu or question.")
+                case "blocked":
+                    pendingNotes.append("\(label) is waiting for the user at a menu or question\(state.note.map { ": \($0)" } ?? "").")
+                default:
+                    continue
                 }
-                voiceTrace("watch: \(event.change) \(event.key)")
+                voiceTrace("watch: \(pane.id) \(before) → \(now)")
             }
         }
     }
 
-    /// "the conversation in tab 1 working in sessions/1, titled "Backlog and Linear scrapers""
-    private static func label(_ agent: ClaudeAgent, tab: VoiceTab) -> String {
-        var label = "The Claude conversation in tab \(tab.number) working in \(agent.shortDirectory)"
-        if let title = agent.title {
-            label += ", titled \"\(title)\","
-        }
+    /// "The agent in tab 2, pane 1 (api), on "fix the login redirect","
+    private static func label(_ pane: VoicePane, in tab: VoiceTab, task: String?) -> String {
+        var label = "The agent in tab \(tab.number)"
+        if tab.panes.count > 1 { label += ", pane \(pane.number)" }
+        label += " (\(pane.title))"
+        if let task, !task.isEmpty, task != pane.title { label += ", on \"\(task)\"," }
         return label
     }
 
@@ -564,35 +549,60 @@ final class VoiceAgent: ObservableObject {
         voiceTrace("tool \(name) \(arguments)")
 
         Task {
-            let output: [String: Any]
-            switch name {
-            case "list_tabs":
-                append(.tool, "listed tabs")
-                output = ["tabs": await listTabs()]
-            case "read_tab":
-                output = await readTab(args)
-            case "search_tab":
-                output = await searchTab(args)
-            case "read_turn":
-                output = await readTurn(args)
-            case "send_prompt":
-                output = await sendPrompt(args)
-            case "press_keys":
-                output = await pressKeys(args)
-            case "run_command":
-                output = await runCommand(args)
-            case "show_tab":
-                output = await showTab(args)
-            case "end_session":
-                endRequested = true
-                output = ["ok": true]
-                scheduleHangUpFallback()
-            default:
-                output = ["error": "Unknown tool \(name)"]
-            }
+            let output = await perform(name, args)
             finishTool(callId: callId, output: output)
         }
     }
+
+    private func perform(_ name: String, _ args: [String: Any]) async -> [String: Any] {
+        let output: [String: Any]
+        switch name {
+        case "list_tabs":
+            append(.tool, "listed tabs")
+            output = ["tabs": listTabs()]
+        case "read_tab":
+            output = await readTab(args)
+        case "search_tab":
+            output = await searchTab(args)
+        case "read_turn":
+            output = await readTurn(args)
+        case "send_prompt":
+            output = await sendPrompt(args)
+        case "press_keys":
+            output = await pressKeys(args)
+        case "run_command":
+            output = await runCommand(args)
+        case "show_tab":
+            output = await showTab(args)
+        case "end_session":
+            endRequested = true
+            output = ["ok": true]
+            scheduleHangUpFallback()
+        default:
+            output = ["error": "Unknown tool \(name)"]
+        }
+        return output
+    }
+
+    #if DEBUG
+    /// Run one tool with no session (the `clauntty://voice-tool` URL), to try the tools
+    /// against a host without calling xAI. Returns the result as JSON.
+    func debugTool(_ name: String, arguments: String, sessionManager: SessionManager) async -> String {
+        self.sessionManager = sessionManager
+        let args = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] ?? [:]
+        var output: [String: Any]
+        if name == "watch" {
+            // The notes the panes' changes since the last call would give the model
+            watchPanes()
+            output = ["notes": pendingNotes]
+            pendingNotes = []
+        } else {
+            output = await perform(name, args)
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])) ?? Data()
+        return String(decoding: data, as: UTF8.self)
+    }
+    #endif
 
     /// Don't wait forever for the goodbye to finish playing
     private func scheduleHangUpFallback() {
@@ -624,68 +634,90 @@ final class VoiceAgent: ObservableObject {
         }
     }
 
-    /// Terminal tabs in tab-bar order, numbered from 1
+    /// Terminal tabs (workspaces) in the app's order, numbered from 1, with their panes
     private func voiceTabs() -> [(tab: VoiceTab, session: Session)] {
         guard let sessionManager else { return [] }
         var result: [(VoiceTab, Session)] = []
         for item in sessionManager.orderedTabs() {
             guard case .terminal(let session) = item else { continue }
             let config = session.connectionConfig
-            let tab = VoiceTab(
-                number: result.count + 1,
-                title: session.title,
-                name: config.name,
-                host: "\(config.username)@\(config.host)"
-            )
+            let group = sessionManager.sessionGroup(for: session)
+            let panes = group?.panes ?? []
+            let shown = panes.firstIndex { $0.id == group?.activePaneId } ?? 0
+            var title = group?.title ?? session.title
+            // A workspace named after a folder: what runs in its pane says more
+            if title.isEmpty || title == "~" || title.hasPrefix("/"), panes.indices.contains(shown) {
+                title = panes[shown].title
+            }
+            var tab = VoiceTab(number: result.count + 1, title: title, name: config.name, host: "\(config.username)@\(config.host)")
+            if !panes.isEmpty {
+                tab.panes = panes.enumerated().map { VoicePane(number: $0 + 1, id: $1.id, title: $1.title) }
+                tab.shownPane = shown
+            } else if let id = session.rtachSessionId {
+                tab.panes = [VoicePane(number: 1, id: id, title: session.title)]
+            }
             result.append((tab, session))
         }
         return result
     }
 
-    /// Every tab with the Claude conversations running in it. Tabs on one machine that
-    /// run the same multiplexer share their Claudes; those are listed once.
-    private func listTabs() async -> [[String: Any]] {
-        let activeId = sessionManager?.activeSession?.id
-        let tabs = voiceTabs()
-        // Look up every connected tab at once
-        var found: [UUID: [ClaudeAgent]] = [:]
-        await withTaskGroup(of: (UUID, [ClaudeAgent]?).self) { group in
-            for (_, session) in tabs where session.state == .connected && session.sshConnection != nil {
-                group.addTask { @MainActor in (session.id, await self.scan(in: session)?.agents) }
-            }
-            for await (id, agents) in group {
-                found[id] = agents
-            }
-        }
+    /// The session for one of a tab's panes: made, disconnected, if the app hasn't
+    /// shown that pane yet
+    private func paneSession(_ tab: VoiceTab, pane index: Int, shown: Session) -> Session {
+        guard let sessionManager, let group = sessionManager.sessionGroup(for: shown),
+              tab.panes.indices.contains(index) else { return shown }
+        return sessionManager.paneSession(for: group, paneId: tab.panes[index].id, config: shown.connectionConfig) ?? shown
+    }
 
-        var listedOn: [String: Int] = [:]  // "host pid" → tab number
-        return tabs.map { tab, session in
+    /// Every tab and its panes: what each runs and how its agent is doing, from rtach's
+    /// pane states (nothing is asked of the machines)
+    private func listTabs() -> [[String: Any]] {
+        let activeId = sessionManager?.activeSession?.id
+        return voiceTabs().map { tab, session in
             var entry: [String: Any] = [
                 "tab": tab.number,
                 "title": tab.title,
                 "machine": tab.name.isEmpty ? tab.host : "\(tab.name) (\(tab.host))",
                 "on_screen": session.id == activeId,
             ]
-            guard session.state == .connected else {
+            if session.state != .connected {
                 entry["state"] = "\(session.stateDescription); read_tab connects it"
-                return entry
             }
-            guard let agents = found[session.id] else {
-                entry["claude"] = "couldn't check"
-                return entry
-            }
-            let keys = agents.map { "\(tab.host) \($0.pid)" }
-            if !keys.isEmpty, let earlier = keys.compactMap({ listedOn[$0] }).first, keys.allSatisfy({ listedOn[$0] != nil }) {
-                entry["claude"] = "same conversations as tab \(earlier)"
-                if let index = agents.firstIndex(where: \.focused) {
-                    entry["showing"] = "conversation \(index + 1): \(agents[index].title ?? "untitled")"
-                }
-                return entry
-            }
-            keys.forEach { listedOn[$0] = listedOn[$0] ?? tab.number }
-            entry["claude"] = agents.isEmpty ? "none (a plain terminal)" : agents.enumerated().map { Self.describe($1, number: $0 + 1) }
+            entry["panes"] = tab.panes.map { paneEntry($0, in: tab) }
             return entry
         }
+    }
+
+    /// A pane for the model: what it runs, and an agent's status and last prompt
+    private func paneEntry(_ pane: VoicePane, in tab: VoiceTab) -> [String: Any] {
+        var entry: [String: Any] = ["pane": pane.number, "title": pane.title]
+        if tab.panes.count > 1 && pane.number - 1 == tab.shownPane {
+            entry["showing"] = true
+        }
+        guard let state = sessionManager?.paneStates[pane.id] else { return entry }
+        if state.hasAgent {
+            entry["runs"] = state.agent == "claude" ? "Claude Code" : state.agent
+            entry["status"] = Self.statusText(state)
+            if let task = state.task, !task.isEmpty { entry["last_prompt"] = task }
+        } else {
+            entry["runs"] = state.fg.flatMap { $0.isEmpty ? nil : $0 } ?? "a shell"
+        }
+        return entry
+    }
+
+    /// An agent's state in words, from rtach (which knows about menus)
+    private static func statusText(_ state: RemotePaneState) -> String {
+        switch state.state {
+        case "working": return "working"
+        case "blocked": return "waiting for the user at a menu or question" + (state.note.map { ": \($0)" } ?? "")
+        case "done", "idle": return "idle: finished its turn, waiting for the user"
+        default: return state.state ?? "unknown"
+        }
+    }
+
+    /// Panes with an agent in them
+    private func agentPanes(_ tab: VoiceTab) -> [VoicePane] {
+        tab.panes.filter { sessionManager?.paneStates[$0.id]?.hasAgent == true }
     }
 
     /// For a Claude conversation: an outline of recent turns, the latest turn in full
@@ -703,12 +735,12 @@ final class VoiceAgent: ObservableObject {
             return readPlain(target)
         }
         guard let transcript = await transcript(for: agent, in: target.session) else {
-            return ["tab": target.tab.number, "error": "Couldn't read the Claude conversation's history"]
+            return target.ids.merging(["error": "Couldn't read the Claude conversation's history"]) { $1 }
         }
-        let agents = target.scan.agents
-        var output: [String: Any] = ["tab": target.tab.number, "claude": Self.describe(agent, number: target.number)]
-        if agents.count > 1 && args["conversation"] == nil {
-            output["other_conversations_in_tab"] = agents.enumerated().filter { $1 != agent }.map { "\($0 + 1): \($1.title ?? "untitled")" }
+        var output = target.ids
+        output["claude"] = describe(agent, in: target)
+        if target.tab.panes.count > 1 && args["pane"] == nil {
+            output["other_panes"] = target.tab.panes.filter { $0 != target.pane }.map { "\($0.number): \($0.title)" }
         }
         let count = transcript.turns.count
         if count == 0 {
@@ -720,30 +752,29 @@ final class VoiceAgent: ObservableObject {
             }
             output["latest_turn"] = transcript.render(turn: count - 1, limit: 3500)
         }
-        output["screen_bottom"] = await screenBottom(of: target)
+        output["screen_bottom"] = screenBottom(target.session)
         return output
     }
 
     /// What a plain terminal printed since the model last read it
     private func readPlain(_ target: Target) -> [String: Any] {
         let session = target.session
+        var output = target.ids
+        output["title"] = target.title
         guard let whole = session.readTerminalText?(true) else {
-            return ["tab": target.tab.number, "title": target.title, "error": "The tab's terminal isn't ready yet"]
+            output["error"] = "The pane's terminal isn't ready yet"
+            return output
         }
         let lines = TerminalTextCleaner.clean(TerminalStyledText.markup(whole))
-        var output: [String: Any] = [
-            "tab": target.tab.number,
-            "title": target.title,
-            "waiting_for_input": session.isWaitingForInput,
-        ]
+        output["waiting_for_input"] = session.isWaitingForInput
         let diff = TerminalTextDiff.newLines(previous: snapshots[session.id], current: lines)
         switch diff.kind {
-        case .first: output["note"] = "First read of this tab: its most recent lines"
+        case .first: output["note"] = "First read of this pane: its most recent lines"
         case .reset: output["note"] = "The screen changed completely since the last read: its most recent lines"
         case .new:
             if diff.lines.isEmpty {
                 output["note"] = "Nothing new since the last read"
-                output["screen_bottom"] = tabScreenBottom(session)
+                output["screen_bottom"] = screenBottom(session)
             }
         }
         if diff.omitted > 0 {
@@ -766,11 +797,9 @@ final class VoiceAgent: ObservableObject {
         }
         append(.tool, "searched \(target.title) for \"\(query)\"")
         let result = transcript.search(query)
-        var output: [String: Any] = [
-            "tab": target.tab.number,
-            "total_turns": transcript.turns.count,
-            "matches": result.hits.map { "Turn \($0.turn), \($0.who): \($0.snippet)" },
-        ]
+        var output = target.ids
+        output["total_turns"] = transcript.turns.count
+        output["matches"] = result.hits.map { "Turn \($0.turn), \($0.who): \($0.snippet)" }
         if result.total > result.hits.count {
             output["note"] = "Showing the newest \(result.hits.count) of \(result.total) matches"
         } else if result.hits.isEmpty {
@@ -787,10 +816,10 @@ final class VoiceAgent: ObservableObject {
         }
         let requested = args["turn"] as? Int ?? Int(args["turn"] as? String ?? "") ?? transcript.turns.count
         guard let text = transcript.render(turn: requested - 1) else {
-            return ["tab": target.tab.number, "error": "No turn \(requested); the conversation has \(transcript.turns.count)"]
+            return target.ids.merging(["error": "No turn \(requested); the conversation has \(transcript.turns.count)"]) { $1 }
         }
         append(.tool, "read turn \(requested) of \(target.title)")
-        return ["tab": target.tab.number, "turn": text]
+        return target.ids.merging(["turn": text]) { $1 }
     }
 
     // MARK: - Acting
@@ -805,52 +834,29 @@ final class VoiceAgent: ObservableObject {
         }
         promptsThisResponse.insert(key)
         let target: Target
-        switch await resolveTarget(args, fresh: true, acting: true) {
+        switch await resolveTarget(args, fresh: true, acting: true, wantsAgent: true) {
         case .success(let found): target = found
         case .failure(let error): return error.output
         }
         guard let agent = target.agent else {
-            return ["tab": target.tab.number, "error": "No Claude conversation runs in this tab. For a shell command, use run_command."]
+            return target.ids.merging(["error": "No Claude runs in this pane. For a shell command, use run_command."]) { $1 }
+        }
+        let state = sessionManager?.paneStates[target.pane.id]
+        if state?.state == "blocked" {
+            return target.ids.merging(["error": "Nothing was sent: Claude is waiting at a menu or question. Read the pane and ask the user how to answer it."]) { $1 }
         }
 
-        var note: String?
-        switch agent.route {
-        case .herdr(let pane):
-            guard let script = ClaudeScripts.herdrPrompt(pane: pane, text: text),
-                  let output = await runScript(script, in: target.session, timeout: 10) else {
-                return ["tab": target.tab.number, "error": "Couldn't reach Herdr on the machine; nothing was sent"]
-            }
-            switch ClaudeScripts.herdrError(output) {
-            case nil:
-                break
-            case "agent_blocked":
-                return ["tab": target.tab.number, "error": "Nothing was sent: Claude is waiting at a menu or question. Read the tab and ask the user how to answer it."]
-            case "agent_prompt_stalled", "timeout":
-                note = "Sent, but Claude hasn't visibly started yet"
-            case let code?:
-                voiceTrace("herdr prompt failed: \(output.prefix(300))")
-                return ["tab": target.tab.number, "error": "Herdr refused the prompt (\(code)); nothing was sent"]
-            }
-        case .tab:
-            target.session.sendData(Data(VoiceKeys.paste(text).utf8))
-            try? await Task.sleep(for: .milliseconds(150))
-            target.session.sendData(Data("\r".utf8))
-        case .unsupported(let multiplexer):
-            return ["tab": target.tab.number, "error": "Can't type into a Claude inside \(multiplexer) yet; nothing was sent"]
-        }
-
+        target.session.sendData(Data(VoiceKeys.paste(text).utf8))
+        try? await Task.sleep(for: .milliseconds(150))
+        target.session.sendData(Data("\r".utf8))
         append(.tool, "sent to \(target.title): \(text)")
-        // Herdr already waited for Claude to start, except for a slash command, which
-        // doesn't start a turn
-        let settle: Duration = agent.route == .tab ? .milliseconds(1200)
-            : ClaudeScripts.isSlashCommand(text) ? .milliseconds(800) : .zero
-        var output = await stateAfterAction(target, settle: settle)
+
+        var output = await stateAfterAction(target)
         output["sent"] = text
-        if agent.status == "busy" || agent.herdrStatus == "working" {
+        if agent.status == "busy" || state?.state == "working" {
             // Claude Code holds prompts typed mid-turn until the turn ends
-            note = "Claude was already working, so this prompt is queued and runs when it finishes"
+            output["note"] = "Claude was already working, so this prompt is queued and runs when it finishes"
         }
-        if let note { output["note"] = note }
         return output
     }
 
@@ -871,27 +877,10 @@ final class VoiceAgent: ObservableObject {
         case .failure(let error): return error.output
         }
 
-        switch target.agent?.route {
-        case .herdr(let pane)?:
-            guard let script = ClaudeScripts.herdrKeys(pane: pane, keys: keys),
-                  let output = await runScript(script, in: target.session) else {
-                return ["tab": target.tab.number, "error": "Couldn't reach Herdr on the machine; no keys were pressed"]
-            }
-            if let code = ClaudeScripts.herdrError(output) {
-                return ["tab": target.tab.number, "error": "Herdr refused the keys (\(code)); none were pressed"]
-            }
-        case .unsupported(let multiplexer)?:
-            return ["tab": target.tab.number, "error": "Can't press keys in a Claude inside \(multiplexer) yet"]
-        case .tab?, nil:
-            if target.agent == nil, let multiplexer = target.scan.multiplexers.first {
-                return ["tab": target.tab.number, "error": "This tab runs \(multiplexer) with no Claude in it; can't press keys in its panes yet"]
-            }
-            for key in keys {
-                target.session.sendData(Data((VoiceKeys.bytes[key] ?? "").utf8))
-                try? await Task.sleep(for: .milliseconds(80))
-            }
+        for key in keys {
+            target.session.sendData(Data((VoiceKeys.bytes[key] ?? "").utf8))
+            try? await Task.sleep(for: .milliseconds(80))
         }
-
         append(.tool, "pressed \(keys.joined(separator: " ")) in \(target.title)")
         var output = await stateAfterAction(target, settle: .milliseconds(700))
         output["pressed"] = keys.joined(separator: " ")
@@ -906,16 +895,13 @@ final class VoiceAgent: ObservableObject {
         case .success(let found): target = found
         case .failure(let error): return error.output
         }
-        guard target.scan.agents.isEmpty else {
-            return ["tab": target.tab.number, "error": "This tab runs Claude; use send_prompt to ask Claude instead"]
-        }
-        if let multiplexer = target.scan.multiplexers.first {
-            return ["tab": target.tab.number, "error": "This tab runs \(multiplexer); can't run commands in its panes yet"]
+        guard target.agent == nil else {
+            return target.ids.merging(["error": "This pane runs Claude; use send_prompt to ask Claude instead"]) { $1 }
         }
         // Enforced here as well as in the instructions: the user hears the command first
         let confirmed = args["confirmed"] as? Bool ?? (args["confirmed"] as? String == "true")
         guard confirmed else {
-            return ["tab": target.tab.number, "error": "Not run. Read the command back to the user, and call again with confirmed true only after they say yes."]
+            return target.ids.merging(["error": "Not run. Read the command back to the user, and call again with confirmed true only after they say yes."]) { $1 }
         }
 
         // Start from what's there now, so the result is the command's output
@@ -937,27 +923,34 @@ final class VoiceAgent: ObservableObject {
         case .success(let found): target = found
         case .failure(let error): return error.output
         }
-        sessionManager?.switchTo(target.session)
-        if case .herdr(let pane)? = target.agent?.route, let script = ClaudeScripts.herdrFocus(pane: pane) {
-            _ = await runScript(script, in: target.session)
-            agentCache[target.session.id] = nil
+        if let groupId = target.session.groupId {
+            sessionManager?.selectPane(groupId: groupId, paneId: target.pane.id)
         }
+        sessionManager?.switchTo(target.session)
         append(.tool, "showed \(target.title)")
-        return ["tab": target.tab.number, "showing": target.title]
+        return target.ids.merging(["showing": target.title]) { $1 }
     }
 
-    /// The conversation's status and screen a moment after an action, so the model can
-    /// say what happened rather than assume
+    /// The pane's status and screen a moment after an action, so the model can say
+    /// what happened rather than assume
     private func stateAfterAction(_ target: Target, settle: Duration = .milliseconds(1200)) async -> [String: Any] {
+        // A pane that isn't shown has its output paused: let it through meanwhile, so its
+        // screen is the one after the action
+        let session = target.session
+        let wasPaused = session.isPaused
+        if wasPaused { session.resumeOutput() }
         try? await Task.sleep(for: settle)
+        if wasPaused && sessionManager?.activeSession?.id != session.id {
+            session.pauseOutput()
+        }
         agentCache[target.session.id] = nil
-        var output: [String: Any] = ["tab": target.tab.number]
+        var output = target.ids
         if let agent = target.agent {
             transcriptCache[agent.sessionId] = nil
             let now = await scan(in: target.session, fresh: true)?.agents.first { $0.pid == agent.pid }
-            output["claude"] = Self.describe(now ?? agent, number: target.number)
+            output["claude"] = describe(now ?? agent, in: target)
         }
-        output["screen_bottom"] = await screenBottom(of: target)
+        output["screen_bottom"] = screenBottom(target.session)
         return output
     }
 
@@ -968,130 +961,117 @@ final class VoiceAgent: ObservableObject {
         init(_ output: [String: Any]) { self.output = output }
     }
 
-    /// What a tool call points at: a tab, connected, with the conversation in it that
-    /// the call means (nil for a tab without Claude)
+    /// What a tool call points at: a tab's pane, connected, with the Claude running in
+    /// it (nil for a shell)
     private struct Target {
         let tab: VoiceTab
+        let pane: VoicePane
         let session: Session
-        let scan: ClaudeScan
         let agent: ClaudeAgent?
-        /// The conversation's number in the tab, from 1
-        let number: Int
 
-        /// For the panel log: the conversation's title, or the tab's
-        var title: String { agent?.title ?? tab.title }
+        /// For the panel log
+        var title: String { pane.title }
+        /// Where, for tool results: the tab, and the pane when it has several
+        var ids: [String: Any] {
+            tab.panes.count > 1 ? ["tab": tab.number, "pane": pane.number] : ["tab": tab.number]
+        }
     }
 
-    /// `acting`: the call changes something (sends a prompt, presses keys), so in a tab
-    /// with several conversations it must name one rather than get the one on screen
-    private func resolveTarget(_ args: [String: Any], fresh: Bool = false, acting: Bool = false) async -> Result<Target, ToolError> {
+    /// The pane a tool call means: its `tab` (else the one on screen) and `pane` (else
+    /// the one the tab shows; for a tool that needs Claude, `wantsAgent`, the tab's only
+    /// agent when the shown pane has none). `acting` (sending, pressing keys) in a tab
+    /// named by the model that has several agents: the pane must be named too, not guessed.
+    private func resolveTarget(_ args: [String: Any], fresh: Bool = false, acting: Bool = false,
+                               wantsAgent: Bool = false) async -> Result<Target, ToolError> {
         let query = (args["tab"] as? Int).map(String.init) ?? args["tab"] as? String ?? ""
+        let paneQuery = ((args["pane"] as? Int).map(String.init) ?? args["pane"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         let tabs = voiceTabs()
-        let tab: VoiceTab
-        let session: Session
-        // No tab: the one on screen
-        let resolution: VoiceTabResolver.Resolution
+        let index: Int
         if query.trimmingCharacters(in: .whitespaces).isEmpty {
-            guard let index = tabs.firstIndex(where: { $0.session.id == sessionManager?.activeSession?.id }) else {
+            guard let active = sessionManager?.activeSession,
+                  let found = tabs.firstIndex(where: { $0.session.id == active.id || (active.groupId != nil && $0.session.groupId == active.groupId) }) else {
                 return .failure(ToolError(["error": "No terminal tab is on screen; say which tab"]))
             }
-            resolution = .found(index)
+            index = found
         } else {
-            resolution = VoiceTabResolver.resolve(query, in: tabs.map(\.tab))
+            switch VoiceTabResolver.resolve(query, in: tabs.map(\.tab)) {
+            case .found(let found):
+                index = found
+            case .notFound:
+                return .failure(ToolError(["error": "No tab matches \"\(query)\". Call list_tabs to see them."]))
+            case .ambiguous(let indices):
+                return .failure(ToolError(["error": "\"\(query)\" matches several tabs", "matches": indices.map { "\(tabs[$0].tab.number): \(tabs[$0].tab.title)" }]))
+            }
         }
-        switch resolution {
-        case .found(let index):
-            (tab, session) = tabs[index]
-            lookingAt = session.id
-        case .notFound:
-            return .failure(ToolError(["error": "No tab matches \"\(query)\". Call list_tabs to see them."]))
-        case .ambiguous(let indices):
-            return .failure(ToolError(["error": "\"\(query)\" matches several tabs", "matches": indices.map { "\(tabs[$0].tab.number): \(tabs[$0].tab.title)" }]))
-        }
+        let (tab, shown) = tabs[index]
 
-        if let problem = await makeLive(session) {
-            return .failure(ToolError(["tab": tab.number, "title": tab.title, "error": problem]))
-        }
-        guard let scan = await scan(in: session, fresh: fresh) else {
-            return .failure(ToolError(["tab": tab.number, "error": "Couldn't check the tab for Claude"]))
-        }
-        guard !scan.agents.isEmpty else {
-            return .success(Target(tab: tab, session: session, scan: scan, agent: nil, number: 0))
-        }
-        switch pickConversation(args, from: scan.agents, tab: tab, acting: acting) {
-        case .success(let agent):
-            let number = (scan.agents.firstIndex(of: agent) ?? 0) + 1
-            return .success(Target(tab: tab, session: session, scan: scan, agent: agent, number: number))
-        case .failure(let error):
-            return .failure(error)
-        }
-    }
-
-    /// The conversation a tool call means: one Claude in the tab, or the one the
-    /// `conversation` argument names (a number from list_tabs, or part of its title)
-    private func pickConversation(_ args: [String: Any], from agents: [ClaudeAgent], tab: VoiceTab, acting: Bool = false) -> Result<ClaudeAgent, ToolError> {
-        let query = ((args["conversation"] as? Int).map(String.init) ?? args["conversation"] as? String ?? "")
-            .trimmingCharacters(in: .whitespaces).lowercased()
-        if query.isEmpty {
-            if agents.count == 1 { return .success(agents[0]) }
-            // Guessing wrong here types into the wrong Claude
-            if acting {
+        let paneIndex: Int
+        if paneQuery.isEmpty {
+            // A guess here types into the wrong agent
+            if acting, !query.isEmpty, agentPanes(tab).count > 1 {
                 return .failure(ToolError([
                     "tab": tab.number,
-                    "error": "Nothing was done: this tab has \(agents.count) Claude conversations. Call again with conversation set to the one you mean.",
-                    "conversations": agents.enumerated().map { Self.describe($1, number: $0 + 1) },
+                    "error": "Nothing was done: this tab has \(agentPanes(tab).count) agents. Call again with pane set to the one you mean.",
+                    "panes": tab.panes.map { paneEntry($0, in: tab) },
                 ]))
             }
-            // The one the multiplexer is showing
-            if let focused = agents.first(where: \.focused) { return .success(focused) }
-            return .failure(ToolError([
-                "tab": tab.number,
-                "note": "This tab has \(agents.count) Claude conversations. Call again with conversation set to one of these.",
-                "conversations": agents.enumerated().map { Self.describe($1, number: $0 + 1) },
-            ]))
+            let agents = agentPanes(tab)
+            if wantsAgent, tab.panes.indices.contains(tab.shownPane), !agents.contains(tab.panes[tab.shownPane]),
+               agents.count == 1, let only = tab.panes.firstIndex(of: agents[0]) {
+                paneIndex = only
+            } else {
+                paneIndex = tab.shownPane
+            }
+        } else {
+            guard let found = VoicePaneResolver.resolve(paneQuery, in: tab.panes) else {
+                return .failure(ToolError([
+                    "tab": tab.number,
+                    "error": "No single pane matches \"\(paneQuery)\"",
+                    "panes": tab.panes.map { paneEntry($0, in: tab) },
+                ]))
+            }
+            paneIndex = found
         }
-        if let number = Int(query), agents.indices.contains(number - 1) {
-            return .success(agents[number - 1])
+        let pane = tab.panes.indices.contains(paneIndex) ? tab.panes[paneIndex] : VoicePane(number: 1, id: "", title: tab.title)
+        let session = paneSession(tab, pane: paneIndex, shown: shown)
+        lookingAt = session.id
+
+        if let problem = await makeLive(session) {
+            return .failure(ToolError(["tab": tab.number, "title": pane.title, "error": problem]))
         }
-        let matches = agents.filter { ($0.title ?? "").lowercased().contains(query) || $0.directory.lowercased().contains(query) }
-        if matches.count == 1 { return .success(matches[0]) }
-        return .failure(ToolError([
-            "tab": tab.number,
-            "error": matches.isEmpty ? "No conversation matches \"\(query)\"" : "\"\(query)\" matches several conversations",
-            "conversations": agents.enumerated().map { Self.describe($1, number: $0 + 1) },
-        ]))
+        guard let scan = await scan(in: session, fresh: fresh) else {
+            return .failure(ToolError(["tab": tab.number, "error": "Couldn't check the pane for Claude"]))
+        }
+        return .success(Target(tab: tab, pane: pane, session: session, agent: scan.agents.last))
     }
 
     /// The conversation and its history, for search_tab and read_turn
     private func conversation(_ args: [String: Any]) async -> Result<(Target, ClaudeTranscript), ToolError> {
         let target: Target
-        switch await resolveTarget(args) {
+        switch await resolveTarget(args, wantsAgent: true) {
         case .success(let found): target = found
         case .failure(let error): return .failure(error)
         }
         guard let agent = target.agent else {
-            return .failure(ToolError(["tab": target.tab.number, "error": "No Claude conversation runs in this tab; use read_tab"]))
+            return .failure(ToolError(target.ids.merging(["error": "No Claude runs in this pane; use read_tab"]) { $1 }))
         }
         guard let transcript = await transcript(for: agent, in: target.session) else {
-            return .failure(ToolError(["tab": target.tab.number, "error": "Couldn't read the Claude conversation's history"]))
+            return .failure(ToolError(target.ids.merging(["error": "Couldn't read the Claude conversation's history"]) { $1 }))
         }
         return .success((target, transcript))
     }
 
-    private static func describe(_ agent: ClaudeAgent, number: Int) -> [String: Any] {
-        var entry: [String: Any] = [
-            "conversation": number,
+    /// A pane's Claude for the model: its conversation's title, status and directory
+    private func describe(_ agent: ClaudeAgent, in target: Target) -> [String: Any] {
+        let state = sessionManager?.paneStates[target.pane.id]
+        return [
             "title": agent.title ?? "untitled (new, or nothing asked yet)",
-            "status": agent.statusText,
+            "status": state.flatMap { $0.hasAgent ? Self.statusText($0) : nil } ?? agent.statusText,
             "directory": agent.shortDirectory,
         ]
-        if agent.focused {
-            entry["showing_in_tab"] = true
-        }
-        return entry
     }
 
-    /// What runs in a tab, or nil if the machine couldn't be asked
+    /// The Claude running in a pane, or nil if the machine couldn't be asked
     private func scan(in session: Session, fresh: Bool = false) async -> ClaudeScan? {
         if !fresh, let cached = agentCache[session.id], Date().timeIntervalSince(cached.at) < 5 {
             return cached.scan
@@ -1099,8 +1079,7 @@ final class VoiceAgent: ObservableObject {
         guard let id = session.rtachSessionId else { return ClaudeScan() }
         guard let script = ClaudeScripts.find(rtachSessionId: id),
               let output = await runScript(script, in: session) else { return nil }
-        var scan = ClaudeScripts.parse(output)
-        scan.markShowing(screen: plainScreen(session))
+        let scan = ClaudeScripts.parse(output)
         agentCache[session.id] = (Date(), scan)
         return scan
     }
@@ -1117,13 +1096,16 @@ final class VoiceAgent: ObservableObject {
         return transcript
     }
 
-    /// Run a script on the tab's machine, giving up after `timeout` seconds
+    /// Run a script on the pane's machine, over its host's connection, giving up after
+    /// `timeout` seconds
     private func runScript(_ script: String, in session: Session, timeout: Double = 6, quiet: Bool = false) async -> String? {
         final class Once {
             var done = false
         }
         let once = Once()
         let started = Date()
+        let config = session.connectionConfig
+        let encoded = Data(script.utf8).base64EncodedString()
         let output: String? = await withCheckedContinuation { continuation in
             func finish(_ value: String?) {
                 guard !once.done else { return }
@@ -1132,7 +1114,8 @@ final class VoiceAgent: ObservableObject {
             }
             Task { @MainActor in
                 do {
-                    finish(try await session.runRemoteScript(script))
+                    guard let sessionManager = self.sessionManager else { return finish(nil) }
+                    finish(try await sessionManager.withHost(config) { try await $0.executeCommand("echo \(encoded) | base64 -d | sh") })
                 } catch {
                     voiceTrace("remote script failed: \(error.localizedDescription)")
                     finish(nil)
@@ -1149,26 +1132,8 @@ final class VoiceAgent: ObservableObject {
         return output
     }
 
-    /// The bottom of the conversation's screen: a question, menu or suggestion it's
-    /// showing. In Herdr, from its own pane, whichever pane Herdr is showing.
-    private func screenBottom(of target: Target) async -> String {
-        if case .herdr(let pane)? = target.agent?.route, let script = ClaudeScripts.herdrScreen(pane: pane),
-           let output = await runScript(script, in: target.session), !output.isEmpty {
-            return TerminalTextCleaner.clean(TerminalStyledText.markup(output)).suffix(12).joined(separator: "\n")
-        }
-        return tabScreenBottom(target.session)
-    }
-
-    /// What the tab shows, as plain text
-    private func plainScreen(_ session: Session) -> String {
-        var text = TerminalStyledText.markup(session.readTerminalText?(false) ?? "")
-        for marker in ["[dim]", "[/dim]", "[strike]", "[/strike]"] {
-            text = text.replacingOccurrences(of: marker, with: "")
-        }
-        return text
-    }
-
-    private func tabScreenBottom(_ session: Session) -> String {
+    /// The bottom of a pane's screen: a question, menu or suggestion it's showing
+    private func screenBottom(_ session: Session) -> String {
         let screen = TerminalTextCleaner.clean(TerminalStyledText.markup(session.readTerminalText?(false) ?? ""))
         return screen.suffix(12).joined(separator: "\n")
     }
@@ -1244,8 +1209,8 @@ final class VoiceAgent: ObservableObject {
 
     static let instructions = """
     You are the voice assistant in Clauntty, an iPhone terminal app. The user runs Claude \
-    Code, an AI coding agent, in their terminal tabs on remote machines, sometimes several \
-    in one tab through a multiplexer like Herdr or tmux. You're on the user's side of those \
+    Code, an AI coding agent, in their terminal tabs on remote machines. A tab can be split \
+    into panes, each running a shell or a Claude. You're on the user's side of those \
     conversations: you help them keep track of what each Claude is doing, what it's asking \
     them, and what they might tell it next, while they're away from the keyboard. You \
     are Clauntty's voice assistant: if a conversation is about Clauntty's voice agent, \
@@ -1255,7 +1220,7 @@ final class VoiceAgent: ObservableObject {
     code, long paths, IDs or raw output; summarize instead.
     - Be quick. When the user asks what's on screen, what they're working on, or what \
     Claude is doing, call read_tab straight away with no arguments (that's the tab and \
-    conversation on screen), without calling list_tabs first.
+    pane on screen), without calling list_tabs first.
     - Answer with the work itself, in one sentence: what the user and Claude are working \
     on right now and where it stands, e.g. "You're testing voice prompts; Claude got \
     yours and is waiting for the results." Take it from the latest turns. Don't lead \
@@ -1266,9 +1231,11 @@ final class VoiceAgent: ObservableObject {
     and Claude are actually doing. Claude Code's dim suggested prompt is only its guess \
     at the user's next message and is often wrong; don't recommend it just because it's \
     there.
-    - Call list_tabs when the user asks about other tabs or conversations, or which ones \
-    need them. When a tab has several conversations, showing_in_tab marks the one that \
-    tab is showing, and read_tab without a conversation reads that one.
+    - Call list_tabs when the user asks about other tabs or agents, or which ones need \
+    them. It lists each tab's panes with what they run, and each agent's status and the \
+    user's last prompt to it, so it often answers "what needs me" without reading more. \
+    In a tab with several panes, showing marks the one it shows; tools without pane use \
+    that one.
     - Before saying what a conversation did or asked, or giving advice, read it with \
     read_tab. Read only the conversations the question is about, not all of them.
     - For anything older or more detailed, look it up instead of guessing: search_tab \
@@ -1280,20 +1247,20 @@ final class VoiceAgent: ObservableObject {
     hints, not something the user typed. In Claude Code, a dim prompt after the ❯ is a \
     suggested prompt and the input box is otherwise empty. [strike]...[/strike] is \
     crossed-out text, usually a finished item.
-    - Refer to tabs and conversations by title, or by number if titles are unclear.
+    - Refer to tabs and panes by title, or by number if titles are unclear.
 
     Acting for the user:
     - Act only when the user asks. Never send a prompt, answer a menu or press keys on \
     your own initiative, even when the next step seems obvious; suggest it instead.
-    - Send each message once, to one conversation: one send_prompt call, never two for \
-    the same message. In a tab with several conversations, actions must name the \
-    conversation, by its number from read_tab or list_tabs.
+    - Send each message once, to one pane: one send_prompt call, never two for the same \
+    message. When you name a tab that has several agents, name the pane too, by its \
+    number from read_tab or list_tabs.
     - Everything the user says is said to you, not to Claude. Call send_prompt only \
     when they explicitly ask you to pass something on: "tell it...", "send...", \
     "reply...", "ask it...", "say to Claude...". A remark that sounds like an answer \
     to Claude's question ("I still need to run that migration") is them talking to \
     you; if it seems meant for Claude, ask "Want me to send that?" and wait.
-    - send_prompt types a prompt into a Claude conversation and submits it. Send the \
+    - send_prompt types a prompt into a pane's Claude and submits it. Send the \
     user's words as they said them, minus filler like "um", without asking first, then \
     say briefly what you sent. When the user asks indirectly ("tell it that...", "ask \
     it to..."), write the message as the user would type it to Claude, turning the \
@@ -1314,14 +1281,14 @@ final class VoiceAgent: ObservableObject {
     screen first. Before approving a permission prompt, say in a few words what it \
     allows, unless the user already told you what to answer. esc stops Claude mid-turn \
     and is always fine when the user asks.
-    - run_command runs a command in a plain shell tab. Always read the command back and \
+    - run_command runs a command in a plain shell pane. Always read the command back and \
     wait for a yes before calling it with confirmed true.
-    - show_tab puts a tab, or a conversation inside it, on the phone's screen.
-    - Each action returns the conversation's status and screen a moment later. Say what \
+    - show_tab puts a tab, or a pane in it, on the phone's screen.
+    - Each action returns the pane's status and screen a moment later. Say what \
     happened from that, e.g. that Claude started working or is asking something.
 
-    - Messages in [Clauntty: ...] come from the app, not the user. When one says a \
-    conversation finished its turn or is waiting at a menu, tell the user in a few \
+    - Messages in [Clauntty: ...] come from the app, not the user. When one says an \
+    agent finished its turn or is waiting at a menu, tell the user in a few \
     words which one (by what it's working on, if you know) and offer to read it. Don't \
     read it unless they ask. If the user is busy with something else, keep it to one \
     short sentence.
@@ -1333,25 +1300,25 @@ final class VoiceAgent: ObservableObject {
         "type": "string",
         "description": "Tab number from list_tabs, or part of its title, e.g. \"2\" or \"devbox\". Leave it out for the tab on screen.",
     ]
-    private static let conversationParameter: [String: Any] = [
+    private static let paneParameter: [String: Any] = [
         "type": "string",
-        "description": "Which Claude conversation, when the tab has several: its number from list_tabs, or part of its title",
+        "description": "Which pane of the tab: its number from list_tabs, or part of its title. Leave it out for the pane the tab shows.",
     ]
 
     static let tools: [[String: Any]] = [
         [
             "type": "function",
             "name": "list_tabs",
-            "description": "List the terminal tabs: number, title, machine, which one is on screen, and the Claude conversations running in each (title, working or waiting, directory).",
+            "description": "List the terminal tabs: number, title, machine, which one is on screen, and their panes: what each runs, and for a Claude its status (working, finished, waiting at a menu) and the user's last prompt to it.",
             "parameters": ["type": "object", "properties": [String: Any](), "required": [String]()] as [String: Any],
         ],
         [
             "type": "function",
             "name": "read_tab",
-            "description": "Catch up on a tab; with no arguments, the one on screen. For a Claude conversation: the last few turns in brief, the latest turn in full, and the bottom of the screen. For a plain terminal: what it printed since you last read it. Connects the tab first if needed.",
+            "description": "Catch up on a pane; with no arguments, the one on screen. For a Claude: the last few turns of its conversation in brief, the latest turn in full, and the bottom of the screen. For a plain terminal: what it printed since you last read it. Connects the pane first if needed.",
             "parameters": [
                 "type": "object",
-                "properties": ["tab": tabParameter, "conversation": conversationParameter] as [String: Any],
+                "properties": ["tab": tabParameter, "pane": paneParameter] as [String: Any],
                 "required": [String](),
             ] as [String: Any],
         ],
@@ -1364,7 +1331,7 @@ final class VoiceAgent: ObservableObject {
                 "properties": [
                     "tab": tabParameter,
                     "query": ["type": "string", "description": "Words to look for, e.g. \"migration prod\""],
-                    "conversation": conversationParameter,
+                    "pane": paneParameter,
                 ] as [String: Any],
                 "required": ["query"],
             ] as [String: Any],
@@ -1378,7 +1345,7 @@ final class VoiceAgent: ObservableObject {
                 "properties": [
                     "tab": tabParameter,
                     "turn": ["type": "integer", "description": "Turn number, from read_tab or search_tab"],
-                    "conversation": conversationParameter,
+                    "pane": paneParameter,
                 ] as [String: Any],
                 "required": ["turn"],
             ] as [String: Any],
@@ -1386,13 +1353,13 @@ final class VoiceAgent: ObservableObject {
         [
             "type": "function",
             "name": "send_prompt",
-            "description": "Type a prompt into a Claude conversation and submit it. Fails without sending if Claude is waiting at a menu or question; answer that with press_keys first. Returns the conversation's status and screen afterwards.",
+            "description": "Type a prompt into a pane's Claude and submit it. Fails without sending if Claude is waiting at a menu or question; answer that with press_keys first. Returns the pane's status and screen afterwards.",
             "parameters": [
                 "type": "object",
                 "properties": [
                     "tab": tabParameter,
                     "text": ["type": "string", "description": "The prompt, in the user's words"],
-                    "conversation": conversationParameter,
+                    "pane": paneParameter,
                 ] as [String: Any],
                 "required": ["text"],
             ] as [String: Any],
@@ -1400,13 +1367,13 @@ final class VoiceAgent: ObservableObject {
         [
             "type": "function",
             "name": "press_keys",
-            "description": "Press keys in a Claude conversation or a terminal tab, e.g. to answer Claude's menus and permission prompts or to stop it (esc). Returns the status and screen afterwards.",
+            "description": "Press keys in a pane, e.g. to answer Claude's menus and permission prompts or to stop it (esc). Returns the status and screen afterwards.",
             "parameters": [
                 "type": "object",
                 "properties": [
                     "tab": tabParameter,
                     "keys": ["type": "string", "description": "Space-separated keys, pressed in order: 0-9, y, n, enter, esc, up, down, left, right, tab, shift+tab, space, backspace, ctrl+c. E.g. \"1\" or \"down enter\"."],
-                    "conversation": conversationParameter,
+                    "pane": paneParameter,
                 ] as [String: Any],
                 "required": ["keys"],
             ] as [String: Any],
@@ -1414,7 +1381,7 @@ final class VoiceAgent: ObservableObject {
         [
             "type": "function",
             "name": "run_command",
-            "description": "Run a shell command in a plain terminal tab (not a Claude conversation) and return its output. Only after reading the command back to the user and hearing yes.",
+            "description": "Run a shell command in a plain terminal pane (not a Claude) and return its output. Only after reading the command back to the user and hearing yes.",
             "parameters": [
                 "type": "object",
                 "properties": [
@@ -1428,10 +1395,10 @@ final class VoiceAgent: ObservableObject {
         [
             "type": "function",
             "name": "show_tab",
-            "description": "Put a tab on the phone's screen, and in a multiplexer like Herdr, the conversation's pane too.",
+            "description": "Put a tab, or one of its panes, on the phone's screen.",
             "parameters": [
                 "type": "object",
-                "properties": ["tab": tabParameter, "conversation": conversationParameter] as [String: Any],
+                "properties": ["tab": tabParameter, "pane": paneParameter] as [String: Any],
                 "required": [String](),
             ] as [String: Any],
         ],
