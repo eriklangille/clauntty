@@ -38,6 +38,16 @@ public final class PacketReader {
     private var _state: State = .waitingForHeader
     private var _buffer = Data()
 
+    /// Longest payload rtach sends: a whole scrollback buffer (1MB by default, `-s` sets
+    /// it). A longer one is a misread header.
+    public static let maxPayloadLength = 64 * 1024 * 1024
+
+    /// The stream lost its place: a header with an unknown type or an impossible length,
+    /// so bytes went missing or arrived out of order. Nothing after it can be trusted
+    /// (before this was noticed, a misread length waited forever for data that never came
+    /// and the pane showed nothing more); the owner should attach again.
+    public private(set) var lostSync = false
+
     public init() {}
 
     /// Current parser state (for debugging/testing)
@@ -54,12 +64,14 @@ public final class PacketReader {
     public func reset() {
         _state = .waitingForHeader
         _buffer.removeAll(keepingCapacity: true)
+        lostSync = false
     }
 
     /// Process incoming data and return any complete responses
     /// - Parameter data: New data from server
     /// - Returns: Array of parsed responses (may be empty if waiting for more data)
     public func process(_ data: Data) -> [RtachResponse] {
+        guard !lostSync else { return [] }
         _buffer.append(data)
         var responses: [RtachResponse] = []
 
@@ -80,9 +92,10 @@ public final class PacketReader {
                 let actualType = typeRaw & ~ProtocolConstants.compressionFlag
 
                 guard let responseType = ResponseType(rawValue: actualType) else {
-                    // Unknown type - skip this byte and try again
-                    _buffer = Data(_buffer.dropFirst())
-                    continue
+                    os_log(.error, log: decompressionLog, "lost sync: unknown response type %d", typeRaw)
+                    lostSync = true
+                    _buffer.removeAll()
+                    return responses
                 }
 
                 // Use manual byte loading to avoid alignment issues
@@ -90,6 +103,13 @@ public final class PacketReader {
                          (UInt32(_buffer[start + 2]) << 8) |
                          (UInt32(_buffer[start + 3]) << 16) |
                          (UInt32(_buffer[start + 4]) << 24)
+
+                guard len <= Self.maxPayloadLength else {
+                    os_log(.error, log: decompressionLog, "lost sync: %u-byte payload", len)
+                    lostSync = true
+                    _buffer.removeAll()
+                    return responses
+                }
 
                 // Remove header from buffer (use dropFirst to reset indices)
                 _buffer = Data(_buffer.dropFirst(ProtocolConstants.responseHeaderSize))
@@ -133,42 +153,45 @@ public final class PacketReader {
         }
     }
 
-    /// Decompress zlib-compressed data
+    /// Decompress zlib-compressed data. The output buffer grows until it holds it all: a
+    /// fixed 8x cut short very compressible output (a repaint of mostly spaces).
     private func decompress(_ data: Data) -> Data? {
         // Use ZLIB algorithm (includes header)
         let algorithm = COMPRESSION_ZLIB
+        var capacity = max(data.count * 8, 32768)
 
-        // Allocate output buffer - start with 4x input size, expand if needed
-        let maxOutputSize = max(data.count * 8, 32768)
-        var outputBuffer = Data(count: maxOutputSize)
-
-        let decompressedSize = outputBuffer.withUnsafeMutableBytes { outputPtr -> Int in
-            data.withUnsafeBytes { inputPtr -> Int in
-                guard let input = inputPtr.baseAddress,
-                      let output = outputPtr.baseAddress else {
-                    os_log(.error, log: decompressionLog, "Failed to get buffer pointers")
-                    return 0
+        while true {
+            var outputBuffer = Data(count: capacity)
+            let decompressedSize = outputBuffer.withUnsafeMutableBytes { outputPtr -> Int in
+                data.withUnsafeBytes { inputPtr -> Int in
+                    guard let input = inputPtr.baseAddress,
+                          let output = outputPtr.baseAddress else {
+                        os_log(.error, log: decompressionLog, "Failed to get buffer pointers")
+                        return 0
+                    }
+                    return compression_decode_buffer(
+                        output.assumingMemoryBound(to: UInt8.self),
+                        capacity,
+                        input.assumingMemoryBound(to: UInt8.self),
+                        data.count,
+                        nil,
+                        algorithm
+                    )
                 }
-                let result = compression_decode_buffer(
-                    output.assumingMemoryBound(to: UInt8.self),
-                    maxOutputSize,
-                    input.assumingMemoryBound(to: UInt8.self),
-                    data.count,
-                    nil,
-                    algorithm
-                )
-                os_log(.info, log: decompressionLog, "input=%d bytes, output=%d bytes", data.count, result)
-                return result
             }
-        }
 
-        guard decompressedSize > 0 else {
-            os_log(.error, log: decompressionLog, "FAILED: decompressedSize=%d", decompressedSize)
-            return nil
+            guard decompressedSize > 0 else {
+                os_log(.error, log: decompressionLog, "FAILED: decompressedSize=%d", decompressedSize)
+                return nil
+            }
+            // A full buffer may have cut it short: again with more room
+            if decompressedSize == capacity, capacity < Self.maxPayloadLength * 4 {
+                capacity *= 4
+                continue
+            }
+            outputBuffer.count = decompressedSize
+            return outputBuffer
         }
-
-        outputBuffer.count = decompressedSize
-        return outputBuffer
     }
 
     /// Build response from type and payload

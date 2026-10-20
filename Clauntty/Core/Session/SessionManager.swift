@@ -325,13 +325,16 @@ class SessionManager: ObservableObject {
 
         // Create a new channel for this session with the correct terminal size
         Logger.clauntty.debugOnly("SessionManager: creating channel for \(session.id.uuidString.prefix(8)), command=\(shellCommand ?? "shell"), rtach=\(usingRtach)")
+        // Through the main queue, which keeps the order they arrived in: a Task per chunk
+        // doesn't, and a swapped pair left rtach's stream unreadable (the pane went blank
+        // until the app restarted)
         let onData: (Data) -> Void = { [weak session] data in
-            Task { @MainActor in
-                session?.handleDataReceived(data)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { session?.handleDataReceived(data) }
             }
         }
         let onInactive: () -> Void = { [weak self, weak session] in
-            Task { @MainActor in
+            DispatchQueue.main.async { MainActor.assumeIsolated {
                 // Only if the session is still on a dead channel: it may have been
                 // detached already, or reconnected on a new channel since
                 guard let session, let current = session.sshChannel, !current.isActive else { return }
@@ -352,7 +355,7 @@ class SessionManager: ObservableObject {
                 // arrives just after foregrounding, past the foreground handler's checks.
                 // Without this the tab sits on a stale screen until the app restarts.
                 session.onNeedsReconnect?()
-            }
+            } }
         }
         let channel: Channel
         let handler: SSHChannelHandler

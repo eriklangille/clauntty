@@ -271,23 +271,33 @@ final class PacketReaderTests: XCTestCase {
         XCTAssertEqual(reader.currentState, .waitingForHeader)
     }
 
-    // MARK: - Unknown Type Handling
+    // MARK: - Lost Sync
 
-    func testUnknownTypeSkipsBytes() {
-        // Unknown type 99, then valid frame
-        var data = Data([99]) // Unknown type
-        let validFrame = makeFrame(type: .terminalData, payload: Data([0x58]))
-        data.append(validFrame)
+    func testUnknownTypeLosesSync() {
+        // A header with a type rtach never sends: bytes went missing. What follows can't
+        // be trusted, even a frame that looks valid.
+        var data = Data([99])
+        data.append(makeFrame(type: .terminalData, payload: Data([0x58])))
 
-        let responses = reader.process(data)
+        XCTAssertEqual(reader.process(data), [])
+        XCTAssertTrue(reader.lostSync)
+        XCTAssertEqual(reader.process(makeFrame(type: .terminalData, payload: Data([0x59]))), [])
 
-        // Should skip unknown byte and find valid frame
-        XCTAssertEqual(responses.count, 1)
-        if case .terminalData(let payload) = responses[0] {
-            XCTAssertEqual(payload, Data([0x58]))
-        } else {
-            XCTFail("Expected terminalData response")
-        }
+        reader.reset()
+        XCTAssertFalse(reader.lostSync)
+        XCTAssertEqual(reader.process(makeFrame(type: .terminalData, payload: Data([0x5A]))), [.terminalData(Data([0x5A]))])
+    }
+
+    func testImpossibleLengthLosesSync() {
+        // Terminal text read as a header ("\0hell": type 0, a ~1.8GB length). Before, the
+        // reader waited for that much data forever and the pane showed nothing more.
+        let good = makeFrame(type: .terminalData, payload: Data("ok".utf8))
+        var data = good
+        data.append(Data([0x00]) + Data("hello world".utf8))
+
+        XCTAssertEqual(reader.process(data), [.terminalData(Data("ok".utf8))])
+        XCTAssertTrue(reader.lostSync)
+        XCTAssertEqual(reader.bufferedCount, 0)
     }
 
     // MARK: - Large Frame
@@ -343,6 +353,16 @@ final class PacketReaderTests: XCTestCase {
         withUnsafeBytes(of: UInt32(compressed.count).littleEndian) { frame.append(contentsOf: $0) }
         frame.append(compressed)
         return frame
+    }
+
+    func testCompressedPayloadOver8xItsSize() {
+        // A repaint of mostly spaces compresses far more than 8x; it used to come out cut short
+        let original = Data(repeating: 0x20, count: 1_000_000)
+        guard let frame = makeCompressedFrame(type: .terminalData, uncompressedPayload: original) else {
+            return XCTFail("Failed to create compressed frame")
+        }
+        XCTAssertLessThan(frame.count * 8, original.count)
+        XCTAssertEqual(reader.process(frame), [.terminalData(original)])
     }
 
     func testCompressedTerminalData() {

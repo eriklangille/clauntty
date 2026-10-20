@@ -30,9 +30,14 @@ public protocol RtachSessionDelegate: AnyObject {
     /// Called when the PTY's size, or whether it's this client's, changes (masters with
     /// handshakeFlagPtySize; asked for on entering framed mode)
     func rtachSession(_ session: RtachSession, didReceivePtySize size: PtySize)
+
+    /// Called once when the stream from rtach lost its place (PacketReader.lostSync):
+    /// nothing more comes through until the session attaches again
+    func rtachSessionLostSync(_ session: RtachSession)
 }
 
 public extension RtachSessionDelegate {
+    func rtachSessionLostSync(_ session: RtachSession) {}
     func rtachSession(_ session: RtachSession, didReceiveHistoryPage meta: HistoryPageMeta, data: Data) {}
     func rtachSession(_ session: RtachSession, didReceivePtySize size: PtySize) {}
 }
@@ -142,10 +147,17 @@ public final class RtachSession {
 
         case .framedMode:
             // In framed mode, parse all data as frames
-            let responses = reader.process(data)
-            for response in responses {
-                handleResponse(response)
-            }
+            processFrames(data)
+        }
+    }
+
+    private func processFrames(_ data: Data) {
+        let wasInSync = !reader.lostSync
+        for response in reader.process(data) {
+            handleResponse(response)
+        }
+        if wasInSync, reader.lostSync {
+            delegate?.rtachSessionLostSync(self)
         }
     }
 
@@ -193,10 +205,7 @@ public final class RtachSession {
                     rawBuffer.removeAll()
 
                     if !remaining.isEmpty {
-                        let responses = reader.process(remaining)
-                        for response in responses {
-                            handleResponse(response)
-                        }
+                        processFrames(remaining)
                     }
                     return
                 }

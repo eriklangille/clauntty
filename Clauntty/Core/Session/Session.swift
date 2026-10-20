@@ -1144,14 +1144,33 @@ extension Session: Hashable {
 // MARK: - RtachSessionDelegate
 
 extension Session: RtachClient.RtachSessionDelegate {
+    /// On the main actor, in the order rtach sent them: these are called on the main thread
+    /// (processIncomingData runs there), where a Task per message doesn't keep the order
+    nonisolated private func onMain(_ body: @escaping @MainActor () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated(body)
+        } else {
+            DispatchQueue.main.async { MainActor.assumeIsolated(body) }
+        }
+    }
+
+    /// The stream from rtach lost its place (bytes missing or out of order): nothing more
+    /// would show. Closing the channel attaches again with a fresh stream (onChannelInactive).
+    nonisolated func rtachSessionLostSync(_ session: RtachClient.RtachSession) {
+        onMain {
+            Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): lost its place in rtach's stream, attaching again")
+            self.sshChannel?.close(promise: nil)
+        }
+    }
+
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveTerminalData data: Data) {
-        Task { @MainActor in
+        onMain {
             self.processTerminalData(data)
         }
     }
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveScrollback data: Data) {
-        Task { @MainActor in
+        onMain {
             Logger.clauntty.debugOnly("Scrollback response complete: \(data.count) bytes")
             self.scrollbackPageRequestPending = false
             self.onScrollbackReceived?(data)
@@ -1160,13 +1179,13 @@ extension Session: RtachClient.RtachSessionDelegate {
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveScrollbackPage meta: RtachClient.ScrollbackPageMeta, data: Data) {
         // Offset-based pages aren't requested any more (see requestScrollbackPage)
-        Task { @MainActor in
+        onMain {
             self.scrollbackPageRequestPending = false
         }
     }
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveHistoryPage meta: RtachClient.HistoryPageMeta, data: Data) {
-        Task { @MainActor in
+        onMain {
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): history page \(meta.start)..<\(meta.end), \(data.count) bytes, oldest=\(meta.oldest)")
 
             self.scrollbackPageRequestPending = false
@@ -1190,7 +1209,7 @@ extension Session: RtachClient.RtachSessionDelegate {
     }
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveCommand data: Data) {
-        Task { @MainActor in
+        onMain {
             if let commandString = String(data: data, encoding: .utf8) {
                 Logger.clauntty.debugOnly("Received command from rtach: \(commandString)")
                 self.handleRtachCommand(commandString)
@@ -1228,7 +1247,7 @@ extension Session: RtachClient.RtachSessionDelegate {
     }
 
     nonisolated func rtachSessionDidReceiveIdle(_ session: RtachClient.RtachSession) {
-        Task { @MainActor in
+        onMain {
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): received idle notification from rtach")
 
             // Reset pre-fetch state if we receive idle while still in pre-fetch mode
@@ -1278,14 +1297,14 @@ extension Session: RtachClient.RtachSessionDelegate {
     }
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceivePtySize size: RtachClient.PtySize) {
-        Task { @MainActor in
+        onMain {
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pty size \(size.cols)x\(size.rows), yours=\(size.yours)")
             self.setPtySize(size)
         }
     }
 
     nonisolated func rtachSessionDidEnterFramedMode(_ session: RtachClient.RtachSession) {
-        Task { @MainActor in
+        onMain {
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): entered framed mode")
 
             // Request scrollback after framed mode is established
