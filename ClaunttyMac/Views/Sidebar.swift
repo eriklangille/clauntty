@@ -39,7 +39,7 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         // In the row of the window's buttons, where the toolbar was
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .safeAreaInset(edge: .top, spacing: 8) {
             HStack(spacing: 0) {
                 SidebarToggle()
                     .padding(.leading, SidebarToggle.leading)
@@ -402,9 +402,10 @@ private struct HostHeader: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        // In line with the rows' status glyphs
+        // In line with the rows' status glyphs, and clear of the first row: the sections
+        // are already spaced apart
         .padding(.leading, 2)
-        .padding(.top, 6)
+        .padding(.bottom, 4)
     }
 }
 
