@@ -101,7 +101,10 @@ in `SessionManager+Groups.swift`, its panes the dots, swipes and menu sections. 
 `~`; Close is `ws end` (asks first with several panes); sessions in no workspace are adopted with
 `ws add` when a host syncs. The app refreshes `rtach ws list --json` when a host deploys, on foreground,
 when a tab's menu opens and when rtach sends `workspace;…` (a `rtach ws` change from a terminal or an
-agent, shown right away). The server row's context menu has "New Workspace…". Plain tabs only exist
+agent, shown right away). The server row's context menu has "New Workspace…". A host's workspaces
+keep one order on the host (`ws reorder`): `followHostOrder` puts a host's tabs in it within the places
+they have in `tabOrder` (other hosts' tabs and pages stay local), and a drag sends `ws reorder` once it
+settles (`moveWorkspaceOnHost`). A new tab goes after the one you're in (`ws new --after`). Plain tabs only exist
 with rtach turned off. To try it in the simulator, run `rtach ws new demo` and `rtach ws split -v` in a tab on the
 test container, then open the tab's menu. Fake panes for every terminal tab, without a host:
 `xcrun simctl spawn booted defaults write com.octerm.clauntty fakeTabPanes -bool YES` (`NO` to turn off).
@@ -375,8 +378,9 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   click takes the pane back. Output waits for the resize, as on the phone.
 - **Sidebar:** one single-line row per workspace (its name, or what runs in its shown pane
   for one named after a folder; the status of its most pressing pane; its pane dots); panes are in the split, each under a title bar with split,
-  zoom and close. Zoom (`WindowState.zoomedPane`) is local only. Workspaces drag to
-  reorder (the shared `tabOrder`, per device: the phone keeps its own); the host's name
+  zoom and close. Zoom (`WindowState.zoomedPane`) is local only. Dragging a divider
+  (`DividerHandle`) resizes the split here and on the host (`ws resize`), holding the
+  terminals' sizes until the drag stops. Workspaces drag to reorder; the host's name
   has a "…" menu (New Workspace, Refresh, Remove Host); the section's own hover chevron
   folds it. `StatusGlyph` draws the phone's `PaneStatusIndicator` in SwiftUI; change both
   together.

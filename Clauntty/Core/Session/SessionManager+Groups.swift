@@ -315,6 +315,7 @@ extension SessionManager {
         workspacePaneIds[config.id] = Set(listed.flatMap { $0.tabs.flatMap { $0.panes.map(\.id) } })
         let workspaces = endedPanes.isEmpty ? listed : listed.compactMap { $0.without(endedPanes) }
         var shown = Set<UUID>()
+        var order: [UUID] = []
 
         for workspace in workspaces {
             for tab in workspace.tabs {
@@ -334,14 +335,38 @@ extension SessionManager {
                 continue
             }
             shown.insert(groupId)
+            order.append(groupId)
             updateGroup(id: groupId, workspace: workspace, panes: panes, config: config)
         }
 
         for group in sessionGroups where group.connectionId == config.id && !shown.contains(group.id) {
             removeSessionGroup(group.id)
         }
+        // Not over a drag the host hasn't heard about yet
+        if pendingWorkspaceMoves[config.id] == nil {
+            followHostOrder(order)
+        } else {
+            for id in order where !tabOrder.contains(id) {
+                tabOrder.append(id)
+            }
+        }
         saveGroups()
         saveTabOrder()
+    }
+
+    /// A host's workspace tabs in the host's order (`rtach ws reorder`, from any
+    /// device), in the places they have among other hosts' tabs and pages. A new one
+    /// goes right after the one before it on the host.
+    private func followHostOrder(_ order: [UUID]) {
+        for (index, id) in order.enumerated() where !tabOrder.contains(id) {
+            let previous = order[..<index].last.flatMap { tabOrder.firstIndex(of: $0) }
+            tabOrder.insert(id, at: previous.map { $0 + 1 } ?? tabOrder.endIndex)
+        }
+        let ids = Set(order)
+        let places = tabOrder.indices.filter { ids.contains(tabOrder[$0]) }
+        for (place, id) in zip(places, order) {
+            tabOrder[place] = id
+        }
     }
 
     private func updateGroup(id groupId: UUID, workspace: RemoteWorkspace, panes: [TabPane], config: SavedConnection) {
@@ -367,9 +392,6 @@ extension SessionManager {
             group = SessionGroup(id: groupId, connectionId: config.id, workspaceId: workspace.id,
                                  title: workspace.name, panes: panes, layouts: layouts, activePaneId: panes[0].id)
             sessionGroups.append(group)
-            if !tabOrder.contains(groupId) {
-                tabOrder.append(groupId)
-            }
         }
 
         let current = paneSession(for: group, paneId: group.activePaneId, config: config)
@@ -462,14 +484,17 @@ extension SessionManager {
         return await newWorkspace(on: config, folder: "~")
     }
 
-    /// Start a workspace on a host, in `folder` (its git root, if any), and show it
+    /// Start a workspace on a host, in `folder` (its git root, if any), and show it.
+    /// It goes right after the workspace you're in, if that's on the same host.
     @discardableResult
     func newWorkspace(on config: SavedConnection, folder: String) async -> Session? {
         let folder = folder.trimmingCharacters(in: .whitespaces)
+        let current = activeSession.flatMap { sessionGroup(for: $0) }
+        let after = current.flatMap { $0.connectionId == config.id ? ["--after", $0.workspaceId] : nil } ?? []
         do {
             let created = try await withHost(config) { connection in
                 try await RtachDeployer(connection: connection)
-                    .workspaceCommand(["new", "--quiet"], in: folder.isEmpty ? "~" : folder, as: WorkspaceCreated.self)
+                    .workspaceCommand(["new"] + after + ["--quiet"], in: folder.isEmpty ? "~" : folder, as: WorkspaceCreated.self)
             }
             await refreshWorkspaces(for: config)
             return showWorkspace(created.workspace)
@@ -491,6 +516,86 @@ extension SessionManager {
             await refreshWorkspaces(for: config)
         } catch {
             Logger.clauntty.warning("SessionManager: can't adopt \(sessionIds.count) sessions on \(config.displayName): \(error.localizedDescription)")
+        }
+    }
+
+    /// A workspace tab was dragged to a new place here: put it there on its host too
+    /// (before the next of the host's tabs), so every device shows that order. A drag
+    /// on the phone moves the tab at every swap, so the host hears once it settles. If
+    /// that fails, the refresh puts back the host's order.
+    func moveWorkspaceOnHost(_ groupId: UUID) {
+        guard let group = sessionGroups.first(where: { $0.id == groupId }) else { return }
+        let connectionId = group.connectionId
+        let previous = pendingWorkspaceMoves[connectionId]
+        previous?.send.cancel()
+        var moved = previous?.groupIds ?? []
+        if !moved.contains(groupId) { moved.append(groupId) }
+        let token = UUID()
+        let send = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            // One at a time: one already under way finishes first
+            await previous?.send.value
+            await sendWorkspaceMoves(moved, connectionId: connectionId)
+            // Moved again meanwhile: the later one refreshes
+            guard pendingWorkspaceMoves[connectionId]?.token == token else { return }
+            pendingWorkspaceMoves[connectionId] = nil
+            if let config = sessionGroups.first(where: { $0.connectionId == connectionId })
+                .flatMap({ currentSession(of: $0) })?.connectionConfig {
+                await refreshWorkspaces(for: config)
+            }
+        }
+        pendingWorkspaceMoves[connectionId] = (moved, send, token)
+    }
+
+    /// `rtach ws reorder` for each moved workspace, before the next of its host's tabs
+    /// here, in turn
+    private func sendWorkspaceMoves(_ groupIds: [UUID], connectionId: UUID) async {
+        for groupId in groupIds {
+            guard let group = sessionGroups.first(where: { $0.id == groupId }),
+                  let config = currentSession(of: group)?.connectionConfig else { continue }
+            let hostGroups = tabOrder.compactMap { id in
+                sessionGroups.first { $0.id == id && $0.connectionId == connectionId }
+            }
+            let local = hostGroups.map(\.workspaceId)
+            // The host has them in this order already
+            guard knownWorkspaces[config.id]?.map(\.id).filter(local.contains) != local,
+                  let index = hostGroups.firstIndex(where: { $0.id == groupId }) else { continue }
+            let before = hostGroups.dropFirst(index + 1).first.map { ["--before", $0.workspaceId] } ?? []
+            do {
+                _ = try await withHost(config) { connection in
+                    try await RtachDeployer(connection: connection)
+                        // Not --quiet: rtach tells the device with the active pane to refresh
+                        // (`workspace;`), which may be another one
+                        .workspaceCommand(["reorder", group.workspaceId] + before, as: WorkspaceReordered.self)
+                }
+            } catch {
+                workspaceMessage = error.localizedDescription
+                return
+            }
+        }
+    }
+
+    /// The divider between two panes of a tab was dragged: `pane`'s side takes `ratio`
+    /// of the space, here at once and on the host (`rtach ws resize`)
+    func resizeSplit(groupId: UUID, pane: String, other: String, ratio: Double) {
+        guard let index = sessionGroups.firstIndex(where: { $0.id == groupId }),
+              let config = currentSession(of: sessionGroups[index])?.connectionConfig else { return }
+        let ratio = (ratio * 1000).rounded() / 1000
+        sessionGroups[index].layouts = sessionGroups[index].layouts.map {
+            $0.paneIds.contains(pane) ? $0.resized(pane, other, ratio: ratio) : $0
+        }
+        Task {
+            do {
+                _ = try await withHost(config) { connection in
+                    try await RtachDeployer(connection: connection)
+                        // Not --quiet, as reorder
+                        .workspaceCommand(["resize", pane, other, String(ratio)], as: WorkspaceResized.self)
+                }
+            } catch {
+                workspaceMessage = error.localizedDescription
+                await refreshWorkspaces(for: config)
+            }
         }
     }
 

@@ -176,6 +176,9 @@ class SessionManager: ObservableObject {
     /// Panes whose session ended: left out of every workspace list, since the host can
     /// still list one for a moment after it ends
     var endedPanes: Set<String> = []
+    /// Workspaces dragged to a new place here that the host hasn't been told yet, by
+    /// connection, and the task that tells it once the drag settles
+    var pendingWorkspaceMoves: [UUID: (groupIds: [UUID], send: Task<Void, Never>, token: UUID)] = [:]
     /// Each host's workspace panes. They're shown in their workspace's tab, never as plain tabs.
     var workspacePaneIds: [UUID: Set<String>] = [:]
     /// A workspace action that failed, to show the user
@@ -1108,6 +1111,7 @@ class SessionManager: ObservableObject {
         tabOrder.insert(movedId, at: insertIndex)
 
         saveTabOrder()
+        moveWorkspaceOnHost(movedId)
         Logger.clauntty.debugOnly("SessionManager: moved tab from index \(sourceIndex) to \(insertIndex)")
     }
 
@@ -1141,6 +1145,7 @@ class SessionManager: ObservableObject {
         // Append to end
         tabOrder.append(id)
         saveTabOrder()
+        moveWorkspaceOnHost(id)
         Logger.clauntty.debugOnly("SessionManager: moved tab to end")
     }
 

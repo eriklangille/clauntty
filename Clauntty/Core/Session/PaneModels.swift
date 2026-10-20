@@ -51,6 +51,21 @@ indirect enum PaneLayout: Equatable, Decodable {
         }
     }
 
+    /// The split between two panes (the smallest holding both) giving `pane`'s side
+    /// `ratio`, kept between 0.1 and 0.9, as `rtach ws resize` does
+    func resized(_ pane: String, _ other: String, ratio: Double) -> PaneLayout {
+        guard case .split(let vertical, let current, let first, let second) = self else { return self }
+        switch (first.paneIds.contains(pane), first.paneIds.contains(other)) {
+        case (true, true):
+            return .split(vertical: vertical, ratio: current, first: first.resized(pane, other, ratio: ratio), second: second)
+        case (false, false):
+            return .split(vertical: vertical, ratio: current, first: first, second: second.resized(pane, other, ratio: ratio))
+        case (let paneFirst, _):
+            return .split(vertical: vertical, ratio: min(max(paneFirst ? ratio : 1 - ratio, 0.1), 0.9),
+                          first: first, second: second)
+        }
+    }
+
     /// Without some panes, a split's other half taking its place; nil if none are left
     func without(_ ids: Set<String>) -> PaneLayout? {
         switch self {

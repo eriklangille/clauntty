@@ -3,7 +3,7 @@ import SwiftUI
 /// The tab the shown pane is in, its panes split as rtach keeps them, each under a
 /// title bar with its actions (as in Rex); the window has no other. The pane you type
 /// into is the active session; clicking another moves there. A zoomed pane fills the
-/// tab by itself.
+/// tab by itself. Dragging a divider resizes the split, on the host too.
 struct SplitPanes: View {
     @EnvironmentObject private var window: WindowState
     let group: SessionGroup
@@ -18,6 +18,7 @@ struct SplitPanes: View {
 }
 
 private struct LayoutNode: View {
+    @EnvironmentObject private var sessionManager: SessionManager
     let layout: PaneLayout
     let group: SessionGroup
     let views: TerminalViews
@@ -25,6 +26,8 @@ private struct LayoutNode: View {
     let zoomed: Bool
     /// Its title bar is under the window's buttons when the sidebar is hidden
     let topLeft: Bool
+    /// The first half's share while its divider is dragged, and where the drag started
+    @State private var dragged: (ratio: Double, start: Double)?
 
     var body: some View {
         switch layout {
@@ -33,19 +36,40 @@ private struct LayoutNode: View {
         case .split(let vertical, let ratio, let first, let second):
             GeometryReader { geometry in
                 let total = vertical ? geometry.size.height : geometry.size.width
-                let firstSize = max(0, (total - SplitDivider.thickness) * min(max(ratio, 0.1), 0.9))
-                if vertical {
-                    VStack(spacing: 0) {
-                        node(first, topLeft: topLeft).frame(height: firstSize)
-                        SplitDivider(vertical: true)
-                        node(second, topLeft: false)
+                let room = max(0, total - SplitDivider.thickness)
+                let firstSize = room * min(max(dragged?.ratio ?? ratio, 0.1), 0.9)
+                Group {
+                    if vertical {
+                        VStack(spacing: 0) {
+                            node(first, topLeft: topLeft).frame(height: firstSize)
+                            SplitDivider(vertical: true)
+                            node(second, topLeft: false)
+                        }
+                    } else {
+                        HStack(spacing: 0) {
+                            node(first, topLeft: topLeft).frame(width: firstSize)
+                            SplitDivider(vertical: false)
+                            node(second, topLeft: false)
+                        }
                     }
-                } else {
-                    HStack(spacing: 0) {
-                        node(first, topLeft: topLeft).frame(width: firstSize)
-                        SplitDivider(vertical: false)
-                        node(second, topLeft: false)
+                }
+                // Over the panes, so the grab area reaches into them
+                .overlay(alignment: .topLeading) {
+                    DividerHandle(vertical: vertical) { distance in
+                        // Terminals resize once, when the drag is over
+                        PaneHostView.holdResizes()
+                        let start = dragged?.start ?? ratio
+                        dragged = (min(max(start + distance / max(room, 1), 0.1), 0.9), start)
+                    } onEnd: {
+                        if let dragged, let pane = first.paneIds.last, let other = second.paneIds.first {
+                            sessionManager.resizeSplit(groupId: group.id, pane: pane, other: other, ratio: dragged.ratio)
+                        }
+                        dragged = nil
                     }
+                    .frame(width: vertical ? total : DividerHandle.reach * 2,
+                           height: vertical ? DividerHandle.reach * 2 : total)
+                    .offset(x: vertical ? 0 : firstSize - DividerHandle.reach,
+                            y: vertical ? firstSize - DividerHandle.reach : 0)
                 }
             }
         }
@@ -65,6 +89,59 @@ private struct SplitDivider: View {
         Rectangle()
             .fill(.white.opacity(0.12))
             .frame(width: vertical ? nil : Self.thickness, height: vertical ? Self.thickness : nil)
+    }
+}
+
+/// Where a divider can be grabbed: a few points either side of the line, with the
+/// resize cursor. Reports how far it's been dragged (right or down), then that it's let go.
+private struct DividerHandle: NSViewRepresentable {
+    /// Either side of the line
+    static let reach: CGFloat = 3
+    let vertical: Bool
+    let onDrag: (CGFloat) -> Void
+    let onEnd: () -> Void
+
+    func makeNSView(context: Context) -> HandleView { HandleView() }
+
+    func updateNSView(_ view: HandleView, context: Context) {
+        if view.vertical != vertical {
+            view.vertical = vertical
+            view.window?.invalidateCursorRects(for: view)
+        }
+        view.onDrag = onDrag
+        view.onEnd = onEnd
+    }
+
+    final class HandleView: NSView {
+        var vertical = false
+        var onDrag: ((CGFloat) -> Void)?
+        var onEnd: (() -> Void)?
+        private var start: NSPoint?
+
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: vertical ? .resizeUpDown : .resizeLeftRight)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            start = event.locationInWindow
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start else { return }
+            let point = event.locationInWindow
+            // Window coordinates go up
+            onDrag?(vertical ? start.y - point.y : point.x - start.x)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard start != nil else { return }
+            start = nil
+            onEnd?()
+        }
     }
 }
 

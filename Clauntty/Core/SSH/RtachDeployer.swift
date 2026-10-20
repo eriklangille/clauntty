@@ -111,7 +111,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.27.0"
+    static let expectedVersion = "2.28.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -914,6 +914,17 @@ struct WorkspaceCreated: Decodable {
 /// What `rtach ws close` prints
 struct WorkspacePaneClosed: Decodable {
     let closed: String
+}
+
+/// What `rtach ws reorder` prints
+struct WorkspaceReordered: Decodable {
+    let reordered: String
+}
+
+/// What `rtach ws resize` prints
+struct WorkspaceResized: Decodable {
+    let workspace: String
+    let tab: String
 }
 
 /// What `rtach ws end` prints

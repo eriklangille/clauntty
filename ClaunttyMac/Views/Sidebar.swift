@@ -146,8 +146,8 @@ private enum SidebarRow: Identifiable {
 }
 
 extension SessionManager {
-    /// A host's workspaces in the order you've dragged them to (this Mac's tab order;
-    /// the phone keeps its own)
+    /// A host's workspaces in the host's order (the tab order follows it), which a drag
+    /// here or on another device changes
     func orderedGroups(on connection: SavedConnection) -> [SessionGroup] {
         let rank = Dictionary(tabOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         return sessionGroups.enumerated()
@@ -174,6 +174,7 @@ extension SessionManager {
         order.insert(id, at: index)
         tabOrder = order
         saveTabOrder()
+        moveWorkspaceOnHost(id)
     }
 }
 
