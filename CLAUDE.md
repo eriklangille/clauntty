@@ -446,6 +446,11 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   `TerminalViews.frameInWindow`). Zoom, paging, the
   bar (always shown; each button's label under it on hover) and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
+- **Notifications:** an agent that needs you or finished posts a notification, as on the phone
+  (`MacNotifications`, from `SessionManager.onPaneAttention`, rtach's pane states), unless the
+  pane is on screen with the app in front (a banner when it's in another workspace). One per pane:
+  showing the pane, or its agent working again, clears it. Clicking one brings the app forward
+  on the pane. The Dock icon counts the panes waiting at a menu or question.
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
 - **Release:** `./scripts/mac.sh release` builds Release for arm64 and x86_64, zips it to

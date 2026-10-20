@@ -203,7 +203,7 @@ extension SessionManager {
             Task { await NotificationManager.shared.schedulePaneAttention(workspace: group.title, pane: paneName, body: body, paneId: paneId) }
         }
         #else
-        _ = body  // Notifications aren't in the Mac app's v1.
+        onPaneAttention?(group.title == paneName ? paneName : "\(group.title) · \(paneName)", body, paneId)
         #endif
     }
 

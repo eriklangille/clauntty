@@ -43,6 +43,14 @@ struct ClaunttyMacApp: App {
             // Remember the pane you're on, so a relaunch (or a crash) comes back to it
             .onChange(of: sessionManager.activeSessionId) { _, _ in
                 sessionManager.savePersistence()
+                // Seen: its notification goes
+                if let pane = sessionManager.activeSession?.pane?.paneId {
+                    MacNotifications.shared.seen(paneId: pane)
+                }
+            }
+            // A pane's status changed (live, or listed again): the Dock's count follows
+            .onChange(of: sessionManager.sessionGroups.flatMap { $0.panes.map(\.status) }) { _, _ in
+                MacNotifications.shared.updateBadge()
             }
         }
         // No title bar: each pane's title bar is the top of the window, as in Rex
@@ -76,6 +84,7 @@ struct ClaunttyMacApp: App {
     /// Saved workspaces first, so the sidebar is there at once, then each host's
     /// current ones.
     private func start() async {
+        MacNotifications.shared.start(sessionManager: sessionManager)
         sessionManager.loadPersistedTabs(connectionStore: hosts.store)
         // Pages reconnect their port when shown
         sessionManager.loadPersistedWebTabs(connectionStore: hosts.store)

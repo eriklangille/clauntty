@@ -102,6 +102,15 @@ class SessionManager: ObservableObject {
     /// those that leave the screen.
     var shownTogether: Set<UUID> = []
 
+    /// A pane's agent started needing the user ("Needs you", or the agent's note) or
+    /// finished ("Finished"), or nil: it's working again. The Mac's notifications.
+    var onPaneAttention: ((_ title: String, _ body: String?, _ paneId: String) -> Void)?
+
+    /// The pane is on screen: the one shown, or a split beside it
+    func isPaneOnScreen(_ paneId: String) -> Bool {
+        sessions.contains { $0.pane?.paneId == paneId && ($0.id == activeSessionId || shownTogether.contains($0.id)) }
+    }
+
     /// Legacy compatibility - active session ID
     var activeSessionId: UUID? {
         get {
