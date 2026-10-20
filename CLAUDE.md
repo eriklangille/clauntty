@@ -375,7 +375,9 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   click takes the pane back. Output waits for the resize, as on the phone.
 - **Sidebar:** one row per workspace (what runs in its shown pane, the status of its most
   pressing pane, its pane dots); panes are in the split, each under a title bar with split,
-  zoom and close. Zoom (`WindowState.zoomedPane`) is local only. `StatusGlyph` draws the
+  zoom and close. Zoom (`WindowState.zoomedPane`) is local only. Workspaces drag to
+  reorder (the shared `tabOrder`, per device: the phone keeps its own); the host's name
+  is a menu (New Workspace, Refresh, Remove Host). `StatusGlyph` draws the
   phone's `PaneStatusIndicator` in SwiftUI; change both together.
 - **No title bar** (`.hiddenTitleBar`): the pane title bars (and a web page's address bar)
   are the top of the window, `PaneHeader.height` to line up with the window's buttons, and

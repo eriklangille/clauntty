@@ -70,6 +70,8 @@ struct ClaunttyMacApp: App {
         sessionManager.loadPersistedTabs(connectionStore: hosts.store)
         // Pages reconnect their port when shown
         sessionManager.loadPersistedWebTabs(connectionStore: hosts.store)
+        // The order you've dragged workspaces to
+        sessionManager.loadTabOrder()
         for connection in hosts.opened {
             await sessionManager.refreshWorkspaces(for: connection)
         }
@@ -132,9 +134,7 @@ struct PaneCommands: Commands {
 
     /// Workspaces in sidebar order: by host as opened, then as the host lists them
     static func groups(_ sessionManager: SessionManager, _ hosts: MacHosts) -> [SessionGroup] {
-        hosts.opened.flatMap { connection in
-            sessionManager.sessionGroups.filter { $0.connectionId == connection.id }
-        }
+        hosts.opened.flatMap { sessionManager.orderedGroups(on: $0) }
     }
 
     /// Every pane in sidebar order

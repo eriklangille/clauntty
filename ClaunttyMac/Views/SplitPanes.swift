@@ -93,11 +93,10 @@ private struct PaneTile: View {
                     TerminalStatusOverlay(session: session) {
                         Task { try? await sessionManager.reconnect(session: session) }
                     }
-                    if !focused {
-                        // The title bar marks the pane you're in; this just recedes the others
-                        Color.black.opacity(0.15)
-                            .allowsHitTesting(false)
-                    }
+                    // The title bar marks the pane you're in; this just recedes the others
+                    Color.black.opacity(focused ? 0 : 0.15)
+                        .allowsHitTesting(false)
+                        .animation(.easeOut(duration: 0.2), value: focused)
                 }
                 .clipped()
             } else {

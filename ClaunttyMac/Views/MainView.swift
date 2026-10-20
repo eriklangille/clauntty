@@ -161,7 +161,7 @@ extension MainView {
     /// List a host's workspaces; with none, start one in the home folder.
     static func openHost(_ connection: SavedConnection, _ sessionManager: SessionManager) async {
         await sessionManager.refreshWorkspaces(for: connection)
-        let groups = sessionManager.sessionGroups.filter { $0.connectionId == connection.id }
+        let groups = sessionManager.orderedGroups(on: connection)
         if let group = groups.first, let session = sessionManager.currentSession(of: group) {
             sessionManager.switchTo(session)
         } else if groups.isEmpty {

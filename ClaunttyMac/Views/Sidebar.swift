@@ -18,19 +18,21 @@ struct Sidebar: View {
     var body: some View {
         List(selection: selection) {
             ForEach(hosts.opened) { connection in
+                let rows = rows(on: connection)
                 Section {
-                    ForEach(groups(on: connection)) { group in
-                        WorkspaceRow(group: group)
-                            .tag(SidebarItem.workspace(group.id))
-                        ForEach(sessionManager.webTabs.filter { $0.workspaceId == group.id }) { webTab in
+                    ForEach(rows) { row in
+                        switch row {
+                        case .workspace(let group):
+                            WorkspaceRow(group: group)
+                                .tag(SidebarItem.workspace(group.id))
+                        case .web(let webTab, let nested):
                             WebTabRow(webTab: webTab)
-                                .padding(.leading, 26)
+                                .padding(.leading, nested ? 26 : 0)
+                                // They go with their workspace
+                                .moveDisabled(true)
                         }
                     }
-                    // Opened outside any workspace shown here
-                    ForEach(looseWebTabs(on: connection)) { webTab in
-                        WebTabRow(webTab: webTab)
-                    }
+                    .onMove { source, destination in move(in: rows, from: source, to: destination) }
                 } header: {
                     HostHeader(connection: connection)
                 }
@@ -55,15 +57,31 @@ struct Sidebar: View {
         .ignoresSafeArea(.container, edges: .top)
     }
 
-    private func groups(on connection: SavedConnection) -> [SessionGroup] {
-        sessionManager.sessionGroups.filter { $0.connectionId == connection.id }
+    /// A host's workspaces in your order, each followed by the pages it opened, then
+    /// pages opened outside any workspace shown here
+    private func rows(on connection: SavedConnection) -> [SidebarRow] {
+        let groups = sessionManager.orderedGroups(on: connection)
+        var rows: [SidebarRow] = []
+        for group in groups {
+            rows.append(.workspace(group))
+            for webTab in sessionManager.webTabs where webTab.workspaceId == group.id {
+                rows.append(.web(webTab, nested: true))
+            }
+        }
+        let groupIds = Set(sessionManager.sessionGroups.map(\.id))
+        for webTab in sessionManager.webTabs(on: connection) where webTab.workspaceId.map({ !groupIds.contains($0) }) ?? true {
+            rows.append(.web(webTab, nested: false))
+        }
+        return rows
     }
 
-    private func looseWebTabs(on connection: SavedConnection) -> [WebTab] {
-        let groupIds = Set(sessionManager.sessionGroups.map(\.id))
-        return sessionManager.webTabs(on: connection).filter { webTab in
-            webTab.workspaceId.map { !groupIds.contains($0) } ?? true
-        }
+    /// A workspace dragged to `destination`: it goes before the next workspace there,
+    /// or after the host's last one
+    private func move(in rows: [SidebarRow], from source: IndexSet, to destination: Int) {
+        guard let index = source.first, case .workspace(let moved) = rows[index] else { return }
+        let workspaces = rows.compactMap(\.groupId)
+        let next = rows[min(destination, rows.count)...].lazy.compactMap(\.groupId).first { $0 != moved.id }
+        sessionManager.moveWorkspace(moved.id, before: next, among: workspaces)
     }
 
     /// The workspace or page shown, as the list's selection; picking a row shows it.
@@ -87,6 +105,56 @@ struct Sidebar: View {
                 }
             }
         )
+    }
+}
+
+/// A row in a host's section
+private enum SidebarRow: Identifiable {
+    case workspace(SessionGroup)
+    case web(WebTab, nested: Bool)
+
+    var id: UUID {
+        switch self {
+        case .workspace(let group): return group.id
+        case .web(let webTab, _): return webTab.id
+        }
+    }
+
+    var groupId: UUID? {
+        if case .workspace(let group) = self { return group.id }
+        return nil
+    }
+}
+
+extension SessionManager {
+    /// A host's workspaces in the order you've dragged them to (this Mac's tab order;
+    /// the phone keeps its own)
+    func orderedGroups(on connection: SavedConnection) -> [SessionGroup] {
+        let rank = Dictionary(tabOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        return sessionGroups.enumerated()
+            .filter { $0.element.connectionId == connection.id }
+            .sorted { (rank[$0.element.id] ?? Int.max, $0.offset) < (rank[$1.element.id] ?? Int.max, $1.offset) }
+            .map(\.element)
+    }
+
+    /// Move a workspace before `next`, or after the last of `workspaces` (its host's)
+    func moveWorkspace(_ id: UUID, before next: UUID?, among workspaces: [UUID]) {
+        var order = tabOrder
+        for workspace in workspaces where !order.contains(workspace) {
+            order.append(workspace)
+        }
+        order.removeAll { $0 == id }
+        let index: Int
+        if let next, let nextIndex = order.firstIndex(of: next) {
+            index = nextIndex
+        } else if let last = workspaces.last(where: { $0 != id }), let lastIndex = order.firstIndex(of: last) {
+            index = lastIndex + 1
+        } else {
+            index = order.count
+        }
+        order.insert(id, at: index)
+        tabOrder = order
+        saveTabOrder()
     }
 }
 
@@ -207,6 +275,8 @@ private struct PaneDots: View {
                     .frame(width: active ? 10 : 4, height: 4)
             }
         }
+        // Switching panes: the capsule springs across, as the phone's slides
+        .animation(.spring(response: 0.35, dampingFraction: 0.55), value: activeId)
     }
 
     private func color(_ pane: TabPane, active: Bool) -> Color {
@@ -279,52 +349,45 @@ extension SessionGroup {
     }
 }
 
-/// The host's name in small caps; New Workspace and its menu show on hover.
+/// The host's name in small caps, with a chevron: its menu (New Workspace, Refresh,
+/// Remove Host).
 private struct HostHeader: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
     let connection: SavedConnection
-    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(connection.name.uppercased())
-                .font(.caption.weight(.semibold))
-                .tracking(0.6)
-            Spacer()
-            Group {
-                Button {
-                    Task { await sessionManager.newWorkspace(on: connection, folder: "~") }
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .help("New Workspace")
-                Menu {
-                    Button("Refresh") {
-                        Task { await sessionManager.refreshWorkspaces(for: connection) }
-                    }
-                    Divider()
-                    Button("Remove Host", role: .destructive) {
-                        // Its workspaces leave the sidebar; the panes keep running on the host
-                        sessionManager.applyWorkspaces([], hostName: nil, config: connection)
-                        for session in sessionManager.sessions where session.connectionConfig.id == connection.id {
-                            sessionManager.closeSession(session, killRemote: false)
-                        }
-                        hosts.remove(connection)
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuStyle(.button)
-                .menuIndicator(.hidden)
-                .fixedSize()
+        Menu {
+            Button("New Workspace") {
+                Task { await sessionManager.newWorkspace(on: connection, folder: "~") }
             }
-            .buttonStyle(.plain)
-            .opacity(hovering ? 1 : 0)
+            Button("Refresh") {
+                Task { await sessionManager.refreshWorkspaces(for: connection) }
+            }
+            Divider()
+            Button("Remove Host", role: .destructive) {
+                // Its workspaces leave the sidebar; the panes keep running on the host
+                sessionManager.applyWorkspaces([], hostName: nil, config: connection)
+                for session in sessionManager.sessions where session.connectionConfig.id == connection.id {
+                    sessionManager.closeSession(session, killRemote: false)
+                }
+                hosts.remove(connection)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(connection.name.uppercased())
+                    .font(.caption.weight(.semibold))
+                    .tracking(0.6)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .contentShape(Rectangle())
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
         .padding(.top, 6)
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
     }
 }
 
