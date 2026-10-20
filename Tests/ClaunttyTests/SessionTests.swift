@@ -253,7 +253,7 @@ final class SessionTests: XCTestCase {
         let session = Session(connectionConfig: config)
         var receivedPort: Int?
 
-        session.onOpenTabRequested = { port in
+        session.onOpenTabRequested = { port, _ in
             receivedPort = port
         }
 
@@ -324,7 +324,7 @@ final class SessionTests: XCTestCase {
         let session = Session(connectionConfig: config)
         var receivedPort: Int?
 
-        session.onOpenTabRequested = { port in
+        session.onOpenTabRequested = { port, _ in
             receivedPort = port
         }
 
@@ -359,7 +359,7 @@ final class SessionTests: XCTestCase {
         var receivedPort: Int?
         var terminalData = Data()
 
-        session.onOpenTabRequested = { port in
+        session.onOpenTabRequested = { port, _ in
             receivedPort = port
         }
         session.onDataReceived = { data in
@@ -395,7 +395,7 @@ final class SessionTests: XCTestCase {
         var openCalled = false
         var forwardCalled = false
 
-        session.onOpenTabRequested = { _ in openCalled = true }
+        session.onOpenTabRequested = { _, _ in openCalled = true }
         session.onPortForwardRequested = { _ in forwardCalled = true }
 
         // Unknown command should be silently ignored

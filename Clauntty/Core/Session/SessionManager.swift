@@ -397,9 +397,9 @@ class SessionManager: ObservableObject {
             guard let self = self, let session = session else { return }
             self.handlePortForwardRequest(from: session, port: port)
         }
-        session.onOpenTabRequested = { [weak self, weak session] port in
+        session.onOpenTabRequested = { [weak self, weak session] port, pane in
             guard let self = self, let session = session else { return }
-            self.handleOpenTabRequest(from: session, port: port)
+            self.handleOpenTabRequest(from: session, port: port, pane: pane)
         }
         session.onOpenBrowserRequested = { [weak self, weak session] urlString in
             guard let self = self, let session = session else { return }
@@ -1148,9 +1148,12 @@ class SessionManager: ObservableObject {
         }
     }
 
-    /// Handle an open tab request from a session (triggered by OSC 777;open;PORT)
-    /// Opens the tab in background without switching to it
-    func handleOpenTabRequest(from session: Session, port: Int) {
+    /// Handle an open tab request from a session (`clauntty tab`), without switching to
+    /// it. The tab goes under the workspace of the pane that asked, else the session's.
+    func handleOpenTabRequest(from session: Session, port: Int, pane: String? = nil) {
+        let workspace = pane.flatMap { pane in
+            sessionGroups.first { $0.panes.contains { $0.id == pane } }?.id
+        } ?? session.groupId
         let config = session.connectionConfig
         let remotePort = RemotePort(id: port, port: port, process: nil, address: "127.0.0.1")
 
@@ -1164,7 +1167,7 @@ class SessionManager: ObservableObject {
 
                 // Create new web tab in background (don't switch to it)
                 _ = try await createWebTab(for: remotePort, config: config, makeActive: false,
-                                           workspace: .some(session.groupId))
+                                           workspace: .some(workspace))
                 Logger.clauntty.debugOnly("SessionManager: opened web tab for port \(port) via OSC 777 (background)")
             } catch {
                 Logger.clauntty.error("SessionManager: failed to open tab for port \(port): \(error)")
