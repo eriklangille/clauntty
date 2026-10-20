@@ -216,31 +216,59 @@ final class MacTerminalView: NSView, NSTextInputClient {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// The terminal whose surface has focus (a blinking cursor; the others draw a hollow
+    /// box): one at a time. A view moved between containers when a split changes shape
+    /// can lose the keyboard without `resignFirstResponder`, and its surface kept focus:
+    /// two panes blinking.
+    private static weak var focusedView: MacTerminalView?
+
+    private func setSurfaceFocus(_ focused: Bool) {
+        if let surface { ghostty_surface_set_focus(surface, focused) }
+    }
+
     override func becomeFirstResponder() -> Bool {
-        if let surface { ghostty_surface_set_focus(surface, true) }
+        if Self.focusedView !== self { Self.focusedView?.setSurfaceFocus(false) }
+        Self.focusedView = self
+        // Another app in front: focused once the window is key again
+        setSurfaceFocus(window?.isKeyWindow ?? true)
         // Not during the SwiftUI update that may have made us first responder
         DispatchQueue.main.async { [weak self] in self?.onFocus?() }
         return true
     }
 
     override func resignFirstResponder() -> Bool {
-        if let surface { ghostty_surface_set_focus(surface, false) }
+        setSurfaceFocus(false)
+        if Self.focusedView === self { Self.focusedView = nil }
         return true
     }
 
     /// Leaving the window with the keyboard doesn't resign it: the cursor would stay
     /// drawn as focused
     override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow == nil, window?.firstResponder === self, let surface {
-            ghostty_surface_set_focus(surface, false)
+        if newWindow == nil, window?.firstResponder === self {
+            setSurfaceFocus(false)
+        }
+        if let window {
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
         }
         super.viewWillMove(toWindow: newWindow)
+    }
+
+    /// Another app in front (or back): the pane with the keyboard follows, as in Ghostty
+    @objc private func windowKeyChanged(_ note: Notification) {
+        guard let window, window.firstResponder === self else { return }
+        let key = note.name == NSWindow.didBecomeKeyNotification
+        if key { Self.focusedView = self }
+        setSurfaceFocus(key)
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         // Which pane gets the keyboard is TerminalContainer's call
         guard let window else { return }
+        NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged), name: NSWindow.didBecomeKeyNotification, object: window)
+        NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged), name: NSWindow.didResignKeyNotification, object: window)
         updateScale()
         if let surface,
            let id = window.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {

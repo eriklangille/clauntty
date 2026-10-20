@@ -453,6 +453,9 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   on the pane. The Dock icon counts the panes waiting at a menu or question.
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
+  One surface has focus at a time (`focusedView`): it blinks, the others draw a hollow box, and
+  with another app in front all do. A view moved between containers can lose the keyboard
+  without `resignFirstResponder`, so gaining it unfocuses the previous one.
 - **Release:** `./scripts/mac.sh release` builds Release for arm64 and x86_64, zips it to
   `build/mac/Clauntty.zip` and prints the command that installs it on another Mac over ssh.
   Signed with Apple Development (there's no Developer ID); copied over ssh it has no
