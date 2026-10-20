@@ -412,9 +412,12 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
 - **Pasting images:** Cmd+V, Ctrl+V (only with nothing but an image on the clipboard) and
   dropping image files upload to the host's /tmp (`Session.uploadImage`) and paste the
   path, as the phone does, so Claude Code attaches it.
-- **Images and pages:** `clauntty show` fills the shared `imageViewer`, shown by
-  `ImageViewer` over the whole window. It opens out of the pane that ran it
-  (`ImageViewerContent.source`, `TerminalViews.frameInWindow`). Zoom, paging, the
+- **Images and pages:** `clauntty show` images go with the workspace of the pane that
+  ran it (`windowImages`, by workspace, as agent mode on the phone). `ImageViewer` shows
+  them over that workspace's panes only, when it's on screen; another workspace's wait,
+  with a photo badge on its sidebar row, until you go there. Closing the viewer clears
+  them. It opens out of the pane that ran it (`ImageViewerContent.source`,
+  `TerminalViews.frameInWindow`). Zoom, paging, the
   self-hiding bar and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag

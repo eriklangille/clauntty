@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Images from `clauntty show`, over the whole window, as the phone shows them. The
-/// image springs out of the pane that ran it, over the window blurred, and shrinks back
+/// Images from `clauntty show`, over the workspace whose pane ran it, as the phone shows
+/// them. The image springs out of that pane, over the workspace blurred, and shrinks back
 /// into it on closing. The bar and thumbnails fade away while the mouse rests and come
 /// back when it moves.
 ///
@@ -13,7 +13,8 @@ import UniformTypeIdentifiers
 /// open are added, and it moves to the first of them.
 struct ImageViewer: View {
     @Binding var content: ImageViewerContent?
-    /// Where a session's pane is in the window, to open out of and close back into
+    /// Where a session's pane is in the window (from its top left), to open out of and
+    /// close back into
     let paneFrame: (UUID) -> CGRect?
 
     /// Cmd+= (+1), Cmd+− (−1) and Cmd+0 (nil) from the View menu, as an NSNumber
@@ -51,8 +52,12 @@ struct ImageViewer: View {
                     let area = imageArea(in: geometry.size, thumbnails: items.count > 1)
                     backdrop
                         .transition(.opacity)
+                    // The pane where it is in this view, which may not start at the
+                    // window's corner
+                    let origin = geometry.frame(in: .global).origin
+                    let pane = content.source.flatMap(paneFrame)?.offsetBy(dx: -origin.x, dy: -origin.y)
                     stage(items[index], area: area)
-                        .transition(opening(from: content.source.flatMap(paneFrame), in: geometry.size))
+                        .transition(opening(from: pane, in: geometry.size))
                     chrome(content, index: index, size: geometry.size)
                         .transition(.opacity)
                 }
@@ -60,9 +65,11 @@ struct ImageViewer: View {
             .onAppear { windowSize = geometry.size }
             .onChange(of: geometry.size) { _, size in windowSize = size }
         }
-        .ignoresSafeArea()
         .animation(.spring(response: 0.42, dampingFraction: 0.82), value: content == nil)
         .onChange(of: content == nil) { _, closed in closed ? didClose() : didOpen() }
+        // Shown with images already there: going back to a workspace that has some
+        .onAppear { if content != nil { didOpen() } }
+        .onDisappear { didClose() }
         .onChange(of: content?.selection) { _, selection in
             if let selection { turn(to: selection) }
         }

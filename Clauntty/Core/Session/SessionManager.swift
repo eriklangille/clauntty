@@ -23,7 +23,8 @@ class SessionManager: ObservableObject {
     /// bar; agent mode keeps them with their windows)
     @Published var imageViewer: ImageViewerContent?
 
-    /// Agent mode: each window's images (by its tab id), shown in its corner until cleared
+    /// Agent mode: each window's images (by its tab id), shown in its corner until cleared.
+    /// The Mac always keeps them here, by workspace.
     @Published var windowImages: [UUID: ImageViewerContent] = [:]
     /// A window whose images should open (a notification for them was tapped)
     @Published var openImagesWindow: UUID?
@@ -1247,12 +1248,15 @@ class SessionManager: ObservableObject {
         var images: [ImageViewerContent.Item] = []
         // Where each image goes in agent mode: its pane's window
         var windows: [UUID?] = []
+        // The pane each image came from, for the Mac's viewer to open out of
+        var panes: [UUID] = []
         // Inbox entries to delete: shown, or never going to work (missing, not an image,
         // too large). A failed download stays for the next connect to retry.
         var finished: [(session: Session, id: String)] = []
         for pending in batch {
             let (session, path, inboxId) = (pending.session, pending.path, pending.inboxId)
             windows.append(imageWindow(pane: pending.pane, from: session))
+            panes.append(sessions.first { pending.pane != nil && $0.rtachSessionId == pending.pane }?.id ?? session.id)
             let name = (path as NSString).lastPathComponent
             var retry = false
             do {
@@ -1279,17 +1283,25 @@ class SessionManager: ObservableObject {
         Logger.clauntty.debugOnly("SessionManager: showing \(images.count) image(s) from \(host)")
         let away = !PlatformApp.isActive
 
-        if UserDefaults.standard.bool(forKey: "agentMode"), windows.allSatisfy({ $0 != nil }) {
-            // In the corner of each image's window; nothing opens by itself
+        #if os(macOS)
+        // With their workspace: the viewer opens over it when it's shown, and they wait
+        // there otherwise, so one workspace's images don't cover another's
+        let perWindow = true
+        #else
+        let perWindow = UserDefaults.standard.bool(forKey: "agentMode")
+        #endif
+        if perWindow, windows.allSatisfy({ $0 != nil }) {
+            // On the phone, in the corner of each image's window; nothing opens by itself
             for window in Set(windows.compactMap { $0 }) {
                 let added = zip(images, windows).filter { $0.1 == window }.map(\.0)
+                let pane = zip(panes, windows).first { $0.1 == window }?.0
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     if var current = windowImages[window] {
                         current.selection = current.items.count
                         current.items += added
                         windowImages[window] = current
                     } else {
-                        windowImages[window] = ImageViewerContent(host: host, items: added)
+                        windowImages[window] = ImageViewerContent(host: host, items: added, source: pane)
                     }
                 }
                 #if os(iOS)

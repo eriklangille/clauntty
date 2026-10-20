@@ -36,13 +36,20 @@ struct MainView: View {
         }
         .overlay {
             ImageViewer(content: $sessionManager.imageViewer) { views.frameInWindow(of: $0) }
+                .ignoresSafeArea()
         }
         // Closed: typing goes back to the pane you're in
         .onChange(of: window.switcherShown) { _, shown in
             if !shown { refocus() }
         }
-        .onChange(of: sessionManager.imageViewer == nil) { _, closed in
+        .onChange(of: sessionManager.shownImages == nil) { _, closed in
             if closed { refocus() }
+        }
+        // An ended workspace's images go with it
+        .onChange(of: sessionManager.sessionGroups.map(\.id)) { _, ids in
+            for workspace in sessionManager.windowImages.keys where !ids.contains(workspace) {
+                sessionManager.windowImages[workspace] = nil
+            }
         }
         .onChange(of: sessionManager.sessions.map(\.id)) { _, ids in
             views.prune(keeping: Set(ids))
@@ -68,6 +75,13 @@ struct MainView: View {
             SplitPanes(group: group, views: views)
                 .background(ThemeColors.background)
                 .ignoresSafeArea(.container, edges: .top)
+                // Images its panes sent: over this workspace only, so the sidebar stays
+                // and another workspace's don't interrupt. A new one each workspace.
+                .overlay {
+                    ImageViewer(content: $sessionManager.windowImages[group.id]) { views.frameInWindow(of: $0) }
+                        .ignoresSafeArea(.container, edges: .top)
+                        .id(group.id)
+                }
         } else if hosts.opened.isEmpty {
             HostPicker()
         } else {
@@ -154,6 +168,20 @@ struct HostPicker: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+extension SessionManager {
+    /// The workspace on screen, unless a page is
+    var shownWorkspaceId: UUID? {
+        guard activeWebTab == nil, let session = activeSession else { return nil }
+        return sessionGroup(for: session)?.id
+    }
+
+    /// The images open in the window: the shown workspace's, else ones that came with
+    /// no workspace to go to
+    var shownImages: ImageViewerContent? {
+        shownWorkspaceId.flatMap { windowImages[$0] } ?? imageViewer
     }
 }
 

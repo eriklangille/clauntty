@@ -22,7 +22,7 @@ struct Sidebar: View {
                     ForEach(rows) { row in
                         switch row {
                         case .workspace(let group):
-                            WorkspaceRow(group: group)
+                            WorkspaceRow(group: group, images: sessionManager.windowImages[group.id]?.items.count ?? 0)
                                 .tag(SidebarItem.workspace(group.id))
                         case .web(let webTab, let nested):
                             WebTabRow(webTab: webTab)
@@ -182,6 +182,8 @@ extension SessionManager {
 /// pressing status, and a dot per pane as on the phone's tab.
 private struct WorkspaceRow: View {
     let group: SessionGroup
+    /// Images its panes sent with `clauntty show`, waiting to be seen
+    var images = 0
     private static let glyphSpacing: CGFloat = 9
     /// Where the title starts, for the rows nested under it
     static let titleInset = StatusGlyph.defaultSize + glyphSpacing
@@ -196,6 +198,16 @@ private struct WorkspaceRow: View {
                 .font(.system(size: 13, weight: .medium))
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if images > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "photo")
+                    if images > 1 { Text("\(images)") }
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .transition(.opacity)
+                .help(images == 1 ? "An image to see" : "\(images) images to see")
+            }
             if group.panes.count > 1 {
                 PaneDots(panes: group.panes, activeId: group.activePaneId)
             }
