@@ -31,6 +31,11 @@ forwards use the host's first connection. sshd allows 10 sessions per connection
 back when its channel closes. Closing a pane closes only its channel. Only one connect per host runs
 at a time (`connectingHosts`); the task records the new connection itself, so waiters find it.
 `connect()` opens no shell: an unread login shell used to sit on the host for every connection.
+Idle panes let their channel go (`releaseIdlePanes`, 2s after switching or attaching settles): each
+host keeps the panes on screen, its 8 most recently shown (`Session.lastShownAt`) and busy agents'
+panes; the rest `rest()`, keeping their terminal, and attach again when shown, without a Connecting
+notice (`isResting`). Every attach's first output starts with a full reset (`resetBeforeReplay`):
+rtach replays the screen and recent scrollback, which otherwise showed twice.
 
 ## Repository Layout
 
