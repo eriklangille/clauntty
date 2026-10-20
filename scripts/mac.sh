@@ -71,9 +71,15 @@ quit_app() {
 RELEASE_APP="$DERIVED/Build/Products/Release/Clauntty.app"
 RELEASE_ZIP="$DERIVED/Clauntty.zip"
 
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
 release() {
+    # Each build its own number (the commit count): with the same one, macOS kept showing
+    # the installed app's old icon in the Dock
+    build_number=$(git -C "$PROJECT_DIR" rev-list --count HEAD)
     xcodebuild -project "$PROJECT_DIR/ClaunttyMac.xcodeproj" -scheme ClaunttyMac -configuration Release \
-        -derivedDataPath "$DERIVED" -destination 'generic/platform=macOS' build 2>&1 \
+        -derivedDataPath "$DERIVED" -destination 'generic/platform=macOS' \
+        CURRENT_PROJECT_VERSION="$build_number" build 2>&1 \
         | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
     [ -x "$RELEASE_APP/Contents/MacOS/Clauntty" ]
     codesign --verify --deep --strict "$RELEASE_APP"
@@ -92,12 +98,14 @@ case "$cmd" in
     release)
         release
         version=$(defaults read "$RELEASE_APP/Contents/Info.plist" CFBundleShortVersionString)
-        echo "Clauntty $version: $RELEASE_ZIP ($(du -h "$RELEASE_ZIP" | cut -f1), $(lipo -archs "$RELEASE_APP/Contents/MacOS/Clauntty"))"
+        build_number=$(defaults read "$RELEASE_APP/Contents/Info.plist" CFBundleVersion)
+        echo "Clauntty $version ($build_number): $RELEASE_ZIP ($(du -h "$RELEASE_ZIP" | cut -f1), $(lipo -archs "$RELEASE_APP/Contents/MacOS/Clauntty"))"
         echo
         echo "Install on another Mac (HOST: this Mac's ssh name there). Copied over ssh, it has no"
         echo "quarantine flag, so the development signature is enough:"
         echo
-        echo "  ssh HOST cat '$RELEASE_ZIP' > /tmp/Clauntty.zip && { pkill -f /Applications/Clauntty.app/Contents/MacOS/Clauntty; rm -rf /Applications/Clauntty.app && ditto -x -k /tmp/Clauntty.zip /Applications && open /Applications/Clauntty.app; }"
+        # touch and lsregister: Launch Services (and the Dock's icon) take the new app in
+        echo "  ssh HOST cat '$RELEASE_ZIP' > /tmp/Clauntty.zip && { pkill -f /Applications/Clauntty.app/Contents/MacOS/Clauntty; rm -rf /Applications/Clauntty.app && ditto -x -k /tmp/Clauntty.zip /Applications && touch /Applications/Clauntty.app && $LSREGISTER -f /Applications/Clauntty.app && open /Applications/Clauntty.app; }"
         ;;
     run)
         [ "${1:-}" = "--" ] && shift

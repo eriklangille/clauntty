@@ -459,7 +459,9 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
 - **Release:** `./scripts/mac.sh release` builds Release for arm64 and x86_64, zips it to
   `build/mac/Clauntty.zip` and prints the command that installs it on another Mac over ssh.
   Signed with Apple Development (there's no Developer ID); copied over ssh it has no
-  quarantine flag, so Gatekeeper doesn't check it.
+  quarantine flag, so Gatekeeper doesn't check it. Each Release's build number is the commit
+  count, and the install command re-registers the app (`lsregister -f`): with the same number,
+  the Dock kept showing the old icon after the icon changed.
 - **Icon:** drawn in `design/AppIcon.svg`. `scripts/render-icon.sh` renders it into the iOS
   `AppIcon.png`, then the Mac sizes (the same icon in the macOS grid) with
   `make-mac-icon.swift`. Edit the SVG, not the PNGs.
