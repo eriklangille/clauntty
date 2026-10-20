@@ -361,7 +361,7 @@ class SessionManager: ObservableObject {
         let handler: SSHChannelHandler
         do {
             (channel, handler) = try await connection.createChannel(
-                terminalSize: session.initialTerminalSize,
+                terminalSize: session.attachSize,
                 command: shellCommand,
                 onDataReceived: onData,
                 onChannelInactive: onInactive
@@ -376,7 +376,7 @@ class SessionManager: ObservableObject {
             session.sshConnection = connection
             do {
                 (channel, handler) = try await connection.createChannel(
-                    terminalSize: session.initialTerminalSize,
+                    terminalSize: session.attachSize,
                     command: shellCommand,
                     onDataReceived: onData,
                     onChannelInactive: onInactive

@@ -243,6 +243,12 @@ class Session: ObservableObject, Identifiable {
     /// Set this before connecting for correct initial PTY size
     var initialTerminalSize: (rows: Int, columns: Int) = (30, 60)
 
+    /// The size to open a channel at: the one last sent, else the first one the view had.
+    /// A reattach at a stale size made the program redraw once more for nothing.
+    var attachSize: (rows: Int, columns: Int) {
+        lastWindowSize.map { (Int($0.rows), Int($0.columns)) } ?? initialTerminalSize
+    }
+
     // MARK: - Power Management
 
     /// Whether output streaming is paused (tab is inactive/backgrounded)
@@ -478,6 +484,7 @@ class Session: ObservableObject, Identifiable {
         // Reset scrollback tracking state for reconnects
         // rtach will send scrollback when we reconnect to an existing session
         resetBeforeReplay = expectsRtach
+        if expectsRtach { beginSettling() }
         isResting = false
         historyBefore = ProtocolConstants.historyBeforeReplay
         emptyHistoryPages = 0
@@ -691,7 +698,82 @@ class Session: ObservableObject, Identifiable {
             // the replay so nothing draws in between. Older history pages in on scroll.
             data = Data([0x1b, 0x63]) + data
             scrollbackBuffer.removeAll()
+            // A program on the alternate screen gets no replay, only a redraw, and only
+            // for a real size change (Node ignores a SIGWINCH at the same size)
+            if data.range(of: Self.altScreenEnter) != nil {
+                forceRemoteRepaint()
+            }
         }
+        if settling {
+            settleHeld.append(data)
+            if awaitingRedraw && nudgeRestored { awaitingRedraw = false }
+            scheduleSettle()
+            return
+        }
+        writeToTerminal(data)
+    }
+
+    private static let altScreenEnter = Data([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x68]) // ESC[?1049h
+
+    // MARK: - Settling After an Attach
+
+    /// After an attach, output is held until it settles, then written at once: the replay,
+    /// or a program's redraw for the new size, otherwise drew piece by piece as it came,
+    /// the cursor walking down the screen. The terminal shows what it had meanwhile.
+    private var settling = false
+    private var settleHeld = Data()
+    private var settleTimer: DispatchWorkItem?
+    private var settleDeadline = Date.distantPast
+    /// The repaint nudge is under way: the redraw that counts comes after it
+    private var awaitingRedraw = false
+    /// The nudge has put the real size back: output from now is that redraw
+    private var nudgeRestored = false
+    /// The real size while the nudge has the remote one row short
+    private var nudgedSize: (rows: UInt16, columns: UInt16)?
+    /// No more output for this long: it has settled
+    private static let settleQuiet: TimeInterval = 0.05
+    /// Held no longer than this after the attach, however busy the program
+    private static let settleLimit: TimeInterval = 1.0
+
+    private func beginSettling() {
+        settleTimer?.cancel()
+        settling = true
+        awaitingRedraw = false
+        settleHeld = Data()
+        settleDeadline = Date().addingTimeInterval(Self.settleLimit)
+        // Nothing comes at all: let go at the limit
+        scheduleSettle(after: Self.settleLimit)
+    }
+
+    private func scheduleSettle(after delay: TimeInterval = Session.settleQuiet) {
+        settleTimer?.cancel()
+        let remaining = settleDeadline.timeIntervalSinceNow
+        guard remaining > 0 else { return finishSettling() }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.settling else { return }
+            // Still waiting on the program's redraw for the real size
+            if self.awaitingRedraw, self.settleDeadline.timeIntervalSinceNow > 0 {
+                return self.scheduleSettle(after: self.settleDeadline.timeIntervalSinceNow)
+            }
+            self.finishSettling()
+        }
+        settleTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + min(delay, remaining), execute: item)
+    }
+
+    private func finishSettling() {
+        settleTimer?.cancel()
+        settleTimer = nil
+        guard settling else { return }
+        settling = false
+        awaitingRedraw = false
+        let held = settleHeld
+        settleHeld = Data()
+        if !held.isEmpty { writeToTerminal(held) }
+    }
+
+    /// Forward output to the terminal and keep the bookkeeping that goes with it
+    private func writeToTerminal(_ data: Data) {
         let sessionTitle = self.title.prefix(15)
         let hasCallback = self.onDataReceived != nil
         Logger.clauntty.verbose("DATA_FLOW[\(self.id.uuidString.prefix(8))] '\(sessionTitle)': \(data.count) bytes, callback=\(hasCallback)")
@@ -890,6 +972,12 @@ class Session: ObservableObject, Identifiable {
         // this phone's size. The phone's goes out again when the terminal sizes back.
         if inUseElsewhere {
             Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange SKIPPED (in use on another device)")
+            return
+        }
+        // The repaint nudge has the remote one row short: its restore sends this size.
+        // Sent now (the view sends its size again as the attach settles), the program
+        // read the real size again before noticing the change, and didn't redraw.
+        if let nudged = nudgedSize, nudged == (rows, columns) {
             return
         }
         lastWindowSize = (rows, columns)
@@ -1287,12 +1375,19 @@ extension Session: RtachClient.RtachSessionDelegate {
             return
         }
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): repaint nudge \(size.columns)x\(size.rows)")
+        // Its redraw one row short isn't shown: settling holds output until the redraw
+        // at the real size
+        awaitingRedraw = settling
+        nudgeRestored = false
         sendWindowChange(rows: size.rows - 1, columns: size.columns)
+        nudgedSize = (size.rows, size.columns)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.nudgedSize = nil
             guard let self, let current = self.lastWindowSize else { return }
             // Restore the latest real size (a resize may have happened in between)
             let rows = current.rows == size.rows - 1 && current.columns == size.columns ? size.rows : current.rows
             self.sendWindowChange(rows: rows, columns: current.columns)
+            self.nudgeRestored = true
         }
     }
 
@@ -1317,12 +1412,8 @@ extension Session: RtachClient.RtachSessionDelegate {
                 self.pauseOutput()
             }
 
-            // On reattach, rtach skips replaying the screen when the program is on the
-            // alternate screen (Claude Code, vim), relying on it to redraw. Programs only
-            // redraw on a real size change (Node ignores a SIGWINCH at the same size), and
-            // reattaching at the same size sends none, so the screen stays blank until
-            // something resizes (e.g. rotating). Nudge the remote size by one row and back.
-            self.forceRemoteRepaint()
+            // A program on the alternate screen gets a repaint nudge once rtach's first
+            // output shows it's there (processTerminalData)
 
             if self.pendingActiveClaim {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): applying deferred active claim")
