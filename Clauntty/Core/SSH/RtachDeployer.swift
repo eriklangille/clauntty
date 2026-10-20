@@ -274,48 +274,53 @@ class RtachDeployer {
         return try await rtachExists()
     }
 
-    /// Deploy rtach if needed (without creating a session)
-    /// Checks version and redeploys if outdated
+    /// Deploy rtach if needed (without creating a session), and the rest that goes with
+    /// it (helper scripts, the Claude hook, upgrading old sessions, cleanup, spawnd)
     func ensureDeployed() async throws {
-        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: checking if update needed...")
-        if try await needsUpdate() {
-            Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: update needed, getting arch...")
-            let arch = try await getRemoteArch()
-            Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: deploying for \(arch)...")
-            try await deploy(arch: arch)
+        try await ensureBinary()
+        await finishDeploy()
+    }
+
+    /// This version's binary on the host, deployed if it isn't there: what a pane needs
+    /// before it can attach. One command when it's there already (the sessions folder
+    /// too). True if it deployed it.
+    @discardableResult
+    func ensureBinary() async throws -> Bool {
+        let output = try await connection.executeCommand(
+            "mkdir -p \(Self.remoteSessionsPath) && { \(Self.remoteBinPath) --version 2>/dev/null || echo missing; }"
+        )
+        let version = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard version != Self.expectedVersion else {
+            Logger.clauntty.debugOnly("RtachDeployer: rtach \(version) is up to date")
+            return false
         }
-        // Ensure sessions directory exists
-        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: creating sessions directory...")
-        _ = try await connection.executeCommand("mkdir -p \(Self.remoteSessionsPath)")
+        Logger.clauntty.debugOnly("RtachDeployer: remote rtach is \(version), deploying \(Self.expectedVersion)")
+        let arch = try await getRemoteArch()
+        try await deploy(arch: arch)
+        return true
+    }
 
-        // Deploy helper scripts (forward-port, open-tab)
-        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: deploying helper scripts...")
-        try await deployHelperScripts()
-
-        // Deploy Claude Code hook for input detection
-        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: deploying Claude Code hook...")
-        try await deployClaudeHook()
-
+    /// The rest of the deploy, which panes don't wait for
+    func finishDeploy() async {
+        do {
+            try await deployHelperScripts()
+            try await deployClaudeHook()
+        } catch {
+            Logger.clauntty.warning("RtachDeployer: helper scripts or hook failed: \(error.localizedDescription)")
+        }
         // Running sessions move to this rtach without ending (first, so the binaries
         // they leave are cleaned up below)
         await upgradeSessions()
-
-        // Clean up old unused binaries
-        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: cleaning up old binaries...")
         await cleanupOldBinaries()
-
         await checkSpawnd()
-
         await updatePushFile()
-
-        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: done")
     }
 
     /// Ask the host's sessions on an older rtach to replace it with this one, keeping
     /// their shells and scrollback (rtach's upgrade.zig; masters from 2.19.0 can). Their
     /// clients, ours included, are dropped and reconnect. Does nothing when all are
     /// current.
-    private func upgradeSessions() async {
+    func upgradeSessions() async {
         // Once per host per launch: each window's connection deploys, all at once
         let host = "\(connection.username)@\(connection.host):\(connection.port)"
         let first = Self.upgradeLock.withLock { Self.upgradedHosts.insert(host).inserted }
@@ -724,32 +729,6 @@ class RtachDeployer {
     }
 
     /// Get the version of rtach installed on remote server (nil if not installed or version unknown)
-    private func getRemoteVersion() async throws -> String? {
-        let output = try await connection.executeCommand("\(Self.remoteBinPath) --version 2>/dev/null || echo unknown")
-        let version = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return version == "unknown" ? nil : version
-    }
-
-    /// Check if remote rtach needs to be updated
-    private func needsUpdate() async throws -> Bool {
-        guard try await rtachExists() else {
-            return true // Not installed, needs deployment
-        }
-
-        guard let remoteVersion = try await getRemoteVersion() else {
-            Logger.clauntty.debugOnly("Remote rtach version unknown, will redeploy")
-            return true // Can't determine version, redeploy to be safe
-        }
-
-        let needsUpdate = remoteVersion != Self.expectedVersion
-        if needsUpdate {
-            Logger.clauntty.debugOnly("Remote rtach version \(remoteVersion) != expected \(Self.expectedVersion), will update")
-        } else {
-            Logger.clauntty.debugOnly("Remote rtach version \(remoteVersion) is up to date")
-        }
-        return needsUpdate
-    }
-
     private func deploy(arch: String) async throws {
         // Get full platform info for binary selection
         let platform = try await connection.getRemotePlatform()

@@ -124,6 +124,10 @@ class SessionManager: ObservableObject {
     var connectingHosts: [String: Task<SSHConnection, Error>] = [:]
     /// Lets idle panes go once switching has settled (releaseIdlePanes)
     var idleReleaseTask: Task<Void, Never>?
+    /// Hosts whose rtach binary was checked this launch (hostDeployer)
+    var verifiedHosts: Set<String> = []
+    /// A host's binary being checked or deployed, for callers that need it meanwhile
+    var deployingHosts: [String: Task<RtachDeployer, Error>] = [:]
 
     // MARK: - Reconnection Throttling
 
@@ -201,17 +205,14 @@ class SessionManager: ObservableObject {
     /// Returns sessions and deployer, or nil if rtach is disabled or deployment fails
     func connectAndListSessions(for config: SavedConnection) async throws -> (sessions: [RtachSession], deployer: RtachDeployer)? {
         let poolKey = connectionKey(for: config)
-        let connection = try await hostConnection(for: config)
+        _ = try await hostConnection(for: config)
 
         guard useRtach else { return nil }
 
         // Deploy rtach and list sessions
         do {
-            let deployer = RtachDeployer(connection: connection)
-            Logger.clauntty.debugOnly("SessionManager: ensuring rtach deployed...")
-            try await deployer.ensureDeployed()
+            let deployer = try await hostDeployer(for: config)
             rtachDeployers[poolKey] = deployer
-            offerSpawndIfNeeded(deployer, config: config)
             Logger.clauntty.debugOnly("SessionManager: listing sessions...")
             let sessions = try await deployer.listSessions()
             Logger.clauntty.debugOnly("SessionManager: found \(sessions.count) existing sessions")
@@ -225,7 +226,7 @@ class SessionManager: ObservableObject {
     // MARK: spawnd
 
     /// Offer spawnd for a Mac host that doesn't have it, once per run
-    private func offerSpawndIfNeeded(_ deployer: RtachDeployer, config: SavedConnection) {
+    func offerSpawndIfNeeded(_ deployer: RtachDeployer, config: SavedConnection) {
         let key = deployer.spawndHostName ?? connectionKey(for: config)
         guard deployer.spawndInstalled == false, !spawndOffered.contains(key) else { return }
         spawndOffered.insert(key)
@@ -283,21 +284,12 @@ class SessionManager: ObservableObject {
         var shellCommand: String? = nil
         var usingRtach = false
         if useRtach {
-            // Ensure rtach is deployed (may already be cached in rtachDeployers)
-            var deployer = rtachDeployers[poolKey]
-            if deployer == nil {
-                Logger.clauntty.debugOnly("SessionManager: deploying rtach for session \(session.id.uuidString.prefix(8))...")
-                let newDeployer = RtachDeployer(connection: connection)
-                do {
-                    try await newDeployer.ensureDeployed()
-                    rtachDeployers[poolKey] = newDeployer
-                    deployer = newDeployer
-                    offerSpawndIfNeeded(newDeployer, config: config)
-                    Task { await syncSessionsWithServer(config: config, deployer: newDeployer) }
-                    Logger.clauntty.debugOnly("SessionManager: rtach deployed successfully")
-                } catch {
-                    Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
-                }
+            // This version's rtach on the host (checked once per launch, shared)
+            var deployer: RtachDeployer?
+            do {
+                deployer = try await hostDeployer(for: config)
+            } catch {
+                Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
             }
 
             if let deployer = deployer {
@@ -328,9 +320,10 @@ class SessionManager: ObservableObject {
         // Through the main queue, which keeps the order they arrived in: a Task per chunk
         // doesn't, and a swapped pair left rtach's stream unreadable (the pane went blank
         // until the app restarted)
+        let attachToken = session.expectAttach()
         let onData: (Data) -> Void = { [weak session] data in
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { session?.handleDataReceived(data) }
+                MainActor.assumeIsolated { session?.handleChannelData(data, token: attachToken) }
             }
         }
         let onInactive: () -> Void = { [weak self, weak session] in
@@ -496,21 +489,8 @@ class SessionManager: ObservableObject {
 
         Logger.clauntty.debugOnly("SessionManager: reconnecting session \(session.id.uuidString.prefix(8)) (state=\(session.stateDescription), channel=\(session.hasAttachedChannel ? "attached" : "missing")) to rtach session \(rtachSessionId.prefix(8))")
 
-        // Ensure rtach deployer exists for this connection
-        let config = session.connectionConfig
-        let poolKey = connectionKey(for: config)
-
-        if rtachDeployers[poolKey] == nil {
-            // Need to reconnect SSH and redeploy rtach
-            let connection = try await hostConnection(for: config)
-
-            let deployer = RtachDeployer(connection: connection)
-            try await deployer.ensureDeployed()
-            rtachDeployers[poolKey] = deployer
-            offerSpawndIfNeeded(deployer, config: config)
-            Task { await syncSessionsWithServer(config: config, deployer: deployer) }
-        }
-
+        // connect() checks rtach on the host (hostDeployer) after marking the session
+        // connecting, so it says "Connecting…" meanwhile, not "Disconnected"
         // Reconnect using existing rtach session ID
         do {
             try await connect(session: session, rtachSessionId: rtachSessionId)
@@ -523,6 +503,7 @@ class SessionManager: ObservableObject {
             }
             // It failed: say so, rather than sit quietly on the old screen
             session.isResting = false
+            session.reconnectFailed = true
             TailscaleDebugLog.note("reconnecting tab \(session.id.uuidString.prefix(8)) failed: \(error.localizedDescription)")
             throw error
         }

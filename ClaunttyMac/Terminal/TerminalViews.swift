@@ -294,7 +294,10 @@ struct TerminalStatusOverlay: View {
         switch session.state {
         case .connected: return nil
         case .connecting: return ("Connecting…", nil)
-        case .disconnected: return ("Disconnected · Click to reconnect", reconnect)
+        // A pane on screen reconnects by itself; only a failed attempt waits for a click
+        case .disconnected:
+            // (a click still reconnects, in case nothing is: the app in the background)
+            return session.reconnectFailed ? ("Disconnected · Click to reconnect", reconnect) : ("Connecting…", reconnect)
         case .error(let message): return ("\(message) · Click to retry", reconnect)
         case .remotelyDeleted: return ("This pane has ended", nil)
         }

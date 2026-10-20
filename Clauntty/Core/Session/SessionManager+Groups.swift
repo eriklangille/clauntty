@@ -437,9 +437,7 @@ extension SessionManager {
     private func run<T>(_ body: (SSHConnection) async throws -> T, on connection: SSHConnection,
                         config: SavedConnection) async throws -> T {
         // rtach may not be on a host this run hasn't reached yet
-        if rtachDeployers[connectionKey(for: config)] == nil {
-            try await RtachDeployer(connection: connection).ensureDeployed()
-        }
+        _ = try await hostDeployer(for: config)
         return try await body(connection)
     }
 

@@ -226,6 +226,10 @@ class Session: ObservableObject, Identifiable {
     /// When this pane was last on screen; the app keeps the most recent ones attached
     var lastShownAt: Date?
 
+    /// The last reconnect failed: it waits for the user (a click to try again). Until
+    /// then a disconnected pane on screen is about to connect.
+    @Published var reconnectFailed = false
+
     /// The app let this idle pane's channel go (`rest()`); its terminal is as it was.
     /// Showing it attaches again without a "Connecting" notice.
     @Published var isResting = false
@@ -484,6 +488,7 @@ class Session: ObservableObject, Identifiable {
         // Reset scrollback tracking state for reconnects
         // rtach will send scrollback when we reconnect to an existing session
         resetBeforeReplay = expectsRtach
+        reconnectFailed = false
         if expectsRtach { beginSettling() }
         isResting = false
         historyBefore = ProtocolConstants.historyBeforeReplay
@@ -496,6 +501,11 @@ class Session: ObservableObject, Identifiable {
         rtachProtocol.delegate = self
         rtachProtocol.connect()
         setPtySize(nil)
+
+        // What came before (the handshake, often)
+        let early = earlyData ?? []
+        earlyData = nil
+        early.forEach(handleDataReceived)
 
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): channel attached, channelHandler is set")
     }
@@ -514,7 +524,8 @@ class Session: ObservableObject, Identifiable {
         inactivityTimer = nil
 
         // Close this pane's channel: the SSH connection is the host's, shared with its
-        // other panes
+        // other panes. What it still sends is dropped.
+        attachToken = nil
         sshChannel?.close(promise: nil)
         sshConnection = nil
         sshChannel = nil
@@ -530,6 +541,32 @@ class Session: ObservableObject, Identifiable {
     }
 
     // MARK: - Data Flow
+
+    /// The attach under way or current (expectAttach); a channel's data with another
+    /// token is from a channel this session has left, and is dropped
+    private var attachToken: UUID?
+    /// Data that came before attach() for this token: rtach's handshake can beat it (the
+    /// channel's requests go out together), and the protocol isn't reading until then.
+    /// Dropped, it left the pane waiting for a handshake that had come.
+    private var earlyData: [Data]? = []
+
+    /// A channel is about to be opened for this session: its data carries this token
+    func expectAttach() -> UUID {
+        let token = UUID()
+        attachToken = token
+        earlyData = []
+        return token
+    }
+
+    /// Data from the channel opened with `token`
+    func handleChannelData(_ data: Data, token: UUID) {
+        guard token == attachToken else { return }
+        if earlyData != nil {
+            earlyData?.append(data)
+            return
+        }
+        handleDataReceived(data)
+    }
 
     /// Handle data received from SSH
     /// Delegates to RtachSession for protocol handling (raw vs framed mode)

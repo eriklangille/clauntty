@@ -51,6 +51,41 @@ extension SessionManager {
         closeIdleConnections()
     }
 
+    /// This version's rtach on the host: its binary checked once per launch (and deployed
+    /// if it isn't this version), shared by panes, listing and commands. The rest of the
+    /// deploy (helper scripts, the Claude hook, cleanup, spawnd) runs after without
+    /// holding them up. It used to run first, about ten commands one after another, each
+    /// a `login` and a shell through Tailscale SSH: seconds before a pane could attach.
+    /// Old sessions still upgrade first after a new binary: a pane would attach to one
+    /// only to be dropped by its upgrade.
+    func hostDeployer(for config: SavedConnection) async throws -> RtachDeployer {
+        let key = connectionKey(for: config)
+        if verifiedHosts.contains(key) {
+            if let deployer = rtachDeployers[key], deployer.connection.isConnected { return deployer }
+            return RtachDeployer(connection: try await hostConnection(for: config))
+        }
+        if let pending = deployingHosts[key] {
+            return try await pending.value
+        }
+        let deploying = Task { () throws -> RtachDeployer in
+            defer { deployingHosts[key] = nil }
+            let deployer = RtachDeployer(connection: try await hostConnection(for: config))
+            if try await deployer.ensureBinary() {
+                await deployer.upgradeSessions()
+            }
+            verifiedHosts.insert(key)
+            rtachDeployers[key] = deployer
+            Task {
+                await deployer.finishDeploy()
+                self.offerSpawndIfNeeded(deployer, config: config)
+                await self.syncSessionsWithServer(config: config, deployer: deployer)
+            }
+            return deployer
+        }
+        deployingHosts[key] = deploying
+        return try await deploying.value
+    }
+
     /// A live connection to the host, connecting if it has none
     func hostConnection(for config: SavedConnection) async throws -> SSHConnection {
         let key = connectionKey(for: config)
