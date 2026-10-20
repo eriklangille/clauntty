@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Clauntty's app icon. scripts/render-icon.sh renders it into the iOS and Mac icons -->
+  <defs>
+    <linearGradient id="silver" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8f8f6"/>
+      <stop offset=".025" stop-color="#e2e3df"/>
+      <stop offset=".1" stop-color="#d8d9d5"/>
+      <stop offset=".4" stop-color="#b0b0ac"/>
+      <stop offset=".6" stop-color="#959592"/>
+      <stop offset=".78" stop-color="#7a7977"/>
+      <stop offset=".86" stop-color="#868684"/>
+      <stop offset=".95" stop-color="#5e5e5b"/>
+      <stop offset="1" stop-color="#737370"/>
+    </linearGradient>
+    <radialGradient id="silverSheen" cx=".5" cy=".5" r=".72">
+      <stop offset=".78" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".35"/>
+    </radialGradient>
+    <linearGradient id="bezel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2e2f2d"/>
+      <stop offset=".3" stop-color="#171816"/>
+      <stop offset=".75" stop-color="#090909"/>
+      <stop offset="1" stop-color="#020202"/>
+    </linearGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="7"/>
+      <feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 -1.6 1.1"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4c1d07"/>
+      <stop offset=".38" stop-color="#561d04"/>
+      <stop offset=".55" stop-color="#7a2805"/>
+      <stop offset=".75" stop-color="#963406"/>
+      <stop offset="1" stop-color="#a83d08"/>
+    </linearGradient>
+    <radialGradient id="dot">
+      <stop offset="0" stop-color="#ff9445" stop-opacity=".5"/>
+      <stop offset=".6" stop-color="#ff9445" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#ff9445" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" x="-1" y="-4" width="18" height="18" patternUnits="userSpaceOnUse">
+      <circle cx="9" cy="9" r="6.5" fill="url(#dot)"/>
+    </pattern>
+    <radialGradient id="litDot">
+      <stop offset="0" stop-color="#ffd27a" stop-opacity=".55"/>
+      <stop offset=".6" stop-color="#ffc060" stop-opacity=".4"/>
+      <stop offset="1" stop-color="#ffd27a" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="litDots" x="-1" y="-4" width="18" height="18" patternUnits="userSpaceOnUse">
+      <circle cx="9" cy="9" r="6.5" fill="url(#litDot)"/>
+    </pattern>
+    <radialGradient id="vignette" cx=".5" cy=".55" r=".75">
+      <stop offset=".6" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".35"/>
+    </radialGradient>
+    <radialGradient id="starFill" cx="346" cy="350" r="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f89a45"/>
+      <stop offset=".7" stop-color="#f28a3c"/>
+      <stop offset="1" stop-color="#ee8236"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="0" y1="104" x2="0" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffcfa0" stop-opacity=".3"/>
+      <stop offset=".3" stop-color="#ffc090" stop-opacity=".09"/>
+      <stop offset="1" stop-color="#ffc090" stop-opacity=".05"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="104" x2="0" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffc79a" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#ffc79a" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="blur3" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="blur10" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="10"/></filter>
+    <filter id="blur28" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="28"/></filter>
+    <filter id="blur14" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+    <!-- Under the glass the dots go soft, and fade out towards the top -->
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".12" stop-color="#fff" stop-opacity=".08"/>
+      <stop offset=".3" stop-color="#fff" stop-opacity=".4"/>
+      <stop offset=".42" stop-color="#fff" stop-opacity=".75"/>
+      <stop offset=".6" stop-color="#fff"/>
+    </linearGradient>
+    <linearGradient id="softFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".12" stop-color="#fff" stop-opacity=".2"/>
+      <stop offset=".3" stop-color="#fff" stop-opacity=".45"/>
+      <stop offset=".45" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="dotFade"><rect x="104" y="104" width="816" height="816" fill="url(#fade)"/></mask>
+    <mask id="softDotFade"><rect x="104" y="104" width="816" height="816" fill="url(#softFade)"/></mask>
+    <radialGradient id="softDot">
+      <stop offset="0" stop-color="#ff9445" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#ff9445" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="softDots" x="-1" y="-4" width="18" height="18" patternUnits="userSpaceOnUse">
+      <circle cx="9" cy="9" r="9" fill="url(#softDot)"/>
+    </pattern>
+    <radialGradient id="maskDot">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".55" stop-color="#fff" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="maskDots" x="-1" y="-4" width="18" height="18" patternUnits="userSpaceOnUse">
+      <circle cx="9" cy="9" r="7" fill="url(#maskDot)"/>
+    </pattern>
+    <mask id="glowDots"><rect x="104" y="104" width="816" height="816" fill="url(#maskDots)"/></mask>
+    <clipPath id="screenClip"><rect x="104" y="104" width="816" height="816" rx="182"/></clipPath>
+    <clipPath id="starClip"><path d="M162.0,289.5 Q162.0,288.0 163.5,288.0 L192.5,288.0 Q194.0,288.0 194.0,286.5 L194.0,281.5 Q194.0,280.0 195.5,280.0 L280.5,280.0 Q282.0,280.0 282.0,278.5 L282.0,265.5 Q282.0,264.0 283.5,264.0 L288.5,264.0 Q290.0,264.0 290.0,262.5 L290.0,249.5 Q290.0,248.0 291.5,248.0 L296.5,248.0 Q298.0,248.0 298.0,246.5 L298.0,233.5 Q298.0,232.0 299.5,232.0 L304.5,232.0 Q306.0,232.0 306.0,230.5 L306.0,217.5 Q306.0,216.0 307.5,216.0 L312.5,216.0 Q314.0,216.0 314.0,214.5 L314.0,201.5 Q314.0,200.0 315.5,200.0 L320.5,200.0 Q322.0,200.0 322.0,198.5 L322.0,185.5 Q322.0,184.0 323.5,184.0 L328.5,184.0 Q330.0,184.0 330.0,182.5 L330.0,169.5 Q330.0,168.0 331.5,168.0 L336.5,168.0 Q338.0,168.0 338.0,166.5 L338.0,161.5 Q338.0,160.0 339.5,160.0 L352.5,160.0 Q354.0,160.0 354.0,161.5 L354.0,166.5 Q354.0,168.0 355.5,168.0 L360.5,168.0 Q362.0,168.0 362.0,169.5 L362.0,182.5 Q362.0,184.0 363.5,184.0 L368.5,184.0 Q370.0,184.0 370.0,185.5 L370.0,198.5 Q370.0,200.0 371.5,200.0 L376.5,200.0 Q378.0,200.0 378.0,201.5 L378.0,214.5 Q378.0,216.0 379.5,216.0 L384.5,216.0 Q386.0,216.0 386.0,217.5 L386.0,230.5 Q386.0,232.0 387.5,232.0 L392.5,232.0 Q394.0,232.0 394.0,233.5 L394.0,246.5 Q394.0,248.0 395.5,248.0 L400.5,248.0 Q402.0,248.0 402.0,249.5 L402.0,262.5 Q402.0,264.0 403.5,264.0 L408.5,264.0 Q410.0,264.0 410.0,265.5 L410.0,278.5 Q410.0,280.0 411.5,280.0 L496.5,280.0 Q498.0,280.0 498.0,281.5 L498.0,286.5 Q498.0,288.0 499.5,288.0 L528.5,288.0 Q530.0,288.0 530.0,289.5 L530.0,318.5 Q530.0,320.0 528.5,320.0 L523.5,320.0 Q522.0,320.0 522.0,321.5 L522.0,326.5 Q522.0,328.0 520.5,328.0 L515.5,328.0 Q514.0,328.0 514.0,329.5 L514.0,334.5 Q514.0,336.0 512.5,336.0 L507.5,336.0 Q506.0,336.0 506.0,337.5 L506.0,342.5 Q506.0,344.0 504.5,344.0 L499.5,344.0 Q498.0,344.0 498.0,345.5 L498.0,350.5 Q498.0,352.0 496.5,352.0 L491.5,352.0 Q490.0,352.0 490.0,353.5 L490.0,358.5 Q490.0,360.0 488.5,360.0 L475.5,360.0 Q474.0,360.0 474.0,361.5 L474.0,366.5 Q474.0,368.0 472.5,368.0 L467.5,368.0 Q466.0,368.0 466.0,369.5 L466.0,374.5 Q466.0,376.0 464.5,376.0 L459.5,376.0 Q458.0,376.0 458.0,377.5 L458.0,382.5 Q458.0,384.0 456.5,384.0 L451.5,384.0 Q450.0,384.0 450.0,385.5 L450.0,390.5 Q450.0,392.0 448.5,392.0 L443.5,392.0 Q442.0,392.0 442.0,393.5 L442.0,414.5 Q442.0,416.0 443.5,416.0 L448.5,416.0 Q450.0,416.0 450.0,417.5 L450.0,438.5 Q450.0,440.0 451.5,440.0 L456.5,440.0 Q458.0,440.0 458.0,441.5 L458.0,470.5 Q458.0,472.0 459.5,472.0 L464.5,472.0 Q466.0,472.0 466.0,473.5 L466.0,494.5 Q466.0,496.0 467.5,496.0 L472.5,496.0 Q474.0,496.0 474.0,497.5 L474.0,526.5 Q474.0,528.0 472.5,528.0 L443.5,528.0 Q442.0,528.0 442.0,526.5 L442.0,521.5 Q442.0,520.0 440.5,520.0 L427.5,520.0 Q426.0,520.0 426.0,518.5 L426.0,513.5 Q426.0,512.0 424.5,512.0 L419.5,512.0 Q418.0,512.0 418.0,510.5 L418.0,505.5 Q418.0,504.0 416.5,504.0 L403.5,504.0 Q402.0,504.0 402.0,502.5 L402.0,497.5 Q402.0,496.0 400.5,496.0 L387.5,496.0 Q386.0,496.0 386.0,494.5 L386.0,489.5 Q386.0,488.0 384.5,488.0 L371.5,488.0 Q370.0,488.0 370.0,486.5 L370.0,481.5 Q370.0,480.0 368.5,480.0 L363.5,480.0 Q362.0,480.0 362.0,478.5 L362.0,473.5 Q362.0,472.0 360.5,472.0 L339.5,472.0 Q338.0,472.0 338.0,473.5 L338.0,478.5 Q338.0,480.0 336.5,480.0 L323.5,480.0 Q322.0,480.0 322.0,481.5 L322.0,486.5 Q322.0,488.0 320.5,488.0 L307.5,488.0 Q306.0,488.0 306.0,489.5 L306.0,494.5 Q306.0,496.0 304.5,496.0 L291.5,496.0 Q290.0,496.0 290.0,497.5 L290.0,502.5 Q290.0,504.0 288.5,504.0 L283.5,504.0 Q282.0,504.0 282.0,505.5 L282.0,510.5 Q282.0,512.0 280.5,512.0 L267.5,512.0 Q266.0,512.0 266.0,513.5 L266.0,518.5 Q266.0,520.0 264.5,520.0 L251.5,520.0 Q250.0,520.0 250.0,521.5 L250.0,526.5 Q250.0,528.0 248.5,528.0 L219.5,528.0 Q218.0,528.0 218.0,526.5 L218.0,505.5 Q218.0,504.0 219.5,504.0 L224.5,504.0 Q226.0,504.0 226.0,502.5 L226.0,473.5 Q226.0,472.0 227.5,472.0 L232.5,472.0 Q234.0,472.0 234.0,470.5 L234.0,449.5 Q234.0,448.0 235.5,448.0 L240.5,448.0 Q242.0,448.0 242.0,446.5 L242.0,417.5 Q242.0,416.0 243.5,416.0 L248.5,416.0 Q250.0,416.0 250.0,414.5 L250.0,393.5 Q250.0,392.0 248.5,392.0 L243.5,392.0 Q242.0,392.0 242.0,390.5 L242.0,385.5 Q242.0,384.0 240.5,384.0 L235.5,384.0 Q234.0,384.0 234.0,382.5 L234.0,377.5 Q234.0,376.0 232.5,376.0 L227.5,376.0 Q226.0,376.0 226.0,374.5 L226.0,369.5 Q226.0,368.0 224.5,368.0 L219.5,368.0 Q218.0,368.0 218.0,366.5 L218.0,361.5 Q218.0,360.0 216.5,360.0 L211.5,360.0 Q210.0,360.0 210.0,358.5 L210.0,353.5 Q210.0,352.0 208.5,352.0 L195.5,352.0 Q194.0,352.0 194.0,350.5 L194.0,345.5 Q194.0,344.0 192.5,344.0 L187.5,344.0 Q186.0,344.0 186.0,342.5 L186.0,337.5 Q186.0,336.0 184.5,336.0 L179.5,336.0 Q178.0,336.0 178.0,334.5 L178.0,329.5 Q178.0,328.0 176.5,328.0 L171.5,328.0 Q170.0,328.0 170.0,326.5 L170.0,321.5 Q170.0,320.0 168.5,320.0 L163.5,320.0 Q162.0,320.0 162.0,318.5Z"/></clipPath>
+    <path id="star" d="M162.0,289.5 Q162.0,288.0 163.5,288.0 L192.5,288.0 Q194.0,288.0 194.0,286.5 L194.0,281.5 Q194.0,280.0 195.5,280.0 L280.5,280.0 Q282.0,280.0 282.0,278.5 L282.0,265.5 Q282.0,264.0 283.5,264.0 L288.5,264.0 Q290.0,264.0 290.0,262.5 L290.0,249.5 Q290.0,248.0 291.5,248.0 L296.5,248.0 Q298.0,248.0 298.0,246.5 L298.0,233.5 Q298.0,232.0 299.5,232.0 L304.5,232.0 Q306.0,232.0 306.0,230.5 L306.0,217.5 Q306.0,216.0 307.5,216.0 L312.5,216.0 Q314.0,216.0 314.0,214.5 L314.0,201.5 Q314.0,200.0 315.5,200.0 L320.5,200.0 Q322.0,200.0 322.0,198.5 L322.0,185.5 Q322.0,184.0 323.5,184.0 L328.5,184.0 Q330.0,184.0 330.0,182.5 L330.0,169.5 Q330.0,168.0 331.5,168.0 L336.5,168.0 Q338.0,168.0 338.0,166.5 L338.0,161.5 Q338.0,160.0 339.5,160.0 L352.5,160.0 Q354.0,160.0 354.0,161.5 L354.0,166.5 Q354.0,168.0 355.5,168.0 L360.5,168.0 Q362.0,168.0 362.0,169.5 L362.0,182.5 Q362.0,184.0 363.5,184.0 L368.5,184.0 Q370.0,184.0 370.0,185.5 L370.0,198.5 Q370.0,200.0 371.5,200.0 L376.5,200.0 Q378.0,200.0 378.0,201.5 L378.0,214.5 Q378.0,216.0 379.5,216.0 L384.5,216.0 Q386.0,216.0 386.0,217.5 L386.0,230.5 Q386.0,232.0 387.5,232.0 L392.5,232.0 Q394.0,232.0 394.0,233.5 L394.0,246.5 Q394.0,248.0 395.5,248.0 L400.5,248.0 Q402.0,248.0 402.0,249.5 L402.0,262.5 Q402.0,264.0 403.5,264.0 L408.5,264.0 Q410.0,264.0 410.0,265.5 L410.0,278.5 Q410.0,280.0 411.5,280.0 L496.5,280.0 Q498.0,280.0 498.0,281.5 L498.0,286.5 Q498.0,288.0 499.5,288.0 L528.5,288.0 Q530.0,288.0 530.0,289.5 L530.0,318.5 Q530.0,320.0 528.5,320.0 L523.5,320.0 Q522.0,320.0 522.0,321.5 L522.0,326.5 Q522.0,328.0 520.5,328.0 L515.5,328.0 Q514.0,328.0 514.0,329.5 L514.0,334.5 Q514.0,336.0 512.5,336.0 L507.5,336.0 Q506.0,336.0 506.0,337.5 L506.0,342.5 Q506.0,344.0 504.5,344.0 L499.5,344.0 Q498.0,344.0 498.0,345.5 L498.0,350.5 Q498.0,352.0 496.5,352.0 L491.5,352.0 Q490.0,352.0 490.0,353.5 L490.0,358.5 Q490.0,360.0 488.5,360.0 L475.5,360.0 Q474.0,360.0 474.0,361.5 L474.0,366.5 Q474.0,368.0 472.5,368.0 L467.5,368.0 Q466.0,368.0 466.0,369.5 L466.0,374.5 Q466.0,376.0 464.5,376.0 L459.5,376.0 Q458.0,376.0 458.0,377.5 L458.0,382.5 Q458.0,384.0 456.5,384.0 L451.5,384.0 Q450.0,384.0 450.0,385.5 L450.0,390.5 Q450.0,392.0 448.5,392.0 L443.5,392.0 Q442.0,392.0 442.0,393.5 L442.0,414.5 Q442.0,416.0 443.5,416.0 L448.5,416.0 Q450.0,416.0 450.0,417.5 L450.0,438.5 Q450.0,440.0 451.5,440.0 L456.5,440.0 Q458.0,440.0 458.0,441.5 L458.0,470.5 Q458.0,472.0 459.5,472.0 L464.5,472.0 Q466.0,472.0 466.0,473.5 L466.0,494.5 Q466.0,496.0 467.5,496.0 L472.5,496.0 Q474.0,496.0 474.0,497.5 L474.0,526.5 Q474.0,528.0 472.5,528.0 L443.5,528.0 Q442.0,528.0 442.0,526.5 L442.0,521.5 Q442.0,520.0 440.5,520.0 L427.5,520.0 Q426.0,520.0 426.0,518.5 L426.0,513.5 Q426.0,512.0 424.5,512.0 L419.5,512.0 Q418.0,512.0 418.0,510.5 L418.0,505.5 Q418.0,504.0 416.5,504.0 L403.5,504.0 Q402.0,504.0 402.0,502.5 L402.0,497.5 Q402.0,496.0 400.5,496.0 L387.5,496.0 Q386.0,496.0 386.0,494.5 L386.0,489.5 Q386.0,488.0 384.5,488.0 L371.5,488.0 Q370.0,488.0 370.0,486.5 L370.0,481.5 Q370.0,480.0 368.5,480.0 L363.5,480.0 Q362.0,480.0 362.0,478.5 L362.0,473.5 Q362.0,472.0 360.5,472.0 L339.5,472.0 Q338.0,472.0 338.0,473.5 L338.0,478.5 Q338.0,480.0 336.5,480.0 L323.5,480.0 Q322.0,480.0 322.0,481.5 L322.0,486.5 Q322.0,488.0 320.5,488.0 L307.5,488.0 Q306.0,488.0 306.0,489.5 L306.0,494.5 Q306.0,496.0 304.5,496.0 L291.5,496.0 Q290.0,496.0 290.0,497.5 L290.0,502.5 Q290.0,504.0 288.5,504.0 L283.5,504.0 Q282.0,504.0 282.0,505.5 L282.0,510.5 Q282.0,512.0 280.5,512.0 L267.5,512.0 Q266.0,512.0 266.0,513.5 L266.0,518.5 Q266.0,520.0 264.5,520.0 L251.5,520.0 Q250.0,520.0 250.0,521.5 L250.0,526.5 Q250.0,528.0 248.5,528.0 L219.5,528.0 Q218.0,528.0 218.0,526.5 L218.0,505.5 Q218.0,504.0 219.5,504.0 L224.5,504.0 Q226.0,504.0 226.0,502.5 L226.0,473.5 Q226.0,472.0 227.5,472.0 L232.5,472.0 Q234.0,472.0 234.0,470.5 L234.0,449.5 Q234.0,448.0 235.5,448.0 L240.5,448.0 Q242.0,448.0 242.0,446.5 L242.0,417.5 Q242.0,416.0 243.5,416.0 L248.5,416.0 Q250.0,416.0 250.0,414.5 L250.0,393.5 Q250.0,392.0 248.5,392.0 L243.5,392.0 Q242.0,392.0 242.0,390.5 L242.0,385.5 Q242.0,384.0 240.5,384.0 L235.5,384.0 Q234.0,384.0 234.0,382.5 L234.0,377.5 Q234.0,376.0 232.5,376.0 L227.5,376.0 Q226.0,376.0 226.0,374.5 L226.0,369.5 Q226.0,368.0 224.5,368.0 L219.5,368.0 Q218.0,368.0 218.0,366.5 L218.0,361.5 Q218.0,360.0 216.5,360.0 L211.5,360.0 Q210.0,360.0 210.0,358.5 L210.0,353.5 Q210.0,352.0 208.5,352.0 L195.5,352.0 Q194.0,352.0 194.0,350.5 L194.0,345.5 Q194.0,344.0 192.5,344.0 L187.5,344.0 Q186.0,344.0 186.0,342.5 L186.0,337.5 Q186.0,336.0 184.5,336.0 L179.5,336.0 Q178.0,336.0 178.0,334.5 L178.0,329.5 Q178.0,328.0 176.5,328.0 L171.5,328.0 Q170.0,328.0 170.0,326.5 L170.0,321.5 Q170.0,320.0 168.5,320.0 L163.5,320.0 Q162.0,320.0 162.0,318.5Z"/>
+  </defs>
+
+  <!-- Silver frame: fills the square, the system masks the corners -->
+  <rect width="1024" height="1024" fill="url(#silver)"/>
+  <rect width="1024" height="1024" fill="url(#silverSheen)"/>
+  <rect x="47" y="47" width="930" height="930" rx="237" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="3"/>
+
+  <!-- Black bezel -->
+  <rect x="49" y="49" width="926" height="926" rx="235" fill="url(#bezel)"/>
+  <rect x="49" y="49" width="926" height="926" rx="235" fill="#000" filter="url(#grain)" opacity=".16"/>
+  <rect x="51" y="51" width="922" height="922" rx="233" fill="none" stroke="#000" stroke-width="4" opacity=".85"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="none" stroke="#000" stroke-width="8" opacity=".8"/>
+
+  <!-- Screen -->
+  <g clip-path="url(#screenClip)">
+    <rect x="104" y="104" width="816" height="816" fill="url(#screen)"/>
+    <rect x="104" y="104" width="816" height="816" fill="url(#dots)" mask="url(#dotFade)"/>
+    <rect x="104" y="104" width="816" height="816" fill="url(#softDots)" mask="url(#softDotFade)"/>
+    <rect x="104" y="104" width="816" height="816" fill="url(#vignette)"/>
+
+    <!-- Star: glow around it, lit dots in it, a bright outline -->
+    <g fill="none" stroke-linejoin="round">
+      <use href="#star" stroke="#ff7410" stroke-width="44" opacity=".7" filter="url(#blur28)"/>
+      <use href="#star" stroke="#ffa030" stroke-width="20" filter="url(#blur10)"/>
+    </g>
+    <use href="#star" fill="url(#starFill)"/>
+    <g clip-path="url(#starClip)">
+      <use href="#star" fill="url(#litDots)"/>
+      <use href="#star" fill="none" stroke="#ffc35a" stroke-width="22" opacity=".7" filter="url(#blur10)"/>
+    </g>
+    <!-- The glow lights the LED dots near the outline, inside and out -->
+    <g mask="url(#glowDots)" fill="none" stroke-linejoin="round">
+      <use href="#star" stroke="#ffc457" stroke-width="34" opacity=".6" filter="url(#blur10)"/>
+      <use href="#star" stroke="#ffe08a" stroke-width="18" opacity=".7" filter="url(#blur3)"/>
+    </g>
+    <g fill="none" stroke-linejoin="round">
+      <use href="#star" stroke="#ffd060" stroke-width="18" filter="url(#blur3)"/>
+      <use href="#star" stroke="#fff6c4" stroke-width="8"/>
+    </g>
+
+    <!-- >_ prompt, dark with a light rim -->
+    <g fill="none">
+      <g stroke="#ffbd45" stroke-width="34" filter="url(#blur3)"><path d="M283,321 L319,341.5 L283,362" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="369" y1="341.5" x2="421" y2="341.5" stroke-linecap="round"/></g>
+      <g stroke="#ffeea0" stroke-width="25"><path d="M283,321 L319,341.5 L283,362" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="369" y1="341.5" x2="421" y2="341.5" stroke-linecap="round"/></g>
+      <g stroke="#5e220a" stroke-width="16"><path d="M283,321 L319,341.5 L283,362" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="369" y1="341.5" x2="421" y2="341.5" stroke-linecap="round"/></g>
+    </g>
+
+    <!-- Glass: a reflection over the top, ending in a soft curve -->
+    <path d="M104,104 H920 V352 Q512,520 104,372 Z" fill="url(#gloss)"/>
+    <path d="M920,352 Q512,520 104,372" fill="none" stroke="#fff" stroke-opacity=".1" stroke-width="3" filter="url(#blur3)"/>
+
+    <!-- Shade where the screen meets the bezel -->
+    <rect x="104" y="104" width="816" height="816" rx="182" fill="none" stroke="#000" stroke-width="20" opacity=".4" filter="url(#blur14)"/>
+    <!-- Light caught along the top edge of the glass -->
+    <rect x="104" y="104" width="816" height="816" rx="182" fill="none" stroke="url(#rim)" stroke-width="16" filter="url(#blur10)"/>
+  </g>
+</svg>

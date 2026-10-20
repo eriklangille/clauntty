@@ -398,8 +398,10 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
 - **Release:** `./scripts/mac.sh release` builds Release for arm64 and x86_64, zips it to
   `build/mac/Clauntty.zip` and prints the command that installs it on another Mac over ssh.
   Signed with Apple Development (there's no Developer ID); copied over ssh it has no
-  quarantine flag, so Gatekeeper doesn't check it. The icon is the iOS one in the macOS
-  grid: `swift scripts/make-mac-icon.swift` regenerates `ClaunttyMac/Assets.xcassets`.
+  quarantine flag, so Gatekeeper doesn't check it.
+- **Icon:** drawn in `design/AppIcon.svg`. `scripts/render-icon.sh` renders it into the iOS
+  `AppIcon.png`, then the Mac sizes (the same icon in the macOS grid) with
+  `make-mac-icon.swift`. Edit the SVG, not the PNGs.
 - **Testing:** `scripts/mac.sh` is the counterpart of `sim.sh`: `run`, `shot`, `click`, `drag`,
   `scroll`, `type`, `key cmd+t`, `size W H`, `logs`. Input and screenshots go through
   mac-driver (sim-stream repo), which holds Screen Recording and Accessibility; it refuses
