@@ -287,6 +287,10 @@ struct TerminalStatusOverlay: View {
     }
 
     private var connectionMessage: (text: String, action: (() -> Void)?)? {
+        // An idle pane the app let go, attaching again under its last screen
+        if session.isResting, session.state == .disconnected || session.state == .connecting {
+            return nil
+        }
         switch session.state {
         case .connected: return nil
         case .connecting: return ("Connecting…", nil)

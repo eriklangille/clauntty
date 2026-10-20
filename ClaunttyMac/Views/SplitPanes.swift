@@ -296,6 +296,11 @@ extension SessionManager {
             session.pauseOutput()
         }
         shownTogether = shownIds
+        let now = Date()
+        for session in shown {
+            session.lastShownAt = now
+        }
+        scheduleIdleRelease()
 
         for session in shown where session.id != active.id {
             if session.state == .disconnected || (session.state == .connected && !session.hasAttachedChannel) {

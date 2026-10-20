@@ -223,6 +223,13 @@ class Session: ObservableObject, Identifiable {
         sshChannel != nil && channelHandler != nil
     }
 
+    /// When this pane was last on screen; the app keeps the most recent ones attached
+    var lastShownAt: Date?
+
+    /// The app let this idle pane's channel go (`rest()`); its terminal is as it was.
+    /// Showing it attaches again without a "Connecting" notice.
+    @Published var isResting = false
+
     /// Reference to parent connection (for sending data)
     weak var parentConnection: SSHConnection?
 
@@ -471,6 +478,7 @@ class Session: ObservableObject, Identifiable {
         // Reset scrollback tracking state for reconnects
         // rtach will send scrollback when we reconnect to an existing session
         resetBeforeReplay = expectsRtach
+        isResting = false
         historyBefore = ProtocolConstants.historyBeforeReplay
         emptyHistoryPages = 0
         scrollbackFullyLoaded = false
@@ -483,6 +491,13 @@ class Session: ObservableObject, Identifiable {
         setPtySize(nil)
 
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): channel attached, channelHandler is set")
+    }
+
+    /// Close the channel but keep the terminal: an idle pane costs its host nothing
+    /// until it's shown again, which attaches it (the replay starts the terminal over)
+    func rest() {
+        isResting = true
+        detach()
     }
 
     /// Detach the channel (on disconnect)

@@ -1564,7 +1564,8 @@ struct SwitcherWindow: View {
         switch session.state {
         case .error: return ("exclamationmark.triangle.fill", .red, "Couldn't connect")
         case .remotelyDeleted: return ("xmark.circle.fill", .orange, "Session ended")
-        case .connecting: return (nil, .secondary, "Connecting")
+        // An idle pane the app let go keeps its screen while it attaches again
+        case .connecting: return session.isResting && session.hasOutput ? nil : (nil, .secondary, "Connecting")
         case .connected, .disconnected:
             if session.isResuming { return (nil, .secondary, "Resuming") }
             return session.hasOutput ? nil : (nil, .secondary, "Connecting")

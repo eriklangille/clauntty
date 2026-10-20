@@ -11,6 +11,46 @@ extension SessionManager {
     /// and a reorder at once, uploads) and connection checks open sessions too
     static let panesPerConnection = 6
 
+    /// Panes each host keeps attached besides the ones on screen and busy agents'
+    static let recentPanesKept = 8
+
+    /// Let go of the channels of panes nobody needs now: each attached pane costs its
+    /// host processes (through Tailscale SSH a `login` and an `rtach --proxy`, ~8.5MB).
+    /// Each host keeps the panes on screen, its 8 most recently shown, and panes whose
+    /// agent is working or blocked. The rest close their channel and keep their screen;
+    /// showing one attaches it again. Agents' commands still arrive: rtach sends them
+    /// through the session the app shows.
+    /// `releaseIdlePanes` once nothing has been shown for 2s: switching through panes
+    /// quickly doesn't let go of one only to attach it again
+    func scheduleIdleRelease() {
+        idleReleaseTask?.cancel()
+        idleReleaseTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.releaseIdlePanes()
+        }
+    }
+
+    func releaseIdlePanes() {
+        let onScreen = shownTogether.union(activeSessionId.map { [$0] } ?? [])
+        let attached = sessions.filter { $0.usesRtach && $0.state == .connected && $0.hasAttachedChannel }
+        var released = 0
+        for hostPanes in Dictionary(grouping: attached, by: { connectionKey(for: $0.connectionConfig) }).values {
+            let recent = hostPanes
+                .sorted { ($0.lastShownAt ?? .distantPast) > ($1.lastShownAt ?? .distantPast) }
+                .prefix(Self.recentPanesKept)
+            let kept = onScreen.union(recent.map(\.id))
+            for session in hostPanes where !kept.contains(session.id) {
+                if let pane = session.pane?.paneId, [.working, .blocked].contains(paneStatus(pane)) { continue }
+                session.rest()
+                released += 1
+            }
+        }
+        guard released > 0 else { return }
+        Logger.clauntty.debugOnly("SessionManager: let \(released) idle pane(s) go")
+        closeIdleConnections()
+    }
+
     /// A live connection to the host, connecting if it has none
     func hostConnection(for config: SavedConnection) async throws -> SSHConnection {
         let key = connectionKey(for: config)

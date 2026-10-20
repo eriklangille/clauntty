@@ -122,6 +122,8 @@ class SessionManager: ObservableObject {
     var hostConnections: [String: [SSHConnection]] = [:]
     /// A connection being opened to a host, for callers that need one meanwhile
     var connectingHosts: [String: Task<SSHConnection, Error>] = [:]
+    /// Lets idle panes go once switching has settled (releaseIdlePanes)
+    var idleReleaseTask: Task<Void, Never>?
 
     // MARK: - Reconnection Throttling
 
@@ -448,6 +450,8 @@ class SessionManager: ObservableObject {
 
         if usingRtach {
             checkImageInbox(for: session)
+            // At launch the phone attaches every pane: let the idle ones go once it settles
+            scheduleIdleRelease()
         }
 
         // Request notification permission on first session connect
@@ -514,6 +518,8 @@ class SessionManager: ObservableObject {
             if session.state == .connecting {
                 session.state = .disconnected
             }
+            // It failed: say so, rather than sit quietly on the old screen
+            session.isResting = false
             TailscaleDebugLog.note("reconnecting tab \(session.id.uuidString.prefix(8)) failed: \(error.localizedDescription)")
             throw error
         }
@@ -599,7 +605,8 @@ class SessionManager: ObservableObject {
     /// Reconnect all disconnected sessions
     /// Called when app returns to foreground after background timeout
     func reconnectDisconnectedSessions() async {
-        let disconnectedSessions = sessions.filter { $0.state == .disconnected }
+        // Not the idle panes the app let go: they attach when they're shown
+        let disconnectedSessions = sessions.filter { $0.state == .disconnected && !$0.isResting }
 
         if disconnectedSessions.isEmpty {
             Logger.clauntty.debugOnly("SessionManager: no disconnected sessions to reconnect")
@@ -714,6 +721,7 @@ class SessionManager: ObservableObject {
         }
 
         activeSessionId = session.id
+        session.lastShownAt = Date()
         Logger.clauntty.debugOnly("TAB_TAP: activeSessionId set to \(sessionId)")
 
         // If the session is disconnected or channel-less, trigger lazy reconnect
@@ -730,6 +738,7 @@ class SessionManager: ObservableObject {
             // Already connected - resume output
             session.resumeOutput()
         }
+        scheduleIdleRelease()
     }
 
     /// Close all sessions
