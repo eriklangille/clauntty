@@ -417,30 +417,25 @@ extension SessionManager {
 
     // MARK: Workspace actions
 
-    /// Run something on a host: over its pooled connection if that works, else a new
-    /// one. The connection kept from deploying may have closed since.
+    /// Run something on a host, over its shared connection. If that fails and the
+    /// connection no longer answers (the network changed under it), once more on a new one.
     func withHost<T>(_ config: SavedConnection, _ body: (SSHConnection) async throws -> T) async throws -> T {
-        if let pooled = connectionPool[connectionKey(for: config)], pooled.isConnected {
-            do {
-                return try await body(pooled)
-            } catch let error as RtachDeployError {
-                // rtach answered: running it again wouldn't help
-                throw error
-            } catch {
-                Logger.clauntty.debugOnly("SessionManager: pooled connection failed (\(error.localizedDescription)), using a new one")
-            }
+        let connection = try await hostConnection(for: config)
+        do {
+            return try await run(body, on: connection, config: config)
+        } catch let error as RtachDeployError {
+            // rtach answered: running it again wouldn't help
+            throw error
+        } catch {
+            guard await !connection.isResponsive() else { throw error }
+            Logger.clauntty.debugOnly("SessionManager: connection to \(config.displayName) stopped answering (\(error.localizedDescription)), using a new one")
+            dropConnection(connection, reconnect: true)
+            return try await run(body, on: try await hostConnection(for: config), config: config)
         }
-        let connection = SSHConnection(
-            host: config.host,
-            port: config.port,
-            username: config.username,
-            authMethod: config.authMethod,
-            connectionId: config.id,
-            useTailscale: config.useTailscale,
-            proxyCommand: config.proxyCommand
-        )
-        try await connection.connect()
-        defer { connection.disconnect() }
+    }
+
+    private func run<T>(_ body: (SSHConnection) async throws -> T, on connection: SSHConnection,
+                        config: SavedConnection) async throws -> T {
         // rtach may not be on a host this run hasn't reached yet
         if rtachDeployers[connectionKey(for: config)] == nil {
             try await RtachDeployer(connection: connection).ensureDeployed()

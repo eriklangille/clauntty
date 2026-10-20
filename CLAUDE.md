@@ -20,7 +20,17 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 
 **Data Flow**:
 - **SSH → Terminal**: `SSHChannelHandler.channelRead()` → `ghostty_surface_write_pty_output()` → rendered
-- **Keyboard → SSH**: `insertText()` → `SSHConnection.sendData()` → SSH channel
+- **Keyboard → SSH**: `insertText()` → `Session.sendData()` → the pane's SSH channel
+
+**Connections** (`SessionManager+Connections.swift`): one SSH connection per host, shared. Each pane
+is a channel on it running `rtach -a`; commands (deploys, `rtach ws`, listing, uploads) and port
+forwards use the host's first connection. sshd allows 10 sessions per connection by default
+(`MaxSessions`, every pane and running command is one), so a host gets another connection past
+`panesPerConnection` (6) panes; a server that refuses a channel sooner sets that connection's
+`paneLimit`. A pane takes its place when its connection is chosen (`paneConnection`) and gives it
+back when its channel closes. Closing a pane closes only its channel. Only one connect per host runs
+at a time (`connectingHosts`); the task records the new connection itself, so waiters find it.
+`connect()` opens no shell: an unread login shell used to sit on the host for every connection.
 
 ## Repository Layout
 

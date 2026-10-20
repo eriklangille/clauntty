@@ -63,6 +63,7 @@
 		AC0000000000000000000002 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000002 /* Log.swift */; };
 		C0000017 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000017 /* SessionManager.swift */; };
 		58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */; };
+		55E77F7247B5040EF5FD7BFF /* SessionManager+Connections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4874ED9A2E6E254D7091964 /* SessionManager+Connections.swift */; };
 		C0000018 /* SessionTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000018 /* SessionTabBar.swift */; };
 		C0000019 /* RtachDeployer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000019 /* RtachDeployer.swift */; };
 		C0000020 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; };
@@ -179,6 +180,7 @@
 		AC1000000000000000000002 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		C1000017 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Groups.swift"; sourceTree = "<group>"; };
+		D4874ED9A2E6E254D7091964 /* SessionManager+Connections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Connections.swift"; sourceTree = "<group>"; };
 		C1000018 /* SessionTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTabBar.swift; sourceTree = "<group>"; };
 		C1000019 /* RtachDeployer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RtachDeployer.swift; sourceTree = "<group>"; };
 		C1000020 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
@@ -418,6 +420,7 @@
 				AC1000000000000000000003 /* PaneModels.swift */,
 				C1000017 /* SessionManager.swift */,
 				C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */,
+				D4874ED9A2E6E254D7091964 /* SessionManager+Connections.swift */,
 				C1000023 /* WordList.swift */,
 				BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */,
 				C1000029 /* PersistedWebTab.swift */,
@@ -669,6 +672,7 @@
 				AC0000000000000000000002 /* Log.swift in Sources */,
 				C0000017 /* SessionManager.swift in Sources */,
 				58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */,
+				55E77F7247B5040EF5FD7BFF /* SessionManager+Connections.swift in Sources */,
 				C0000018 /* SessionTabBar.swift in Sources */,
 				80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */,
 				C0000023 /* WordList.swift in Sources */,

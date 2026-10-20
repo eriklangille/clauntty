@@ -116,10 +116,12 @@ class SessionManager: ObservableObject {
         }
     }
 
-    // MARK: - Connection Pool
+    // MARK: - Connections
 
-    /// Pool of SSH connections, keyed by "user@host:port"
-    var connectionPool: [String: SSHConnection] = [:]
+    /// Each host's SSH connections, keyed by "user@host:port" (see SessionManager+Connections)
+    var hostConnections: [String: [SSHConnection]] = [:]
+    /// A connection being opened to a host, for callers that need one meanwhile
+    var connectingHosts: [String: Task<SSHConnection, Error>] = [:]
 
     // MARK: - Reconnection Throttling
 
@@ -197,27 +199,7 @@ class SessionManager: ObservableObject {
     /// Returns sessions and deployer, or nil if rtach is disabled or deployment fails
     func connectAndListSessions(for config: SavedConnection) async throws -> (sessions: [RtachSession], deployer: RtachDeployer)? {
         let poolKey = connectionKey(for: config)
-
-        // Get or create SSH connection
-        let connection: SSHConnection
-        if let existing = connectionPool[poolKey], existing.isConnected {
-            Logger.clauntty.debugOnly("SessionManager: reusing existing connection for \(poolKey)")
-            connection = existing
-        } else {
-            Logger.clauntty.debugOnly("SessionManager: creating new connection for \(poolKey)")
-            connection = SSHConnection(
-                host: config.host,
-                port: config.port,
-                username: config.username,
-                authMethod: config.authMethod,
-                connectionId: config.id,
-                useTailscale: config.useTailscale,
-                proxyCommand: config.proxyCommand
-            )
-
-            try await connection.connect()
-            connectionPool[poolKey] = connection
-        }
+        let connection = try await hostConnection(for: config)
 
         guard useRtach else { return nil }
 
@@ -290,23 +272,9 @@ class SessionManager: ObservableObject {
         let config = session.connectionConfig
         let poolKey = connectionKey(for: config)
 
-        // Create a fresh SSH connection for the terminal session
-        // (The connection from connectAndListSessions may be in a bad state after exec commands)
-        Logger.clauntty.debugOnly("SessionManager: creating fresh connection for terminal session \(session.id.uuidString.prefix(8))")
-        let connection = SSHConnection(
-            host: config.host,
-            port: config.port,
-            username: config.username,
-            authMethod: config.authMethod,
-            connectionId: config.id,
-            useTailscale: config.useTailscale,
-            proxyCommand: config.proxyCommand
-        )
-        try await connection.connect()
-        Logger.clauntty.debugOnly("SessionManager: SSH connection established for \(session.id.uuidString.prefix(8))")
-
-        // Store this session's connection - don't disconnect other sessions' connections!
-        // Each session gets its own SSH connection to avoid killing other sessions' channels
+        // A channel on the host's shared connection, or a new one if it has no room
+        var connection = try await paneConnection(for: config)
+        // Uploads and image checks from this pane use it too
         session.sshConnection = connection
 
         // Build rtach command - deploy if needed
@@ -345,8 +313,9 @@ class SessionManager: ObservableObject {
                 usingRtach = true
                 Logger.clauntty.debugOnly("SessionManager: using rtach session: \(sessionId.prefix(8))...")
 
-                // Update last accessed time for this session
-                try? await deployer.updateLastAccessed(sessionId: sessionId)
+                // Update last accessed time for this session: two round trips the
+                // attach doesn't need to wait for
+                Task { try? await deployer.updateLastAccessed(sessionId: sessionId) }
             } else {
                 Logger.clauntty.warning("SessionManager: rtach not available, falling back to plain SSH (no session persistence)")
             }
@@ -354,39 +323,71 @@ class SessionManager: ObservableObject {
 
         // Create a new channel for this session with the correct terminal size
         Logger.clauntty.debugOnly("SessionManager: creating channel for \(session.id.uuidString.prefix(8)), command=\(shellCommand ?? "shell"), rtach=\(usingRtach)")
-        let (channel, handler) = try await connection.createChannel(
-            terminalSize: session.initialTerminalSize,
-            command: shellCommand,
-            onDataReceived: { [weak session] data in
-                Task { @MainActor in
-                    session?.handleDataReceived(data)
-                }
-            },
-            onChannelInactive: { [weak self, weak session] in
-                Task { @MainActor in
-                    // Only if the session is still on a dead channel: it may have been
-                    // detached already, or reconnected on a new channel since
-                    guard let session, let current = session.sshChannel, !current.isActive else { return }
-                    Logger.clauntty.debugOnly("Session \(session.id.uuidString.prefix(8)): channel became inactive, marking disconnected")
-                    let sessionGone = session.channelHandler?.exitStatus == RtachDeployer.noSessionExit
-                    session.handleChannelInactive()
-                    // Its rtach session ended (it said `ended`, or there was none to
-                    // reattach to, or the user closed it): the tab ends too, rather than
-                    // reconnecting
-                    if sessionGone || session.isClosing || session.hasEnded {
-                        session.state = .remotelyDeleted
-                        if let self, let pane = session.pane {
-                            self.paneEnded(pane.paneId, config: session.connectionConfig)
-                        }
-                        return
-                    }
-                    // The server may have closed it while the app was suspended; the close
-                    // arrives just after foregrounding, past the foreground handler's checks.
-                    // Without this the tab sits on a stale screen until the app restarts.
-                    session.onNeedsReconnect?()
-                }
+        let onData: (Data) -> Void = { [weak session] data in
+            Task { @MainActor in
+                session?.handleDataReceived(data)
             }
-        )
+        }
+        let onInactive: () -> Void = { [weak self, weak session] in
+            Task { @MainActor in
+                // Only if the session is still on a dead channel: it may have been
+                // detached already, or reconnected on a new channel since
+                guard let session, let current = session.sshChannel, !current.isActive else { return }
+                Logger.clauntty.debugOnly("Session \(session.id.uuidString.prefix(8)): channel became inactive, marking disconnected")
+                let sessionGone = session.channelHandler?.exitStatus == RtachDeployer.noSessionExit
+                session.handleChannelInactive()
+                // Its rtach session ended (it said `ended`, or there was none to
+                // reattach to, or the user closed it): the tab ends too, rather than
+                // reconnecting
+                if sessionGone || session.isClosing || session.hasEnded {
+                    session.state = .remotelyDeleted
+                    if let self, let pane = session.pane {
+                        self.paneEnded(pane.paneId, config: session.connectionConfig)
+                    }
+                    return
+                }
+                // The server may have closed it while the app was suspended; the close
+                // arrives just after foregrounding, past the foreground handler's checks.
+                // Without this the tab sits on a stale screen until the app restarts.
+                session.onNeedsReconnect?()
+            }
+        }
+        let channel: Channel
+        let handler: SSHChannelHandler
+        do {
+            (channel, handler) = try await connection.createChannel(
+                terminalSize: session.initialTerminalSize,
+                command: shellCommand,
+                onDataReceived: onData,
+                onChannelInactive: onInactive
+            )
+        } catch let error where connection.isConnected {
+            // The connection is up but refused the channel: the server allows fewer
+            // sessions per connection than we assumed (MaxSessions). On another one.
+            Logger.clauntty.warning("SessionManager: \(config.displayName) refused a channel (\(error.localizedDescription)), opening another connection")
+            connection.releasePane()
+            channelRefused(on: connection)
+            connection = try await paneConnection(for: config)
+            session.sshConnection = connection
+            do {
+                (channel, handler) = try await connection.createChannel(
+                    terminalSize: session.initialTerminalSize,
+                    command: shellCommand,
+                    onDataReceived: onData,
+                    onChannelInactive: onInactive
+                )
+            } catch {
+                connection.releasePane()
+                throw error
+            }
+        } catch {
+            connection.releasePane()
+            throw error
+        }
+        // The pane's place on the connection is the channel's now, until it closes
+        channel.closeFuture.whenComplete { [connection] _ in
+            Task { @MainActor in connection.releasePane() }
+        }
         Logger.clauntty.debugOnly("SessionManager: channel created for \(session.id.uuidString.prefix(8))")
 
         session.attach(channel: channel, handler: handler, connection: connection, expectsRtach: usingRtach)
@@ -423,8 +424,9 @@ class SessionManager: ObservableObject {
         // Wire up auto-reconnect callback for when send detects nil channel
         session.onNeedsReconnect = { [weak self, weak session] in
             guard let self = self, let session = session else { return }
-            // Only auto-reconnect if this is the active session
-            guard self.activeTab == .terminal(session.id) else {
+            // Only the tab you're in, and the panes on screen beside it in a split (on a
+            // shared connection they drop together)
+            guard self.activeTab == .terminal(session.id) || self.shownTogether.contains(session.id) else {
                 Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) needs reconnect but is not active, skipping auto-reconnect")
                 return
             }
@@ -493,17 +495,7 @@ class SessionManager: ObservableObject {
 
         if rtachDeployers[poolKey] == nil {
             // Need to reconnect SSH and redeploy rtach
-            let connection = SSHConnection(
-                host: config.host,
-                port: config.port,
-                username: config.username,
-                authMethod: config.authMethod,
-                connectionId: config.id,
-                useTailscale: config.useTailscale,
-                proxyCommand: config.proxyCommand
-            )
-            try await connection.connect()
-            connectionPool[poolKey] = connection
+            let connection = try await hostConnection(for: config)
 
             let deployer = RtachDeployer(connection: connection)
             try await deployer.ensureDeployed()
@@ -549,21 +541,17 @@ class SessionManager: ObservableObject {
     /// Push notifications were turned on or off, or the phone got its key: tell each
     /// connected host (new connections get it when rtach is deployed)
     func updatePushFiles() {
-        var connections: [ObjectIdentifier: SSHConnection] = [:]
-        for connection in sessions.compactMap(\.sshConnection) + Array(connectionPool.values)
-        where connection.isConnected {
-            connections[ObjectIdentifier(connection)] = connection
-        }
-        for connection in connections.values {
+        // One connection per host is enough: they all reach the same files
+        for connections in hostConnections.values {
+            guard let connection = connections.first(where: \.isConnected) else { continue }
             Task { await RtachDeployer(connection: connection).updatePushFile() }
         }
     }
 
     private func runConnectionCheck(reason: String) async {
-        // Each tab has its own connection; the pool holds the ones for listing and deploys
+        // Each host's connections, shared by its panes, commands and forwards
         var connections: [ObjectIdentifier: SSHConnection] = [:]
-        for connection in sessions.compactMap(\.sshConnection) + Array(connectionPool.values)
-        where connection.isConnected {
+        for connection in allConnections {
             connections[ObjectIdentifier(connection)] = connection
         }
         Logger.clauntty.debugOnly("SessionManager: checking \(connections.count) connection(s) (\(reason))")
@@ -583,11 +571,8 @@ class SessionManager: ObservableObject {
         for connection in dead {
             Logger.clauntty.warning("SessionManager: connection to \(connection.host) stopped responding, closing it")
             TailscaleDebugLog.note("connection to \(connection.host) stopped responding, closing it")
-            let attached = sessions.filter { $0.sshConnection === connection }
-            connection.disconnect()
-            for session in attached {
-                session.handleChannelInactive()
-            }
+            // The active tab reconnects below
+            dropConnection(connection, reconnect: false)
         }
         // A live connection with nothing to send (an idle prompt) never ends the resuming
         // overlay with data, so the answered probe does
@@ -595,7 +580,7 @@ class SessionManager: ObservableObject {
             session.endResuming()
         }
         // Drop anything built on a closed connection so the next use connects afresh
-        connectionPool = connectionPool.filter { $0.value.isConnected }
+        hostConnections = hostConnections.mapValues { $0.filter(\.isConnected) }
         rtachDeployers = rtachDeployers.filter { $0.value.connection.isConnected }
         TailscaleDebugLog.note("check done: \(connections.count - dead.count) responsive, \(dead.count) closed")
 
@@ -677,33 +662,17 @@ class SessionManager: ObservableObject {
         }
 
         // Check if connection should be closed (no more sessions using it)
-        cleanupUnusedConnections()
+        closeIdleConnections()
     }
 
     /// Kill an rtach session on the remote server
     private func killRtachSession(sessionId: String, config: SavedConnection) async {
-        let poolKey = connectionKey(for: config)
-
-        // Try to reuse existing connection, or create a new one just for the kill
         let connection: SSHConnection
-        if let existing = connectionPool[poolKey], existing.isConnected {
-            connection = existing
-        } else {
-            connection = SSHConnection(
-                host: config.host,
-                port: config.port,
-                username: config.username,
-                authMethod: config.authMethod,
-                connectionId: config.id,
-                useTailscale: config.useTailscale,
-                proxyCommand: config.proxyCommand
-            )
-            do {
-                try await connection.connect()
-            } catch {
-                Logger.clauntty.error("SessionManager: failed to connect for session kill: \(error.localizedDescription)")
-                return
-            }
+        do {
+            connection = try await hostConnection(for: config)
+        } catch {
+            Logger.clauntty.error("SessionManager: failed to connect for session kill: \(error.localizedDescription)")
+            return
         }
 
         let deployer = RtachDeployer(connection: connection)
@@ -773,52 +742,22 @@ class SessionManager: ObservableObject {
         activeSessionId = nil
 
         // Close all connections
-        for (_, connection) in connectionPool {
+        for connection in allConnections {
             connection.disconnect()
         }
-        connectionPool.removeAll()
+        hostConnections.removeAll()
     }
 
     // MARK: - Connection Pooling
 
-    /// The pooled SSH connection to the machine, connecting if there isn't a live one
+    /// The machine's shared SSH connection, connecting if there isn't a live one
     func pooledConnection(for config: SavedConnection) async throws -> SSHConnection {
-        let poolKey = connectionKey(for: config)
-        if let existing = connectionPool[poolKey], existing.isConnected {
-            return existing
-        }
-        let connection = SSHConnection(
-            host: config.host,
-            port: config.port,
-            username: config.username,
-            authMethod: config.authMethod,
-            connectionId: config.id,
-            useTailscale: config.useTailscale,
-            proxyCommand: config.proxyCommand
-        )
-        try await connection.connect()
-        connectionPool[poolKey] = connection
-        return connection
+        try await hostConnection(for: config)
     }
 
     /// Generate pool key for a connection config
     func connectionKey(for config: SavedConnection) -> String {
         return "\(config.username)@\(config.host):\(config.port)"
-    }
-
-    /// Clean up connections that have no active sessions
-    private func cleanupUnusedConnections() {
-        // Get all pool keys that have active sessions
-        let activeKeys = Set(sessions.map { connectionKey(for: $0.connectionConfig) })
-
-        // Close connections not in use
-        for (key, connection) in connectionPool {
-            if !activeKeys.contains(key) {
-                Logger.clauntty.debugOnly("SessionManager: closing unused connection \(key)")
-                connection.disconnect()
-                connectionPool.removeValue(forKey: key)
-            }
-        }
     }
 
     /// Get the number of sessions using a particular connection
@@ -843,9 +782,7 @@ class SessionManager: ObservableObject {
 
     /// Scan for listening ports on a connection
     func scanPorts(for config: SavedConnection) async throws -> [RemotePort] {
-        let poolKey = connectionKey(for: config)
-
-        guard let connection = connectionPool[poolKey], connection.isConnected else {
+        guard let connection = liveConnection(for: config) else {
             throw SessionError.notConnected
         }
 
@@ -934,7 +871,7 @@ class SessionManager: ObservableObject {
         // Persist web tabs
         saveWebTabPersistence()
 
-        cleanupUnusedConnections()
+        closeIdleConnections()
     }
 
     /// Switch to a web tab
@@ -974,29 +911,9 @@ class SessionManager: ObservableObject {
 
     func reconnectWebTab(_ webTab: WebTab) async throws {
         let config = webTab.connectionConfig
-        let poolKey = connectionKey(for: config)
 
         Logger.clauntty.debugOnly("SessionManager: reconnecting web tab for port \(webTab.remotePort.port)")
-
-        // Get or create connection
-        let connection: SSHConnection
-        if let existing = connectionPool[poolKey], existing.isConnected {
-            Logger.clauntty.debugOnly("SessionManager: reusing existing connection for web tab")
-            connection = existing
-        } else {
-            Logger.clauntty.debugOnly("SessionManager: creating new connection for web tab")
-            connection = SSHConnection(
-                host: config.host,
-                port: config.port,
-                username: config.username,
-                authMethod: config.authMethod,
-                connectionId: config.id,
-                useTailscale: config.useTailscale,
-                proxyCommand: config.proxyCommand
-            )
-            try await connection.connect()
-            connectionPool[poolKey] = connection
-        }
+        let connection = try await hostConnection(for: config)
 
         // Reconnect the web tab with this connection
         try await webTab.reconnect(with: connection)
@@ -1549,7 +1466,7 @@ class SessionManager: ObservableObject {
             closeWebTab(webTab)
         }
 
-        cleanupUnusedConnections()
+        closeIdleConnections()
     }
 
     /// Check if a port is being forwarded (either background or via web tab)
@@ -1620,7 +1537,7 @@ class SessionManager: ObservableObject {
             return Machine(
                 id: key,
                 config: config,
-                isConnected: hasConnectedTab || connectionPool[key]?.isConnected == true,
+                isConnected: hasConnectedTab || liveConnection(for: config) != nil,
                 forwardedPorts: forwardedPorts(on: config)
             )
         }
@@ -1638,18 +1555,9 @@ class SessionManager: ObservableObject {
         return webTabs.filter { connectionKey(for: $0.connectionConfig) == key }
     }
 
-    /// An open SSH connection to the machine, from a connected tab or the pool
+    /// An open SSH connection to the machine, if there is one
     func sshConnection(for config: SavedConnection) -> SSHConnection? {
-        let key = connectionKey(for: config)
-        if let connection = sessions.first(where: {
-            connectionKey(for: $0.connectionConfig) == key && $0.sshConnection?.isConnected == true
-        })?.sshConnection {
-            return connection
-        }
-        if let pooled = connectionPool[key], pooled.isConnected {
-            return pooled
-        }
-        return nil
+        liveConnection(for: config)
     }
 
     // MARK: - Tab Persistence

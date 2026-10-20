@@ -226,8 +226,8 @@ class Session: ObservableObject, Identifiable {
     /// Reference to parent connection (for sending data)
     weak var parentConnection: SSHConnection?
 
-    /// Strong reference to SSH connection - each session owns its connection
-    /// This keeps the connection alive for the lifetime of the session
+    /// The host's SSH connection this pane's channel is on (shared with its other panes;
+    /// SessionManager.hostConnections owns it)
     var sshConnection: SSHConnection?
 
     // MARK: - Terminal Size
@@ -489,8 +489,9 @@ class Session: ObservableObject, Identifiable {
         inactivityTimer?.invalidate()
         inactivityTimer = nil
 
-        // Disconnect our SSH connection
-        sshConnection?.disconnect()
+        // Close this pane's channel: the SSH connection is the host's, shared with its
+        // other panes
+        sshChannel?.close(promise: nil)
         sshConnection = nil
         sshChannel = nil
         channelHandler = nil

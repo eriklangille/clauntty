@@ -40,8 +40,6 @@ class SSHConnection: ObservableObject {
     // MARK: - NIO Components
 
     private var channel: Channel?
-    private var sshChildChannel: Channel?
-    private var channelHandler: SSHChannelHandler?
     #if os(macOS)
     /// The running ProxyCommand, if the connection goes through one
     private var proxyProcess: ProxyCommandProcess?
@@ -53,6 +51,22 @@ class SSHConnection: ObservableObject {
     /// Server accepted our auth; a banner arriving after this is stale
     private var authSucceeded = false
 
+    /// Panes the server allowed on this connection before it refused another channel
+    /// (fewer sessions per connection than SessionManager assumes); nil until then
+    var paneLimit: Int?
+
+    /// Pane channels on this connection, open or about to open: a pane takes its place
+    /// when the connection is chosen for it and gives it back when its channel closes
+    private(set) var paneChannels = 0
+
+    func reservePane() {
+        paneChannels += 1
+    }
+
+    func releasePane() {
+        paneChannels = max(paneChannels - 1, 0)
+    }
+
     /// Expose event loop group for port forwarding
     /// Uses the global singleton - never creates/destroys threads on reconnect
     var nioEventLoopGroup: EventLoopGroup { MultiThreadedEventLoopGroup.singleton }
@@ -61,9 +75,6 @@ class SSHConnection: ObservableObject {
     var nioChannel: Channel? { channel }
 
     // MARK: - Data Flow Callbacks
-
-    /// Called when data is received from SSH (to display in terminal)
-    var onDataReceived: ((Data) -> Void)?
 
     /// Callback when connected
     var onConnected: (() -> Void)?
@@ -169,11 +180,14 @@ class SSHConnection: ObservableObject {
 
             state = .authenticating
 
-            // Create SSH channel for PTY
-            try await createPTYChannel()
+            // Authentication finishes with the first channel: a round trip that opens one
+            // and closes it again. The connection only carries channels (each pane's, and
+            // commands); it used to open a login shell here that nothing read, a `login`
+            // and a shell left on the host per connection.
+            try await openAndCloseChannel()
 
             state = .connected
-            Logger.clauntty.debugOnly("SSH connected and shell ready")
+            Logger.clauntty.debugOnly("SSH connected")
             onConnected?()
 
         } catch {
@@ -205,62 +219,23 @@ class SSHConnection: ObservableObject {
         SSHAuthPrompts.shared.resolve(self)
     }
 
-    private func createPTYChannel() async throws {
-        Logger.clauntty.debugOnly("SSH: createPTYChannel starting...")
+    /// Open a session channel and close it, so connect() returns once the server has
+    /// accepted us (a failed authentication fails here)
+    private func openAndCloseChannel() async throws {
         guard let channel = self.channel else {
             throw SSHError.notConnected
         }
-
-        // Capture callback for closure
-        let onDataReceived = self.onDataReceived
-
-        // Create channel handler
-        let handler = SSHChannelHandler(onDataReceived: onDataReceived)
-        self.channelHandler = handler
-
-        // Create child channel for PTY session
-        Logger.clauntty.debugOnly("SSH: getting NIOSSHHandler from pipeline...")
-        let childChannel = try await channel.pipeline.handler(type: NIOSSHHandler.self).flatMap { sshHandler -> EventLoopFuture<Channel> in
-            Logger.clauntty.debugOnly("SSH: got handler, creating channel...")
+        let probe = try await channel.pipeline.handler(type: NIOSSHHandler.self).flatMap { sshHandler -> EventLoopFuture<Channel> in
             let promise = channel.eventLoop.makePromise(of: Channel.self)
-
             sshHandler.createChannel(promise) { childChannel, channelType in
-                Logger.clauntty.debugOnly("SSH: channel callback, type=\(String(describing: channelType))")
                 guard channelType == .session else {
                     return channel.eventLoop.makeFailedFuture(SSHError.invalidChannelType)
                 }
-                return childChannel.pipeline.addHandler(handler)
+                return childChannel.eventLoop.makeSucceededVoidFuture()
             }
-
             return promise.futureResult
         }.get()
-        Logger.clauntty.debugOnly("SSH: child channel created")
-
-        self.sshChildChannel = childChannel
-
-        // Request PTY
-        let ptyRequest = SSHChannelRequestEvent.PseudoTerminalRequest(
-            wantReply: true,
-            term: "xterm-256color",
-            terminalCharacterWidth: 80,
-            terminalRowHeight: 24,
-            terminalPixelWidth: 0,
-            terminalPixelHeight: 0,
-            terminalModes: .init([:])
-        )
-
-        try await childChannel.triggerUserOutboundEvent(ptyRequest).get()
-        Logger.clauntty.debugOnly("SSH PTY requested")
-
-        // Request shell
-        let shellRequest = SSHChannelRequestEvent.ShellRequest(wantReply: true)
-        try await childChannel.triggerUserOutboundEvent(shellRequest).get()
-        Logger.clauntty.debugOnly("SSH shell started")
-    }
-
-    /// Send data to the remote SSH server (e.g., keyboard input)
-    func sendData(_ data: Data) {
-        channelHandler?.sendToRemote(data)
+        probe.close(promise: nil)
     }
 
     /// Check if connection is still active
@@ -297,7 +272,9 @@ class SSHConnection: ObservableObject {
                     probeChannel.close(promise: nil)
                     answered.succeed(true)
                 case .failure:
-                    answered.succeed(false)
+                    // Refused (a connection at the server's MaxSessions) is an answer too;
+                    // a connection that's gone is inactive by now
+                    answered.succeed(channel.isActive)
                 }
             }
         }
@@ -527,33 +504,10 @@ class SSHConnection: ObservableObject {
         return platform
     }
 
-    /// Send terminal window size change to SSH server
-    func sendWindowChange(rows: UInt16, columns: UInt16) {
-        guard let childChannel = sshChildChannel else {
-            Logger.clauntty.warning("Cannot send window change: no SSH channel")
-            return
-        }
-
-        let windowChange = SSHChannelRequestEvent.WindowChangeRequest(
-            terminalCharacterWidth: Int(columns),
-            terminalRowHeight: Int(rows),
-            terminalPixelWidth: 0,
-            terminalPixelHeight: 0
-        )
-
-        // Must execute on event loop
-        childChannel.eventLoop.execute {
-            childChannel.triggerUserOutboundEvent(windowChange, promise: nil)
-            Logger.clauntty.debugOnly("SSH window change sent: \(columns)x\(rows)")
-        }
-    }
-
     func disconnect() {
         Logger.clauntty.debugOnly("SSH disconnecting")
         channel?.close(mode: .all, promise: nil)
         channel = nil
-        sshChildChannel = nil
-        channelHandler = nil
         #if os(macOS)
         proxyProcess?.terminate()
         proxyProcess = nil
