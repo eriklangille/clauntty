@@ -80,7 +80,9 @@ enum ClaudeScripts {
           [ -n "$sid" ] || continue
           for t in "$HOME"/.claude/projects/*/"$sid".jsonl; do
             [ -f "$t" ] || continue
-            grep -F '"type":"ai-title"' "$t" | tail -n 1 | awk -v sid="$sid" '
+            # Claude writes its title again every so often: the end of a long file has it,
+            # where searching all of it took seconds
+            tail -c 2000000 "$t" | grep -F '"type":"ai-title"' | tail -n 1 | awk -v sid="$sid" '
         \#(grab)
             { t = grab("aiTitle"); if (t != "") print "title\t" sid "\t" t }'
           done

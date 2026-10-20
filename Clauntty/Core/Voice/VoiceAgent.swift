@@ -317,7 +317,7 @@ final class VoiceAgent: ObservableObject {
                 phase = .listening
             }
             // Greet first. This may also cover xAI's slow first turn (5s in the first test); unconfirmed
-            say("[Clauntty: the voice session just started. Greet the user in a few words and ask what they need.]")
+            say("[Clauntty: the voice session just started. Say only \"Hello?\" or \"Hey\", nothing more.]")
 
         case "input_audio_buffer.speech_started":
             // Barge-in: stop playing what the model was saying
