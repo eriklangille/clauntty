@@ -692,7 +692,9 @@ class Session: ObservableObject, Identifiable {
     /// Process terminal data (forward to terminal and track scrollback)
     private func processTerminalData(_ data: Data) {
         var data = data
-        if resetBeforeReplay {
+        // rtach's own output: anything before its handshake (through Tailscale SSH,
+        // `login` can print first) used up this check and missed the alternate screen
+        if resetBeforeReplay, rtachProtocol.isFramedMode {
             resetBeforeReplay = false
             // A full reset (ESC c) clears the screen and scrollback, in the same write as
             // the replay so nothing draws in between. Older history pages in on scroll.
@@ -702,6 +704,7 @@ class Session: ObservableObject, Identifiable {
             // for a real size change (Node ignores a SIGWINCH at the same size)
             if data.range(of: Self.altScreenEnter) != nil {
                 forceRemoteRepaint()
+                nudgedSinceAttach = true
             }
         }
         if settling {
@@ -730,6 +733,8 @@ class Session: ObservableObject, Identifiable {
     private var nudgeRestored = false
     /// The real size while the nudge has the remote one row short
     private var nudgedSize: (rows: UInt16, columns: UInt16)?
+    /// The repaint nudge went out for this attach
+    private var nudgedSinceAttach = false
     /// No more output for this long: it has settled
     private static let settleQuiet: TimeInterval = 0.05
     /// Held no longer than this after the attach, however busy the program
@@ -738,6 +743,7 @@ class Session: ObservableObject, Identifiable {
     private func beginSettling() {
         settleTimer?.cancel()
         settling = true
+        nudgedSinceAttach = false
         awaitingRedraw = false
         settleHeld = Data()
         settleDeadline = Date().addingTimeInterval(Self.settleLimit)
@@ -767,7 +773,8 @@ class Session: ObservableObject, Identifiable {
         guard settling else { return }
         settling = false
         // The program didn't redraw after the nudge: once more, or the pane stays blank
-        let missedRedraw = awaitingRedraw
+        // Or it's on the alternate screen and no nudge went out at all
+        let missedRedraw = awaitingRedraw || (!nudgedSinceAttach && settleHeld.range(of: Self.altScreenEnter) != nil)
         awaitingRedraw = false
         let held = settleHeld
         settleHeld = Data()
