@@ -115,11 +115,8 @@ struct PaneSwitcher: View {
                     .lineLimit(1)
             }
             Spacer()
-            if !item.status.label.isEmpty {
-                Text(item.status.label)
-                    .font(.caption)
-                    .foregroundStyle(item.status.color)
-            } else if item.isShown {
+            // The status is the glyph's
+            if item.isShown {
                 Text("Shown")
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -139,11 +139,6 @@ struct PaneHeader: View {
                     .foregroundStyle(active ? .primary : .secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if !pane.status.label.isEmpty {
-                    Text(pane.status.label)
-                        .font(.caption)
-                        .foregroundStyle(pane.status.color)
-                }
             }
             // Clicks go through to the drag area behind
             .allowsHitTesting(false)
