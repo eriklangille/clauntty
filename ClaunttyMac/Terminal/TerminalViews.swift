@@ -63,6 +63,14 @@ final class TerminalViews {
         window.makeFirstResponder(view)
     }
 
+    /// Where the session's pane is in its window, from the top left, if it's on screen
+    func frameInWindow(of sessionId: UUID) -> CGRect? {
+        guard let pane = views[sessionId]?.view.superview, let window = pane.window,
+              let height = window.contentView?.bounds.height else { return nil }
+        let rect = pane.convert(pane.bounds, to: nil)
+        return CGRect(x: rect.minX, y: height - rect.maxY, width: rect.width, height: rect.height)
+    }
+
     /// Show the session in `container`, unless a newer container shows it. Returns its view.
     @discardableResult
     func show(_ session: Session, in container: NSView) -> MacTerminalView {

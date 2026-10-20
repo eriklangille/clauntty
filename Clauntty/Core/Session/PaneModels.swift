@@ -155,4 +155,6 @@ struct ImageViewerContent: Identifiable {
     var items: [Item]
     /// Page to show; set when more images arrive while the viewer is open
     var selection = 0
+    /// The session that ran `clauntty show`: the Mac opens the viewer out of its pane
+    var source: UUID?
 }

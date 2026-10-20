@@ -35,7 +35,7 @@ struct MainView: View {
             }
         }
         .overlay {
-            ImageViewer(content: $sessionManager.imageViewer)
+            ImageViewer(content: $sessionManager.imageViewer) { views.frameInWindow(of: $0) }
         }
         // Closed: typing goes back to the pane you're in
         .onChange(of: window.switcherShown) { _, shown in

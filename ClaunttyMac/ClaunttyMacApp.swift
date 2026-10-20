@@ -54,13 +54,22 @@ struct ClaunttyMacApp: App {
                     .keyboardShortcut("s", modifiers: [.command, .control])
             }
             CommandGroup(after: .toolbar) {
-                Button("Bigger") { ghostty.terminalViews?.adjustFontSize(by: 1) }
+                Button(sessionManager.imageViewer == nil ? "Bigger" : "Zoom In") { zoom(by: 1) }
                     .keyboardShortcut("=")
-                Button("Smaller") { ghostty.terminalViews?.adjustFontSize(by: -1) }
+                Button(sessionManager.imageViewer == nil ? "Smaller" : "Zoom Out") { zoom(by: -1) }
                     .keyboardShortcut("-")
-                Button("Actual Size") { ghostty.terminalViews?.adjustFontSize(by: nil) }
+                Button(sessionManager.imageViewer == nil ? "Actual Size" : "Fit Image") { zoom(by: nil) }
                     .keyboardShortcut("0")
             }
+        }
+    }
+
+    /// The image shown, if the viewer is open, else the terminals' font
+    private func zoom(by step: Float?) {
+        if sessionManager.imageViewer != nil {
+            NotificationCenter.default.post(name: ImageViewer.zoomCommand, object: step.map { NSNumber(value: $0) })
+        } else {
+            ghostty.terminalViews?.adjustFontSize(by: step)
         }
     }
 

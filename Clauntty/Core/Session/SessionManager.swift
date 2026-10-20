@@ -1388,7 +1388,7 @@ class SessionManager: ObservableObject {
                 current.items += images
                 imageViewer = current
             } else {
-                imageViewer = ImageViewerContent(host: host, items: images)
+                imageViewer = ImageViewerContent(host: host, items: images, source: source.id)
             }
             #if os(iOS)
             if away {
