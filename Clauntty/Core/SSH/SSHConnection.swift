@@ -327,22 +327,27 @@ class SSHConnection: ObservableObject {
         )
 
         Logger.clauntty.debugOnly("SSH PTY request: \(terminalSize.columns)x\(terminalSize.rows)")
-        try await childChannel.triggerUserOutboundEvent(ptyRequest).get()
-
+        // Both requests go out together and are answered in order: waiting for the PTY's
+        // reply before asking for the command cost a round trip on every attach
+        let ptyReplied = childChannel.eventLoop.makePromise(of: Void.self)
+        let started = childChannel.eventLoop.makePromise(of: Void.self)
+        childChannel.triggerUserOutboundEvent(ptyRequest, promise: ptyReplied)
         if let command = command {
             // Execute specific command (e.g., rtach-wrapped shell)
             let execRequest = SSHChannelRequestEvent.ExecRequest(
                 command: command,
                 wantReply: true
             )
-            try await childChannel.triggerUserOutboundEvent(execRequest).get()
+            childChannel.triggerUserOutboundEvent(execRequest, promise: started)
             Logger.clauntty.debugOnly("SSH exec: \(command)")
         } else {
             // Request interactive shell
             let shellRequest = SSHChannelRequestEvent.ShellRequest(wantReply: true)
-            try await childChannel.triggerUserOutboundEvent(shellRequest).get()
+            childChannel.triggerUserOutboundEvent(shellRequest, promise: started)
             Logger.clauntty.debugOnly("SSH shell started")
         }
+        try await ptyReplied.futureResult.get()
+        try await started.futureResult.get()
 
         Logger.clauntty.debugOnly("SSH channel created")
         return (childChannel, handler)
