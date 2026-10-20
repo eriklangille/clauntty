@@ -208,12 +208,6 @@ struct TerminalView: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .captureTabThumbnail)) { _ in
-            // The tab selector is about to open; without this the current tab only has a
-            // preview from the last time it was switched away from (none after a relaunch)
-            guard isActive, let surface = surfaceHolder.surface else { return }
-            session.cachedScreenshot = surface.captureScreenshot()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .captureTerminalText)) { note in
             // Only capture if this is the active terminal
             guard isActive, let surface = surfaceHolder.surface else { return }
@@ -231,11 +225,6 @@ struct TerminalView: View {
             // during a SwiftUI update, and changing the first responder there re-enters the graph.
             if let surface = surfaceHolder.surface {
                 surface.scheduleSetActive(nowActive, force: true)
-            }
-
-            // Capture screenshot when switching away from this tab
-            if wasActive && !nowActive, let surface = surfaceHolder.surface {
-                session.cachedScreenshot = surface.captureScreenshot()
             }
         }
     }

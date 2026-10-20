@@ -67,26 +67,10 @@ struct WebTabView: View {
                 NotificationCenter.default.post(name: .hideAllAccessoryBars, object: nil)
             }
         }
-        .onChange(of: isActive) { wasActive, nowActive in
+        .onChange(of: isActive) { _, nowActive in
             // Hide all terminal accessory bars when web tab becomes active
             if nowActive {
                 NotificationCenter.default.post(name: .hideAllAccessoryBars, object: nil)
-            }
-            // Capture screenshot when switching away from this tab
-            if wasActive && !nowActive {
-                captureScreenshot()
-            }
-        }
-    }
-
-    /// Capture screenshot of the web view for tab selector
-    private func captureScreenshot() {
-        guard let webView = webView else { return }
-
-        Task {
-            let config = WKSnapshotConfiguration()
-            if let screenshot = try? await webView.takeSnapshot(configuration: config) {
-                webTab.cachedScreenshot = screenshot
             }
         }
     }

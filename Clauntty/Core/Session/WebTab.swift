@@ -42,9 +42,6 @@ class WebTab: ObservableObject, Identifiable {
 
     @Published var state: State = .connecting
 
-    /// Cached screenshot for tab selector (captured when switching away)
-    var cachedScreenshot: PlatformImage?
-
     /// The actual local port (may differ from requested if using port 0)
     @Published private(set) var localPort: Int
 

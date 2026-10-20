@@ -116,8 +116,12 @@ running the app in the simulator against the test container (see SSH Testing).
 CoreSimulator is out of date. Run `sudo xcodebuild -runFirstLaunch` in a real terminal on the Mac (over
 SSH, `ssh -t`). It asks for a password, so `!` in Claude Code can't run it.
 
+**Agent view** (`AgentSwitcherView`) is the phone's only layout: one window per workspace, drawn as
+its terminal under a glass pill (status glyph, title, pane dots). Tap one to type into it; swipe it to
+switch panes; fullscreen it to work. (The old tab bar was removed on 2026-10-20.)
+
 **Workspace tabs:** with rtach, every terminal tab is an rtach workspace (`rtach ws`): a `SessionGroup`
-in `SessionManager+Groups.swift`, its panes the dots, swipes and menu sections. A new tab is `ws new` in
+in `SessionManager+Groups.swift`, its panes the window's dots, swipes and menu sections. A new tab is `ws new` in
 `~`; Close is `ws end` (asks first with several panes); sessions in no workspace are adopted with
 `ws add` when a host syncs. The app refreshes `rtach ws list --json` when a host deploys, on foreground,
 when a tab's menu opens and when rtach sends `workspace;…` (a `rtach ws` change from a terminal or an
@@ -126,8 +130,7 @@ keep one order on the host (`ws reorder`): `followHostOrder` puts a host's tabs 
 they have in `tabOrder` (other hosts' tabs and pages stay local), and a drag sends `ws reorder` once it
 settles (`moveWorkspaceOnHost`). A new tab goes after the one you're in (`ws new --after`). Plain tabs only exist
 with rtach turned off. To try it in the simulator, run `rtach ws new demo` and `rtach ws split -v` in a tab on the
-test container, then open the tab's menu. Fake panes for every terminal tab, without a host:
-`xcrun simctl spawn booted defaults write com.octerm.clauntty fakeTabPanes -bool YES` (`NO` to turn off).
+test container, then open the window's menu.
 
 **Voice in agent view:** the pane the voice agent is looking at (`VoiceAgent.lookingAt`, its last
 tool call's pane) has its eyes (`VoiceEyes`) in its window's pill, looking down, and on the rail,

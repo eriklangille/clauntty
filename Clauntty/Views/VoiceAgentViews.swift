@@ -1,112 +1,26 @@
 import SwiftUI
 
-// MARK: - Session Panel
-
-/// Drops down from the voice pill: state, time left, cost, the recent conversation
-/// and an End button. After a session it shows how it ended and what it cost.
-struct VoicePanelView: View {
-    @ObservedObject var agent = VoiceAgent.shared
-
-    private var stateText: String {
-        switch agent.phase {
-        case .idle: return "Voice agent"
-        case .connecting: return "Connecting…"
-        case .listening: return "Listening"
-        case .thinking: return "Thinking…"
-        case .speaking: return "Speaking"
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: "waveform")
-                    .foregroundStyle(agent.isActive ? .green : .secondary)
-                Text(stateText)
-                    .font(.headline)
-                Spacer()
-                if agent.isActive {
-                    Text("\(voiceClockText(agent.remaining)) left")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if agent.isActive {
-                costLine(agent.cost)
-            } else if let last = agent.lastSession {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Last session: \(last.cost.dollarsText) · \(last.cost.breakdownText)")
-                        .font(.subheadline.monospacedDigit())
-                    Text(last.reason)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if !agent.log.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(agent.log.suffix(6)) { entry in
-                        VoiceLogRow(entry: entry, limited: true)
-                    }
-                }
-                .padding(.top, 2)
-            }
-
-            if agent.isActive {
-                Button(role: .destructive) {
-                    agent.end(reason: "Ended")
-                } label: {
-                    Text("End")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .padding(.top, 4)
-            }
-        }
-        .padding(16)
-        // Opaque: terminal text behind a material made it hard to read
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color(.separator), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
-        .padding(.horizontal, 8)
-    }
-
-    private func costLine(_ cost: VoiceCost) -> some View {
-        Text("~\(cost.dollarsText) · \(cost.breakdownText)")
-            .font(.subheadline.monospacedDigit())
-            .foregroundStyle(.secondary)
-    }
-}
-
 /// A line of the conversation: what you said, what Grok said, what it did, or a note
 struct VoiceLogRow: View {
     let entry: VoiceAgent.LogEntry
-    /// A few lines each, in the drop-down panel
-    var limited = false
 
     var body: some View {
         switch entry.kind {
         case .user:
             (Text("You  ").bold() + Text(entry.text))
                 .font(.subheadline)
-                .lineLimit(limited ? 3 : nil)
         case .agent:
             (Text("Grok  ").bold() + Text(entry.text))
                 .font(.subheadline)
-                .lineLimit(limited ? 4 : nil)
         case .tool:
             Text("· \(entry.text)")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .lineLimit(limited ? 1 : 2)
+                .lineLimit(2)
         case .system:
             Text(entry.text)
                 .font(.footnote)
                 .foregroundStyle(.orange)
-                .lineLimit(limited ? 2 : nil)
         }
     }
 }

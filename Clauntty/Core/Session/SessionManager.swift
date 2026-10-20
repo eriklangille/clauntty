@@ -637,7 +637,6 @@ class SessionManager: ObservableObject {
         // reappeared on the next launch
         sessions.removeAll { $0.id == session.id }
         removePersistedTab(session.id)
-        TabThumbnailStore.save(nil, id: session.id)
 
         // Remove from global tab order
         tabOrder.removeAll { $0 == session.id }
@@ -1283,15 +1282,9 @@ class SessionManager: ObservableObject {
         Logger.clauntty.debugOnly("SessionManager: showing \(images.count) image(s) from \(host)")
         let away = !PlatformApp.isActive
 
-        #if os(macOS)
-        // With their workspace: the viewer opens over it when it's shown, and they wait
-        // there otherwise, so one workspace's images don't cover another's
-        let perWindow = true
-        #else
-        let perWindow = UserDefaults.standard.bool(forKey: "agentMode")
-        #endif
-        if perWindow, windows.allSatisfy({ $0 != nil }) {
-            // On the phone, in the corner of each image's window; nothing opens by itself
+        // With their workspace: on the phone in the corner of its window, where nothing opens
+        // by itself; on the Mac over the workspace when it's shown, waiting there otherwise
+        if windows.allSatisfy({ $0 != nil }) {
             for window in Set(windows.compactMap { $0 }) {
                 let added = zip(images, windows).filter { $0.1 == window }.map(\.0)
                 let pane = zip(panes, windows).first { $0.1 == window }?.0

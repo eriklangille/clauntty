@@ -7,115 +7,23 @@ struct ContentView: View {
   @EnvironmentObject var sessionManager: SessionManager
 
   @State private var showingNewTabSheet = false
-  @State private var showingFullTabSelector = false
-  /// Settings → Agent Mode: the agent switcher instead of the tab bar
-  @AppStorage("agentMode") private var agentMode = false
   /// Debug: the voice button starts a pretend session (no xAI), to work on its look
   @AppStorage("fakeVoice") private var fakeVoice = false
   @State private var portsSheetSession: Session?
   @State private var hasCheckedAutoConnect = false
   @State private var showingSpeechModelDownload = false
-  @State private var showingVoicePanel = false
+  @State private var showingVoiceSession = false
   @State private var showingVoiceSettings = false
 
   var body: some View {
     NavigationStack {
       if sessionManager.hasSessions {
-        Group {
-        if agentMode {
-          // Agent mode: the switcher replaces the tab bar and the tabs
-          AgentSwitcherView(
-            onNewTab: { showingNewTabSheet = true },
-            onVoice: handleVoiceTapped,
-            onPorts: { session in portsSheetSession = session }
-          )
-        } else {
-        // Show tabs + content when there are active sessions or web tabs
-        // Tab bar overlays terminal content with transparent background
-        GeometryReader { geometry in
-          ZStack(alignment: .top) {
-            // Terminal tabs (full screen, with top padding for tab bar)
-            ForEach(sessionManager.sessions) { session in
-              let tab = SessionManager.ActiveTab.terminal(session.id)
-              let isActive = sessionManager.activeTab == tab
-
-              TerminalView(session: session, isTabSelectorPresented: showingFullTabSelector)
-                .safeAreaInset(edge: .top) {
-                  Color.clear.frame(height: 48)  // Tab bar height
-                }
-                .offset(x: isActive ? 0 : geometry.size.width)
-                .opacity(isActive ? 1 : 0)
-                .allowsHitTesting(isActive)
-                .transition(.identity)
-                .animation(nil, value: sessionManager.sessions.count)
-                .animation(nil, value: sessionManager.activeTab)
-            }
-
-            // Web tabs (full screen, with top padding for tab bar)
-            ForEach(sessionManager.webTabs) { webTab in
-              let tab = SessionManager.ActiveTab.web(webTab.id)
-              let isActive = sessionManager.activeTab == tab
-
-              WebTabView(webTab: webTab)
-                .safeAreaInset(edge: .top) {
-                  Color.clear.frame(height: 48)  // Tab bar height
-                }
-                .offset(x: isActive ? 0 : geometry.size.width)
-                .opacity(isActive ? 1 : 0)
-                .allowsHitTesting(isActive)
-                .transition(.identity)
-                .animation(nil, value: sessionManager.webTabs.count)
-                .animation(nil, value: sessionManager.activeTab)
-            }
-
-            // Tab bar overlay at top
-            VStack(spacing: 0) {
-              LiquidGlassTabBarRepresentable(
-                onNewTab: { showingNewTabSheet = true },
-                onShowTabSelector: {
-                  Logger.clauntty.info("[TAB_SELECTOR] onShowTabSelector callback FIRED")
-                  // Refresh the current tab's preview while it's still on screen
-                  NotificationCenter.default.post(name: .captureTabThumbnail, object: nil)
-                  // Force dismiss keyboard at window level (most aggressive)
-                  Logger.clauntty.info("[TAB_SELECTOR] Forcing keyboard dismiss via endEditing")
-                  UIApplication.shared.connectedScenes
-                    .compactMap { $0 as? UIWindowScene }
-                    .flatMap { $0.windows }
-                    .forEach { $0.endEditing(true) }
-
-                  // Also post notification to hide accessory bars
-                  NotificationCenter.default.post(name: .hideAllAccessoryBars, object: nil)
-
-                  showingFullTabSelector = true
-                },
-                onShowPorts: { session in
-                  Logger.clauntty.debugOnly(
-                    "ContentView: onShowPorts called for session \(session.id.uuidString.prefix(8))"
-                  )
-                  portsSheetSession = session
-                },
-                sessionStatesHash: sessionManager.sessionStateVersion,
-                onVoiceTapped: handleVoiceTapped
-              )
-              .frame(height: 48)
-              Spacer()
-            }
-
-            // Voice session panel, dropping down from the pill; tap outside to close
-            if showingVoicePanel {
-              Color.black.opacity(0.001)
-                .ignoresSafeArea()
-                .onTapGesture { showingVoicePanel = false }
-              VStack {
-                VoicePanelView()
-                  .padding(.top, 52)
-                Spacer()
-              }
-            }
-          }
-        }
-        }
-        }
+        // Every workspace a window onto its terminal (agent view)
+        AgentSwitcherView(
+          onNewTab: { showingNewTabSheet = true },
+          onVoice: handleVoiceTapped,
+          onPorts: { session in portsSheetSession = session }
+        )
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingNewTabSheet) {
           NavigationStack {
@@ -130,30 +38,12 @@ struct ContentView: View {
               }
           }
         }
-        .fullScreenCover(isPresented: $showingFullTabSelector) {
-          FullTabSelector(
-            onDismiss: { showingFullTabSelector = false },
-            onNewTab: {
-              // Show new tab sheet after a brief delay to let the full cover dismiss
-              DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                showingNewTabSheet = true
-              }
-            }
-          )
-        }
         .sheet(isPresented: $showingVoiceSettings) {
           VoiceSettingsSheet()
         }
-        // Agent view: the voice session as a sheet (the tab bar drops a panel instead)
-        .sheet(isPresented: Binding(get: { agentMode && showingVoicePanel }, set: { showingVoicePanel = $0 })) {
+        // The voice session from the voice button (while typing, the key bar has it)
+        .sheet(isPresented: $showingVoiceSession) {
           VoiceSessionSheet()
-        }
-        .onReceive(VoiceAgent.shared.$lastSession.dropFirst()) { summary in
-          // Show how a session ended and what it cost (agent view shows it in the key
-          // bar, if it was open there)
-          if summary != nil && !agentMode {
-            showingVoicePanel = true
-          }
         }
         .sheet(item: $portsSheetSession) { session in
           PortsSheetView(config: session.connectionConfig, onDismiss: { portsSheetSession = nil })
@@ -235,11 +125,11 @@ struct ContentView: View {
     }
   }
 
-  /// Voice button: set up a key first, start a session, or open the session panel
+  /// Voice button: set up a key first, start a session, or open the session sheet
   private func handleVoiceTapped() {
     let agent = VoiceAgent.shared
     if agent.isActive {
-      showingVoicePanel.toggle()
+      showingVoiceSession.toggle()
     } else if fakeVoice {
       #if DEBUG
       agent.startFake(sessionManager: sessionManager)

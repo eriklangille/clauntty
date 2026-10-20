@@ -13,7 +13,6 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @State private var showingDownloadConfirmation = false
     @AppStorage("sessionManagementEnabled") private var sessionManagementEnabled = true
-    @AppStorage("agentMode") private var agentMode = false
     @State private var fontSize: Float = FontSizePreference.current
     @Environment(\.dismiss) var dismiss
 
@@ -46,14 +45,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Appearance")
-                }
-
-                Section {
-                    Toggle("Agent Mode", isOn: $agentMode)
-                } header: {
-                    Text("Preview")
-                } footer: {
-                    Text("Your workspaces as windows onto their terminals, in place of the tab bar. Tap one to type into it; fullscreen it to work, and pull it down to switch.")
                 }
 
                 Section {

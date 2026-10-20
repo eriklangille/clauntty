@@ -2506,24 +2506,6 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         return result
     }
 
-    /// Capture a screenshot of the terminal surface.
-    /// Used for tab selector preview when switching tabs.
-    /// - Returns: A UIImage of the current terminal content, or nil if capture failed
-    func captureScreenshot() -> UIImage? {
-        guard bounds.width > 0, bounds.height > 0 else {
-            Logger.clauntty.verbose("captureScreenshot: invalid bounds")
-            return nil
-        }
-
-        let renderer = UIGraphicsImageRenderer(bounds: bounds)
-        let image = renderer.image { ctx in
-            layer.render(in: ctx.cgContext)
-        }
-
-        Logger.clauntty.verbose("captureScreenshot: captured \(Int(image.size.width))x\(Int(image.size.height)) image")
-        return image
-    }
-
     // MARK: - UIKeyInput
 
     var hasText: Bool {

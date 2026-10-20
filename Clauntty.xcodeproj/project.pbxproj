@@ -17,9 +17,7 @@
 		F0A00008 /* VoiceClaude.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A00008 /* VoiceClaude.swift */; };
 		06E63D06C52859FA31DA95C7 /* SSHKeyImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */; };
 		1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */; };
-		3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */; };
-		570C2F179E1D3237D5566647 /* TabBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DDF3950FD48E767BF27175 /* TabBubble.swift */; };
-		A3DD5A3D2EFE126521BD8AF4 /* TabPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAE48ED4FB13F83D75BD4F8 /* TabPanes.swift */; };
+		A3DD5A3D2EFE126521BD8AF4 /* PaneStatusIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAE48ED4FB13F83D75BD4F8 /* PaneStatusIndicator.swift */; };
 		5AE31ABCC791B62288ED04F5 /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A3E2A64FA9B3B72703629BB /* ThemeManager.swift */; };
 		70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297EA9CE961BFF920036934A /* SelectionHandleView.swift */; };
 		733936A7CBE2B60407C98651 /* WebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */; };
@@ -64,7 +62,6 @@
 		C0000017 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000017 /* SessionManager.swift */; };
 		58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */; };
 		55E77F7247B5040EF5FD7BFF /* SessionManager+Connections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4874ED9A2E6E254D7091964 /* SessionManager+Connections.swift */; };
-		C0000018 /* SessionTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000018 /* SessionTabBar.swift */; };
 		C0000019 /* RtachDeployer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000019 /* RtachDeployer.swift */; };
 		C0000020 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; };
 		7A000001 /* TailscaleManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A100001 /* TailscaleManager.swift */; };
@@ -80,7 +77,6 @@
 		C0000028 /* PortsSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000028 /* PortsSheetView.swift */; };
 		C00000A1 /* ImageViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A1 /* ImageViewerView.swift */; };
 		C0000029 /* PersistedWebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000029 /* PersistedWebTab.swift */; };
-		C80A313220D32B0F645D406F /* LiquidGlassTabBarRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA3DCC2DFC28098F2BC7C70 /* LiquidGlassTabBarRepresentable.swift */; };
 		CC4B62670E3311459A29FF4C /* SSHKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F66C88A0644682800154EE25 /* SSHKey.swift */; };
 		D1000001 /* GhosttyAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* GhosttyAppTests.swift */; };
 		D1000002 /* TerminalSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000002 /* TerminalSurfaceTests.swift */; };
@@ -88,8 +84,6 @@
 		D1000004 /* SessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000004 /* SessionTests.swift */; };
 		D1000005 /* SessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000005 /* SessionManagerTests.swift */; };
 		E1000001 /* SSHConnectionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2000001 /* SSHConnectionUITests.swift */; };
-		EE2DD46DA05C44309BB94180 /* FullTabSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B1CA5D0C2290DD8C5A6A5B /* FullTabSelector.swift */; };
-		F9C5C4A2CF04EB4C6A929250 /* ExpandedTabOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620BF993225325AE2636ED6D /* ExpandedTabOverlay.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -141,20 +135,15 @@
 		C10000A2 /* NetworkMonitor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		55E4F41052A28ACE836DF03B /* SSHKeyStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHKeyStore.swift; sourceTree = "<group>"; };
 		59A3663E616FC97D48E5888C /* SessionPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionPickerView.swift; sourceTree = "<group>"; };
-		620BF993225325AE2636ED6D /* ExpandedTabOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExpandedTabOverlay.swift; sourceTree = "<group>"; };
-		66B1CA5D0C2290DD8C5A6A5B /* FullTabSelector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FullTabSelector.swift; sourceTree = "<group>"; };
 		7856CABCC7D9170DD7EF307F /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		7CF1104A268D6275CA1C3278 /* ThemePickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemePickerView.swift; sourceTree = "<group>"; };
 		82281A22E5E692A251B06D6B /* ClaunttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaunttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHKeyImportSheet.swift; sourceTree = "<group>"; };
-		90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquidGlassTabBar.swift; sourceTree = "<group>"; };
 		94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortForwardingManager.swift; sourceTree = "<group>"; };
 		A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyBridgeTests.swift; path = ../Tests/ClaunttyTests/GhosttyBridgeTests.swift; sourceTree = "<group>"; };
 		ABF7282BEC77B8743E5A14F7 /* Themes */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
-		B6DDF3950FD48E767BF27175 /* TabBubble.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TabBubble.swift; sourceTree = "<group>"; };
-		CCAE48ED4FB13F83D75BD4F8 /* TabPanes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TabPanes.swift; sourceTree = "<group>"; };
+		CCAE48ED4FB13F83D75BD4F8 /* PaneStatusIndicator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaneStatusIndicator.swift; sourceTree = "<group>"; };
 		BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTab.swift; sourceTree = "<group>"; };
-		BCA3DCC2DFC28098F2BC7C70 /* LiquidGlassTabBarRepresentable.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquidGlassTabBarRepresentable.swift; sourceTree = "<group>"; };
 		C1000000 /* Clauntty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C1000001 /* ClaunttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaunttyApp.swift; sourceTree = "<group>"; };
 		C1000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -181,7 +170,6 @@
 		C1000017 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Groups.swift"; sourceTree = "<group>"; };
 		D4874ED9A2E6E254D7091964 /* SessionManager+Connections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Connections.swift"; sourceTree = "<group>"; };
-		C1000018 /* SessionTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTabBar.swift; sourceTree = "<group>"; };
 		C1000019 /* RtachDeployer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RtachDeployer.swift; sourceTree = "<group>"; };
 		C1000020 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 		7A100001 /* TailscaleManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscaleManager.swift; sourceTree = "<group>"; };
@@ -378,7 +366,6 @@
 				A3DC0C373EF7C12642C82EAF /* AgentSwitcherView.swift */,
 				6D2B8F3C0E4A5B7C9D1E2F30 /* PillMenu.swift */,
 				C1000015 /* KeyboardAccessoryView.swift */,
-				C1000018 /* SessionTabBar.swift */,
 				59A3663E616FC97D48E5888C /* SessionPickerView.swift */,
 				28503FD938162D88F8B6A69F /* WebTabView.swift */,
 				C1000025 /* SettingsView.swift */,
@@ -386,7 +373,7 @@
 				C1000028 /* PortsSheetView.swift */,
 				C10000A1 /* ImageViewerView.swift */,
 				297EA9CE961BFF920036934A /* SelectionHandleView.swift */,
-				DFCD20EE71377F3F8FBB4C5E /* LiquidGlassTabBar */,
+				CCAE48ED4FB13F83D75BD4F8 /* PaneStatusIndicator.swift */,
 				0CD476298B71607D9BDB445C /* ServerPickerView.swift */,
 				8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */,
 				7CF1104A268D6275CA1C3278 /* ThemePickerView.swift */,
@@ -471,19 +458,6 @@
 				C1000027 /* SpeechManager.swift */,
 			);
 			path = Speech;
-			sourceTree = "<group>";
-		};
-		DFCD20EE71377F3F8FBB4C5E /* LiquidGlassTabBar */ = {
-			isa = PBXGroup;
-			children = (
-				B6DDF3950FD48E767BF27175 /* TabBubble.swift */,
-				CCAE48ED4FB13F83D75BD4F8 /* TabPanes.swift */,
-				90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */,
-				620BF993225325AE2636ED6D /* ExpandedTabOverlay.swift */,
-				66B1CA5D0C2290DD8C5A6A5B /* FullTabSelector.swift */,
-				BCA3DCC2DFC28098F2BC7C70 /* LiquidGlassTabBarRepresentable.swift */,
-			);
-			path = LiquidGlassTabBar;
 			sourceTree = "<group>";
 		};
 		E3000010 /* ClaunttyUITests */ = {
@@ -673,7 +647,6 @@
 				C0000017 /* SessionManager.swift in Sources */,
 				58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */,
 				55E77F7247B5040EF5FD7BFF /* SessionManager+Connections.swift in Sources */,
-				C0000018 /* SessionTabBar.swift in Sources */,
 				80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */,
 				C0000023 /* WordList.swift in Sources */,
 				8E8B63B583F4D2BF2E6F18FD /* PortScanner.swift in Sources */,
@@ -696,12 +669,7 @@
 				C0000026 /* PowerManager.swift in Sources */,
 				C0000027 /* SpeechManager.swift in Sources */,
 				70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */,
-				570C2F179E1D3237D5566647 /* TabBubble.swift in Sources */,
-				A3DD5A3D2EFE126521BD8AF4 /* TabPanes.swift in Sources */,
-				3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */,
-				F9C5C4A2CF04EB4C6A929250 /* ExpandedTabOverlay.swift in Sources */,
-				EE2DD46DA05C44309BB94180 /* FullTabSelector.swift in Sources */,
-				C80A313220D32B0F645D406F /* LiquidGlassTabBarRepresentable.swift in Sources */,
+				A3DD5A3D2EFE126521BD8AF4 /* PaneStatusIndicator.swift in Sources */,
 				C0000029 /* PersistedWebTab.swift in Sources */,
 				ADA5806394E7136002E7FE76 /* ServerPickerView.swift in Sources */,
 				CC4B62670E3311459A29FF4C /* SSHKey.swift in Sources */,
