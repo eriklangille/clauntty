@@ -209,16 +209,49 @@ struct TerminalContainer: NSViewRepresentable {
 final class PaneHostView: NSView {
     override var isFlipped: Bool { true }
 
+    /// Terminals keep their size meanwhile (the sidebar is sliding), from the top left
+    private static var held = false
+    private static var release: Task<Void, Never>?
+    private static let released = Notification.Name("PaneHostView.released")
+
+    /// Until the panes' sizes have stopped changing: then each resizes once
+    static func holdResizes() {
+        held = true
+        settle()
+    }
+
+    /// Released once no pane has changed size for a moment, so after the animation
+    private static func settle() {
+        release?.cancel()
+        release = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            held = false
+            NotificationCenter.default.post(name: released, object: nil)
+        }
+    }
+
     init() {
         super.init(frame: .zero)
         wantsLayer = true
+        // A held terminal bigger than the pane mustn't draw over the next one
+        clipsToBounds = true
+        NotificationCenter.default.addObserver(self, selector: #selector(resizeTerminal), name: Self.released, object: nil)
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    @objc private func resizeTerminal() {
+        needsLayout = true
+    }
+
     override func layout() {
         super.layout()
         guard let terminal = subviews.first as? MacTerminalView else { return }
+        if Self.held, terminal.frame.size != .zero {
+            Self.settle()
+            return
+        }
         let fit = terminal.layout(in: bounds.size)
         CATransaction.begin()
         CATransaction.setDisableActions(true)

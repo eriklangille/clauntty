@@ -2,8 +2,10 @@ import SwiftUI
 import WebKit
 
 /// A port on the host (`clauntty tab 8000`), forwarded over SSH and shown in a web view,
-/// with back, forward, reload and its address above it.
+/// with back, forward, reload and its address above it. That bar is the top of the
+/// window, as a pane's title bar is.
 struct WebPane: View {
+    @EnvironmentObject private var window: WindowState
     @ObservedObject var webTab: WebTab
 
     var body: some View {
@@ -31,6 +33,12 @@ struct WebPane: View {
 
     private var bar: some View {
         HStack(spacing: 14) {
+            if window.sidebar == .detailOnly {
+                // Clear of the window's buttons
+                Color.clear.frame(width: 54, height: 1)
+                Button { window.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
+                    .help("Show Sidebar (⌃⌘S)")
+            }
             Button { webTab.goBack() } label: { Image(systemName: "chevron.left") }
                 .disabled(!webTab.canGoBack)
             Button { webTab.goForward() } label: { Image(systemName: "chevron.right") }
@@ -51,8 +59,13 @@ struct WebPane: View {
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .frame(height: PaneHeader.height)
+        .background {
+            ZStack {
+                Rectangle().fill(.bar)
+                WindowDragArea {}
+            }
+        }
     }
 
     private func message(_ text: String) -> some View {

@@ -6,6 +6,15 @@ final class WindowState: ObservableObject {
     @Published var switcherShown = false
     /// A pane shown alone in its split (Cmd+Shift+Return); the host's layout is unchanged
     @Published var zoomedPane: String?
+    /// The sidebar, shown or not; change it with `toggleSidebar()`
+    @Published var sidebar: NavigationSplitViewVisibility = .all
+
+    /// Terminals keep their size while the sidebar slides and resize once at the end:
+    /// a TUI redraws badly at every step in between
+    func toggleSidebar() {
+        PaneHostView.holdResizes()
+        withAnimation { sidebar = sidebar == .detailOnly ? .all : .detailOnly }
+    }
 }
 
 /// Cmd+K: type part of a pane, workspace or host name, Enter goes there. Arrows

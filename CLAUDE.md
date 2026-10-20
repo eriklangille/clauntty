@@ -377,6 +377,11 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   pressing pane, its pane dots); panes are in the split, each under a title bar with split,
   zoom and close. Zoom (`WindowState.zoomedPane`) is local only. `StatusGlyph` draws the
   phone's `PaneStatusIndicator` in SwiftUI; change both together.
+- **No title bar** (`.hiddenTitleBar`): the pane title bars (and a web page's address bar)
+  are the top of the window, `PaneHeader.height` to line up with the window's buttons, and
+  move the window through `WindowDragArea`. The sidebar's toggle and + sit beside the
+  window's buttons. Toggle the sidebar with `WindowState.toggleSidebar()`: it holds every
+  terminal's size (`PaneHostView.holdResizes`) until the slide ends, so each resizes once.
 - **Pasting images:** Cmd+V, Ctrl+V (only with nothing but an image on the clipboard) and
   dropping image files upload to the host's /tmp (`Session.uploadImage`) and paste the
   path, as the phone does, so Claude Code attaches it.

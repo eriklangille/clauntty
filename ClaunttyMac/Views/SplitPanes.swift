@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The tab the shown pane is in, its panes split as rtach keeps them, each under a
-/// title bar with its actions (as in Rex). The pane you type into is the active
-/// session; clicking another moves there. A zoomed pane fills the tab by itself.
+/// title bar with its actions (as in Rex); the window has no other. The pane you type
+/// into is the active session; clicking another moves there. A zoomed pane fills the
+/// tab by itself.
 struct SplitPanes: View {
     @EnvironmentObject private var window: WindowState
     let group: SessionGroup
@@ -12,7 +13,7 @@ struct SplitPanes: View {
         let layout = group.shownLayout
         let zoomed = window.zoomedPane == group.activePaneId && layout.paneIds.count > 1
         LayoutNode(layout: zoomed ? .pane(group.activePaneId) : layout, group: group, views: views,
-                   showsHeaders: layout.paneIds.count > 1, zoomed: zoomed)
+                   split: layout.paneIds.count > 1, zoomed: zoomed, topLeft: true)
     }
 }
 
@@ -20,36 +21,38 @@ private struct LayoutNode: View {
     let layout: PaneLayout
     let group: SessionGroup
     let views: TerminalViews
-    let showsHeaders: Bool
+    let split: Bool
     let zoomed: Bool
+    /// Its title bar is under the window's buttons when the sidebar is hidden
+    let topLeft: Bool
 
     var body: some View {
         switch layout {
         case .pane(let paneId):
-            PaneTile(group: group, paneId: paneId, views: views, showsHeader: showsHeaders, zoomed: zoomed)
+            PaneTile(group: group, paneId: paneId, views: views, split: split, zoomed: zoomed, topLeft: topLeft)
         case .split(let vertical, let ratio, let first, let second):
             GeometryReader { geometry in
                 let total = vertical ? geometry.size.height : geometry.size.width
                 let firstSize = max(0, (total - SplitDivider.thickness) * min(max(ratio, 0.1), 0.9))
                 if vertical {
                     VStack(spacing: 0) {
-                        node(first).frame(height: firstSize)
+                        node(first, topLeft: topLeft).frame(height: firstSize)
                         SplitDivider(vertical: true)
-                        node(second)
+                        node(second, topLeft: false)
                     }
                 } else {
                     HStack(spacing: 0) {
-                        node(first).frame(width: firstSize)
+                        node(first, topLeft: topLeft).frame(width: firstSize)
                         SplitDivider(vertical: false)
-                        node(second)
+                        node(second, topLeft: false)
                     }
                 }
             }
         }
     }
 
-    private func node(_ layout: PaneLayout) -> LayoutNode {
-        LayoutNode(layout: layout, group: group, views: views, showsHeaders: showsHeaders, zoomed: zoomed)
+    private func node(_ layout: PaneLayout, topLeft: Bool) -> LayoutNode {
+        LayoutNode(layout: layout, group: group, views: views, split: split, zoomed: zoomed, topLeft: topLeft)
     }
 }
 
@@ -70,15 +73,17 @@ private struct PaneTile: View {
     let group: SessionGroup
     let paneId: String
     let views: TerminalViews
-    let showsHeader: Bool
+    let split: Bool
     let zoomed: Bool
+    let topLeft: Bool
 
     var body: some View {
         let focused = paneId == group.activePaneId
         let selection = PaneSelection(groupId: group.id, paneId: paneId)
         VStack(spacing: 0) {
-            if showsHeader, let pane = group.panes.first(where: { $0.id == paneId }) {
-                PaneHeader(pane: pane, selection: selection, focused: focused, zoomed: zoomed)
+            if let pane = group.panes.first(where: { $0.id == paneId }) {
+                PaneHeader(pane: pane, selection: selection, focused: focused, split: split, zoomed: zoomed,
+                           topLeft: topLeft)
             }
             if let session = sessionManager.sessions.first(where: { $0.groupId == group.id && $0.pane?.paneId == paneId }) {
                 ZStack {
@@ -103,51 +108,74 @@ private struct PaneTile: View {
     }
 }
 
-/// Over a pane in a split: what's running in it, and its actions.
-private struct PaneHeader: View {
+/// Over each pane: what's running in it, and its actions. The window has no title
+/// bar, so these are it: dragging one moves the window.
+struct PaneHeader: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var window: WindowState
+    /// The window's title bar height, so the window's buttons sit in the top one
+    static let height: CGFloat = 28
     let pane: TabPane
     let selection: PaneSelection
     let focused: Bool
+    /// One of several panes: dimmed when it's not the focused one, and it can zoom
+    let split: Bool
     let zoomed: Bool
+    let topLeft: Bool
 
     var body: some View {
+        let active = focused || !split
         HStack(spacing: 8) {
-            StatusGlyph(status: pane.status)
-            Text(pane.title)
-                .font(.callout.weight(focused ? .semibold : .regular))
-                .foregroundStyle(focused ? .primary : .secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if !pane.status.label.isEmpty {
-                Text(pane.status.label)
-                    .font(.caption)
-                    .foregroundStyle(pane.status.color)
+            if topLeft && window.sidebar == .detailOnly {
+                // Clear of the window's buttons
+                Color.clear.frame(width: 64, height: 1)
+                button("sidebar.left", help: "Show Sidebar (⌃⌘S)") { window.toggleSidebar() }
+                    .foregroundStyle(.secondary)
             }
+            Group {
+                StatusGlyph(status: pane.status)
+                Text(pane.title)
+                    .font(.callout.weight(active ? .semibold : .regular))
+                    .foregroundStyle(active ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !pane.status.label.isEmpty {
+                    Text(pane.status.label)
+                        .font(.caption)
+                        .foregroundStyle(pane.status.color)
+                }
+            }
+            // Clicks go through to the drag area behind
+            .allowsHitTesting(false)
             Spacer(minLength: 8)
             Group {
-                button("rectangle.split.2x1", help: "Split Right (⌘D)") { split(.split) }
-                button("rectangle.split.1x2", help: "Split Down (⇧⌘D)") { split(.splitDown) }
-                button(zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                       help: zoomed ? "Show All Panes (⇧⌘↩)" : "Zoom Pane (⇧⌘↩)") {
-                    MainView.show(selection, sessionManager)
-                    window.zoomedPane = zoomed ? nil : selection.paneId
+                button("rectangle.split.2x1", help: "Split Right (⌘D)") { splitPane(.split) }
+                button("rectangle.split.1x2", help: "Split Down (⇧⌘D)") { splitPane(.splitDown) }
+                if split {
+                    button(zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                           help: zoomed ? "Show All Panes (⇧⌘↩)" : "Zoom Pane (⇧⌘↩)") {
+                        MainView.show(selection, sessionManager)
+                        window.zoomedPane = zoomed ? nil : selection.paneId
+                    }
                 }
                 button("xmark", help: "Close Pane (⇧⌘W)") {
                     MainView.closePane(selection, title: pane.title, sessionManager)
                 }
             }
-            .foregroundStyle(focused ? .secondary : .tertiary)
+            .foregroundStyle(active ? .secondary : .tertiary)
         }
         .padding(.horizontal, 10)
-        .frame(height: 28)
-        .background(focused ? Color.white.opacity(0.07) : Color.white.opacity(0.02))
+        .frame(height: Self.height)
+        .background {
+            ZStack {
+                active ? Color.white.opacity(0.07) : Color.white.opacity(0.02)
+                WindowDragArea { MainView.show(selection, sessionManager) }
+            }
+        }
         .overlay(alignment: .bottom) {
             Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                .allowsHitTesting(false)
         }
-        .contentShape(Rectangle())
-        .onTapGesture { MainView.show(selection, sessionManager) }
     }
 
     private func button(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
@@ -162,7 +190,7 @@ private struct PaneHeader: View {
     }
 
     /// Split this pane, not the one you were in
-    private func split(_ action: PaneAction) {
+    private func splitPane(_ action: PaneAction) {
         MainView.show(selection, sessionManager)
         Task { await sessionManager.performPaneAction(action, groupId: selection.groupId) }
     }
@@ -213,5 +241,35 @@ extension SessionManager {
         }
         // Last, so commands from the host (`clauntty show`) go to the pane you're in
         active.claimActive()
+    }
+}
+
+/// Where a title bar would be: dragging moves the window, a click calls `onClick`, a
+/// double click does what System Settings says a title bar's does (zoom by default).
+struct WindowDragArea: NSViewRepresentable {
+    let onClick: () -> Void
+
+    func makeNSView(context: Context) -> DragView { DragView() }
+
+    func updateNSView(_ view: DragView, context: Context) {
+        view.onClick = onClick
+    }
+
+    final class DragView: NSView {
+        var onClick: (() -> Void)?
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            if event.clickCount == 2 {
+                switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+                case "Minimize": window.miniaturize(nil)
+                case "None": break
+                default: window.zoom(nil)
+                }
+                return
+            }
+            onClick?()
+            window.performDrag(with: event)
+        }
     }
 }

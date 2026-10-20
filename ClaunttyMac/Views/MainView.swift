@@ -15,9 +15,10 @@ struct MainView: View {
     let views: TerminalViews
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $window.sidebar) {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 180, ideal: 230, max: 360)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
         }
@@ -61,9 +62,12 @@ struct MainView: View {
     private var detail: some View {
         if let webTab = sessionManager.activeWebTab {
             WebPane(webTab: webTab)
+                .ignoresSafeArea(.container, edges: .top)
         } else if let session = sessionManager.activeSession, let group = sessionManager.sessionGroup(for: session) {
+            // Up into the title bar's place: the pane title bars are the window's
             SplitPanes(group: group, views: views)
                 .background(ThemeColors.background)
+                .ignoresSafeArea(.container, edges: .top)
         } else if hosts.opened.isEmpty {
             HostPicker()
         } else {

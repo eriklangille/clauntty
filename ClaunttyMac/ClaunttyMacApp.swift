@@ -45,10 +45,14 @@ struct ClaunttyMacApp: App {
                 sessionManager.savePersistence()
             }
         }
-        // A slim title bar: the terminal gets the height
-        .windowToolbarStyle(.unifiedCompact)
+        // No title bar: each pane's title bar is the top of the window, as in Rex
+        .windowStyle(.hiddenTitleBar)
         .commands {
             PaneCommands(sessionManager: sessionManager, hosts: hosts, window: window)
+            CommandGroup(replacing: .sidebar) {
+                Button(window.sidebar == .detailOnly ? "Show Sidebar" : "Hide Sidebar") { window.toggleSidebar() }
+                    .keyboardShortcut("s", modifiers: [.command, .control])
+            }
             CommandGroup(after: .toolbar) {
                 Button("Bigger") { ghostty.terminalViews?.adjustFontSize(by: 1) }
                     .keyboardShortcut("=")

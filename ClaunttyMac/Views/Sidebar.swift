@@ -13,6 +13,7 @@ enum SidebarItem: Hashable {
 struct Sidebar: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
+    @EnvironmentObject private var window: WindowState
 
     var body: some View {
         List(selection: selection) {
@@ -36,11 +37,22 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .toolbar {
-            ToolbarItem {
+        // In the row of the window's buttons, where the toolbar was
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 12) {
+                Spacer()
+                Button { window.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
+                    .help("Hide Sidebar (⌃⌘S)")
                 AddHostMenu()
+                    .fixedSize()
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .frame(height: PaneHeader.height)
         }
+        // The window has no title bar: that row is ours
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     private func groups(on connection: SavedConnection) -> [SessionGroup] {
@@ -337,6 +349,7 @@ private struct AddHostMenu: View {
         } label: {
             Image(systemName: "plus")
         }
+        .menuStyle(.button)
         .menuIndicator(.hidden)
         .help("Open Host")
     }
