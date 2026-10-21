@@ -16,7 +16,10 @@ final class MacTerminalView: NSView, NSTextInputClient {
     var onResize: ((_ columns: UInt16, _ rows: UInt16) -> Void)?
     /// Scrolled to within `nearTopRows` of the oldest line: time to load older history.
     var onScrollNearTop: (() -> Void)?
-    /// Took the keyboard (clicked, or made first responder). Main thread.
+    /// Clicked: the pane becomes the one you're in. Main thread. Only clicks: when the app
+    /// moved the keyboard itself (a split changing shape, a workspace switch), calling it
+    /// switched the window back to this pane's workspace, and two new workspaces shown
+    /// at once switched back and forth until the app quit.
     var onFocus: (() -> Void)?
     /// Images pasted or dropped: uploaded to the host, then `pasteText` their paths
     var onPasteImages: (([NSImage]) -> Void)?
@@ -266,8 +269,6 @@ final class MacTerminalView: NSView, NSTextInputClient {
         Self.focusedView = self
         // Another app in front: focused once the window is key again
         setSurfaceFocus(window?.isKeyWindow ?? true)
-        // Not during the SwiftUI update that may have made us first responder
-        DispatchQueue.main.async { [weak self] in self?.onFocus?() }
         return true
     }
 
@@ -535,6 +536,7 @@ final class MacTerminalView: NSView, NSTextInputClient {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        onFocus?()
         // Not a click into the terminal: it's scaled, so the point would land elsewhere
         if otherDeviceGrid != nil {
             onUseHere?()
@@ -543,9 +545,15 @@ final class MacTerminalView: NSView, NSTextInputClient {
         button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, event)
     }
     override func mouseUp(with event: NSEvent) { button(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event) }
-    override func rightMouseDown(with event: NSEvent) { button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, event) }
+    override func rightMouseDown(with event: NSEvent) {
+        onFocus?()
+        button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, event)
+    }
     override func rightMouseUp(with event: NSEvent) { button(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, event) }
-    override func otherMouseDown(with event: NSEvent) { button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_MIDDLE, event) }
+    override func otherMouseDown(with event: NSEvent) {
+        onFocus?()
+        button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_MIDDLE, event)
+    }
     override func otherMouseUp(with event: NSEvent) { button(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_MIDDLE, event) }
 
     override func mouseMoved(with event: NSEvent) {
