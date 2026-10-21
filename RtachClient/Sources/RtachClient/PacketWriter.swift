@@ -151,11 +151,18 @@ public enum PacketWriter {
         return packet
     }
 
-    /// Create a claim-active packet to mark this client as active
-    public static func claimActive() -> Data {
-        var packet = Data(capacity: ProtocolConstants.clientHeaderSize)
+    /// Create a claim-active packet to mark this client as active. `commandsOnly`: for
+    /// commands and workspace news, without taking the terminal size (rtach 2.32.0; older
+    /// masters ignore the payload and take it as a full claim)
+    public static func claimActive(commandsOnly: Bool = false) -> Data {
+        var packet = Data(capacity: ProtocolConstants.clientHeaderSize + 1)
         packet.append(MessageType.claimActive.rawValue)
-        packet.append(0)
+        if commandsOnly {
+            packet.append(1)
+            packet.append(ProtocolConstants.claimFlagCommandsOnly)
+        } else {
+            packet.append(0)
+        }
         return packet
     }
 

@@ -257,6 +257,8 @@ class Session: ObservableObject, Identifiable {
 
     /// Whether we want to claim active but are waiting for framed mode
     private var pendingActiveClaim: Bool = false
+    /// The waiting claim is for commands only (a full one replaces it)
+    private var pendingClaimCommandsOnly: Bool = false
 
     // MARK: - rtach Session
 
@@ -1175,18 +1177,21 @@ class Session: ObservableObject, Identifiable {
         onPtySizeChanged?(size)
     }
 
-    /// Claim active client for window size and command routing
-    func claimActive() {
+    /// Claim active client for window size and command routing. `commandsOnly` when the
+    /// pane is just being shown (launch, foreground, reconnect), not used: commands come
+    /// here, but a device typing in the pane keeps its size until this one is used.
+    func claimActive(commandsOnly: Bool = false) {
         guard rtachSessionId != nil else { return }
         guard rtachProtocol.isFramedMode else {
+            pendingClaimCommandsOnly = commandsOnly && (!pendingActiveClaim || pendingClaimCommandsOnly)
             pendingActiveClaim = true
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): claimActive deferred (not framed mode yet)")
             return
         }
 
         pendingActiveClaim = false
-        rtachProtocol.sendClaimActive()
-        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): claimActive sent")
+        rtachProtocol.sendClaimActive(commandsOnly: commandsOnly)
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): claimActive sent\(commandsOnly ? " (commands only)" : "")")
     }
 
     // MARK: - Scrollback Request
@@ -1474,10 +1479,11 @@ extension Session: RtachClient.RtachSessionDelegate {
 
             if self.pendingActiveClaim {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): applying deferred active claim")
-                self.claimActive()
+                self.claimActive(commandsOnly: self.pendingClaimCommandsOnly)
             } else if self.isActive {
+                // Connecting isn't using it: a device typing there keeps the size
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): claiming active on connect")
-                self.claimActive()
+                self.claimActive(commandsOnly: true)
             }
         }
     }

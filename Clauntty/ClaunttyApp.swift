@@ -431,8 +431,9 @@ struct AppContentView: View {
                     Logger.clauntty.debugOnly("APP_LIFECYCLE: resuming connected active session")
                     activeSession.beginResuming()
                     activeSession.resumeOutput()
-                    // Take the terminal size back from other devices on the session
-                    activeSession.claimActive()
+                    // Commands come here again; the terminal size stays with a device
+                    // typing in the pane until the phone is used (typing, or a tap)
+                    activeSession.claimActive(commandsOnly: true)
                     // It may have died while the app was suspended without closing
                     sessionManager.checkConnections(reason: "foreground")
                     // Images may have gone to a tab whose connection died meanwhile

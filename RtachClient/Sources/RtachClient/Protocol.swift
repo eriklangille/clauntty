@@ -69,6 +69,9 @@ public enum ProtocolConstants {
     /// Client ID size (UUID = 16 bytes)
     public static let clientIdSize: Int = 16
 
+    /// claim_active payload flag: commands only, not the terminal size (rtach 2.32.0)
+    public static let claimFlagCommandsOnly: UInt8 = 1 << 0
+
     /// Handshake magic bytes "RTCH"
     public static let handshakeMagic: UInt32 = 0x48435452
 

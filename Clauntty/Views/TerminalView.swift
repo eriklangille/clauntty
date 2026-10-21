@@ -384,9 +384,9 @@ struct TerminalView: View {
         // Pause output streaming when tab is inactive, resume when active
         surface.onVisibleStateChanged = { [weak session] visible in
             if visible {
+                // No claim: a window in the switcher shows the pane at the size of a
+                // device using it, and only takes the size when none is (rtach 2.32.0)
                 session?.resumeOutput()
-                // The phone's size applies while it's on screen here
-                session?.claimActive()
             } else {
                 session?.pauseOutput()
             }
@@ -395,7 +395,9 @@ struct TerminalView: View {
             session?.setActiveState(active)
             if active {
                 session?.resumeOutput()
-                session?.claimActive()
+                // Commands come here; the size stays with a device typing in the pane
+                // until the phone is used (typing, or Tap to use here)
+                session?.claimActive(commandsOnly: true)
             } else if surface?.isShownInSwitcher != true {
                 // Still on screen in agent mode: pausing and resuming would make rtach
                 // signal a repaint each time you switch windows

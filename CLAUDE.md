@@ -299,6 +299,12 @@ Tap to use here" under it. A tap claims the pane back. Window changes aren't sen
 the phone's), and output is held until the terminal has actually resized, so the program's redraw for
 the new size doesn't land in the old grid.
 
+The phone only takes a pane's size when it's used: typing, or Tap to use here. Its attaches are
+background ones (`--background`) and its automatic claims (connect, foreground, switching windows)
+are for commands only (`claimActive(commandsOnly: true)`, rtach 2.32.0), so opening the app doesn't
+resize what a laptop is using. A pane nobody else shows gets the phone's size anyway. The Mac app
+claims in full: the panes it shows while it's in front.
+
 ## Current Status
 
 **Working:**

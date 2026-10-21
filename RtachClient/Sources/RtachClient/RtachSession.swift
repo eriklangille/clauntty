@@ -404,10 +404,11 @@ public final class RtachSession {
         delegate?.rtachSession(self, sendData: packet)
     }
 
-    /// Claim active client for window size and command routing
-    public func sendClaimActive() {
+    /// Claim active client for window size and command routing (`commandsOnly`: only
+    /// command routing, see PacketWriter.claimActive)
+    public func sendClaimActive(commandsOnly: Bool = false) {
         guard isFramedMode else { return }
-        let packet = PacketWriter.claimActive()
+        let packet = PacketWriter.claimActive(commandsOnly: commandsOnly)
         delegate?.rtachSession(self, sendData: packet)
     }
 }
