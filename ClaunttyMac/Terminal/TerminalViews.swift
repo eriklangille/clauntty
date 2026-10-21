@@ -146,12 +146,15 @@ final class TerminalViews {
         }
         // Another device has the pane: draw it at that device's grid. Ours again (we
         // took it back, or the other device let go): back to this pane's size, which
-        // wasn't sent meanwhile.
+        // wasn't sent meanwhile. When it was drawn at the other grid, the terminal is
+        // still at that grid until the next layout, which resizes it and sends the
+        // pane's size (onResize); sending its grid now asked rtach for the other size.
         let apply = { [weak session, weak view] (size: RtachClient.PtySize?) in
             guard let session, let view else { return }
             let other = size.flatMap { $0.yours ? nil : (rows: $0.rows, columns: $0.cols) }
+            let wasOther = view.otherDeviceGrid != nil
             view.setOtherDeviceGrid(other)
-            if other == nil, size != nil, let grid = view.gridSize {
+            if other == nil, size != nil, !wasOther, let grid = view.gridSize {
                 session.sendWindowChange(rows: grid.rows, columns: grid.columns)
             }
         }
