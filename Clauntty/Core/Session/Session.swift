@@ -519,8 +519,19 @@ class Session: ObservableObject, Identifiable {
 
         // Reset rtach protocol state for reconnection
         rtachProtocol.reset()
+        forgetPause()
 
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): channel detached")
+    }
+
+    /// The next attach is a new rtach client, and it streams: a pause, or a pre-fetch under
+    /// way, was the old channel's. Kept, a pane shown again after the app let it go (idle)
+    /// was paused by the pre-fetch's re-pause right after attaching, and its redraw waited
+    /// in rtach until it was shown once more: blank, or half drawn.
+    private func forgetPause() {
+        isPaused = false
+        isPrefetchingOnIdle = false
+        pendingPause = false
     }
 
     // MARK: - Data Flow
@@ -579,9 +590,7 @@ class Session: ObservableObject, Identifiable {
         // Reset protocol/transport state so reconnect starts cleanly
         rtachProtocol.reset()
         usesRtach = false
-        isPaused = false
-        isPrefetchingOnIdle = false
-        pendingPause = false
+        forgetPause()
         pendingActiveClaim = false
         isWaitingForInput = false
 
