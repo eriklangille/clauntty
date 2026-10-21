@@ -203,7 +203,7 @@ extension SessionManager {
             Task { await NotificationManager.shared.schedulePaneAttention(workspace: group.title, pane: paneName, body: body, paneId: paneId) }
         }
         #else
-        onPaneAttention?(group.title == paneName ? paneName : "\(group.title) · \(paneName)", body, paneId)
+        onPaneAttention?(group.title == paneName ? paneName : "\(group.title) · \(paneName)", body, paneId, state.state == "blocked")
         #endif
     }
 

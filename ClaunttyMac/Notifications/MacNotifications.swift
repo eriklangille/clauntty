@@ -1,10 +1,11 @@
 import AppKit
 import UserNotifications
 
-/// An agent that needs you or finished, as a notification, as the phone shows them.
-/// Not for a pane on screen while the app is in front: the window shows it already.
-/// Clicking one brings the app forward on that pane. The Dock icon counts the panes
-/// waiting for you.
+/// An agent that needs you or finished, as a notification, as the phone shows them,
+/// with a chime for each (ClaunttyMac/Sounds, made by scripts/make-chimes.py). For a
+/// pane on screen while the app is in front, only the chime: the window shows it
+/// already. Clicking one brings the app forward on that pane. The Dock icon counts the
+/// panes waiting for you.
 @MainActor
 final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
     static let shared = MacNotifications()
@@ -12,11 +13,15 @@ final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private weak var sessionManager: SessionManager?
 
+    /// Pane > Chime When Agents Finish (on unless turned off)
+    static let chimeKey = "agentChime"
+    static var chimes: Bool { UserDefaults.standard.object(forKey: chimeKey) as? Bool ?? true }
+
     func start(sessionManager: SessionManager) {
         self.sessionManager = sessionManager
         center.delegate = self
-        sessionManager.onPaneAttention = { [weak self] title, body, paneId in
-            self?.paneChanged(title: title, body: body, paneId: paneId)
+        sessionManager.onPaneAttention = { [weak self] title, body, paneId, needsYou in
+            self?.paneChanged(title: title, body: body, paneId: paneId, needsYou: needsYou)
         }
         Task {
             do {
@@ -32,17 +37,23 @@ final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
         center.removeDeliveredNotifications(withIdentifiers: [Self.identifier(paneId)])
     }
 
-    private func paneChanged(title: String, body: String?, paneId: String) {
+    private func paneChanged(title: String, body: String?, paneId: String, needsYou: Bool) {
         updateBadge()
         // Working again (answered here or on another device): its notice is old news
         guard let body else { return seen(paneId: paneId) }
-        if NSApp.isActive, sessionManager?.isPaneOnScreen(paneId) == true { return }
+        // On screen with the app in front: just the chime (see willPresent)
+        let onScreen = NSApp.isActive && sessionManager?.isPaneOnScreen(paneId) == true
+        if onScreen && !Self.chimes { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
-        content.userInfo = ["paneId": paneId]
+        // Through the notification, so Focus and the app's sound setting apply
+        content.sound = Self.chimes
+            ? UNNotificationSound(named: UNNotificationSoundName(needsYou ? "agent-needs-you.wav" : "agent-done.wav"))
+            : nil
+        content.userInfo = ["paneId": paneId, "onScreen": onScreen]
+        macLog.info("Notifications: \(needsYou ? "needs you" : "done", privacy: .public), chime \(Self.chimes, privacy: .public), on screen \(onScreen, privacy: .public)")
         // One per pane: a newer one replaces it
         let request = UNNotificationRequest(identifier: Self.identifier(paneId), content: content, trigger: nil)
         center.add(request) { error in
@@ -62,10 +73,17 @@ final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: UNUserNotificationCenterDelegate
 
-    /// In front, but the pane is elsewhere (another workspace): a banner
+    /// In front, but the pane is elsewhere (another workspace): a banner. On screen: the
+    /// chime only, gone from Notification Center once it has played.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        guard notification.request.content.userInfo["onScreen"] as? Bool == true else { return [.banner, .sound] }
+        let id = notification.request.identifier
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            center.removeDeliveredNotifications(withIdentifiers: [id])
+        }
+        return [.sound]
     }
 
     /// Clicked: the app comes forward on the pane

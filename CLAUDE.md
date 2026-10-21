@@ -458,6 +458,11 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   pane is on screen with the app in front (a banner when it's in another workspace). One per pane:
   showing the pane, or its agent working again, clears it. Clicking one brings the app forward
   on the pane. The Dock icon counts the panes waiting at a menu or question.
+  Each plays a chime: `agent-done.wav` when an agent finishes, `agent-needs-you.wav` when it
+  needs you (`ClaunttyMac/Sounds`, synthesized by `scripts/make-chimes.py`: edit its notes and
+  rerun it). A pane on screen with the app in front gets the chime alone (`willPresent`: sound,
+  no banner). The sound goes through the notification, so Focus and the app's notification
+  sound setting apply. Pane > Chime When Agents Finish turns it off (`agentChime`).
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
   One surface has focus at a time (`focusedView`): it blinks, the others draw a hollow box, and

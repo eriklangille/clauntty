@@ -107,6 +107,7 @@ struct PaneCommands: Commands {
     @ObservedObject var sessionManager: SessionManager
     @ObservedObject var hosts: MacHosts
     @ObservedObject var window: WindowState
+    @AppStorage(MacNotifications.chimeKey) private var chimes = true
 
     var body: some Commands {
         CommandMenu("Pane") {
@@ -139,6 +140,8 @@ struct PaneCommands: Commands {
                 Button("Pane \(n)") { show(at: n - 1) }
                     .keyboardShortcut(KeyEquivalent(Character("\(n)")))
             }
+            Divider()
+            Toggle("Chime When Agents Finish", isOn: $chimes)
         }
     }
 
