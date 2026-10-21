@@ -158,20 +158,46 @@ final class MacTerminalView: NSView, NSTextInputClient {
     /// land in the old grid.
     private var heldOutput: [Data]?
     private var heldOutputGrid: (rows: UInt16, columns: UInt16)?
+    /// Held until the terminal is back at this pane's own size (the pane is ours again)
+    private var heldForOwnSize = false
+    private var holdGeneration = 0
+
+    /// The grid this view last drew at for another device. Ghostty reports a resize
+    /// about 25ms after the view's size changes, so the report for that grid can come
+    /// after the pane is ours again: sent as our size, it gave the PTY the other device's
+    /// grid for a moment, and the program redrew for it.
+    private var lastOtherGrid: (rows: UInt16, columns: UInt16)?
 
     func setOtherDeviceGrid(_ grid: (rows: UInt16, columns: UInt16)?) {
         guard grid?.rows != otherDeviceGrid?.rows || grid?.columns != otherDeviceGrid?.columns else { return }
+        let wasOther = otherDeviceGrid != nil
         otherDeviceGrid = grid
+        if let grid { lastOtherGrid = grid }
         if let surface, grid != nil { ghostty_surface_clear_selection(surface) }
         if let grid, let current = gridSize, current.rows != grid.rows || current.columns != grid.columns {
-            heldOutputGrid = grid
-            if heldOutput == nil { heldOutput = [] }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                guard let self, let held = self.heldOutputGrid, held == grid else { return }
-                self.releaseHeldOutput()
-            }
+            hold { $0.heldOutputGrid = grid }
+        } else if grid == nil, wasOther {
+            // The program redraws for our size as soon as rtach has it, and the terminal
+            // gets there after the next layout and Ghostty's resize: written meanwhile,
+            // the redraw landed in the other device's grid and broke its lines
+            hold { $0.heldForOwnSize = true }
         }
         superview?.needsLayout = true
+    }
+
+    /// Hold output until a resize releases it, or half a second (a resize that never
+    /// comes: the grid didn't change)
+    private func hold(_ until: (MacTerminalView) -> Void) {
+        heldOutputGrid = nil
+        heldForOwnSize = false
+        until(self)
+        if heldOutput == nil { heldOutput = [] }
+        holdGeneration += 1
+        let generation = holdGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.holdGeneration == generation else { return }
+            self.releaseHeldOutput()
+        }
     }
 
     /// The size in points that shows `grid`: its cells, plus what the current size has
@@ -199,7 +225,14 @@ final class MacTerminalView: NSView, NSTextInputClient {
     }
 
     private func didResize(columns: UInt16, rows: UInt16) {
+        if otherDeviceGrid == nil, let stale = lastOtherGrid {
+            lastOtherGrid = nil
+            // The late report of the other device's grid: our own size comes next
+            if stale.rows == rows, stale.columns == columns { return }
+        }
         if let held = heldOutputGrid, held.rows == rows, held.columns == columns {
+            releaseHeldOutput()
+        } else if heldForOwnSize, otherDeviceGrid == nil {
             releaseHeldOutput()
         }
         onResize?(columns, rows)
@@ -209,6 +242,8 @@ final class MacTerminalView: NSView, NSTextInputClient {
         guard let held = heldOutput else { return }
         heldOutput = nil
         heldOutputGrid = nil
+        heldForOwnSize = false
+        holdGeneration += 1
         held.forEach(write)
     }
 
