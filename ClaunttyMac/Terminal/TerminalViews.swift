@@ -44,15 +44,16 @@ final class TerminalViews {
     }
 
     /// The session's view, made and wired to it on first use. `size` is where it'll
-    /// be shown, so the session starts at the right grid.
-    func view(for session: Session, size: CGSize) -> MacTerminalView {
+    /// be shown, so the session starts at the right grid; nil when that isn't known yet
+    /// (the session gets its grid from the first layout).
+    func view(for session: Session, size: CGSize?) -> MacTerminalView {
         if let entry = views[session.id] {
             if entry.session.session === session { return entry.view }
             entry.view.removeFromSuperview()
         }
         let view = MacTerminalView(app: app, fontSize: fontSize)
-        view.frame = NSRect(origin: .zero, size: size)
-        wire(session, to: view)
+        view.frame = NSRect(origin: .zero, size: size ?? CGSize(width: 900, height: 600))
+        wire(session, to: view, sized: size != nil)
         views[session.id] = (WeakSession(session: session), view)
         return view
     }
@@ -77,8 +78,7 @@ final class TerminalViews {
         var list = containers[session.id, default: []].filter { $0.view != nil }
         if !list.contains(where: { $0.view === container }) { list.append(WeakContainer(view: container)) }
         containers[session.id] = list
-        let size = container.bounds.size == .zero ? CGSize(width: 900, height: 600) : container.bounds.size
-        let view = view(for: session, size: size)
+        let view = view(for: session, size: container.bounds.size == .zero ? nil : container.bounds.size)
         place(view, of: session.id)
         return view
     }
@@ -115,9 +115,14 @@ final class TerminalViews {
         }
     }
 
-    private func wire(_ session: Session, to view: MacTerminalView) {
-        if let grid = view.gridSize {
+    private func wire(_ session: Session, to view: MacTerminalView, sized: Bool) {
+        // Not a placeholder's grid: attached at that, the program drew for it until the
+        // pane's own size went out
+        if sized, let grid = view.gridSize {
             session.initialTerminalSize = (rows: Int(grid.rows), columns: Int(grid.columns))
+        }
+        view.onLayout = { [weak session] columns, rows in
+            session?.initialTerminalSize = (rows: Int(rows), columns: Int(columns))
         }
         // What arrived before there was a view (it connected first, or this
         // replaces an older view), then everything from now on

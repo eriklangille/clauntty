@@ -14,6 +14,9 @@ final class MacTerminalView: NSView, NSTextInputClient {
     var onInput: ((Data) -> Void)?
     /// The terminal resized to this grid (after Ghostty's resize coalescing). Main thread.
     var onResize: ((_ columns: UInt16, _ rows: UInt16) -> Void)?
+    /// Laid out at this pane's own size, with this grid (right away, not after Ghostty's
+    /// coalescing): the size to attach at, if the pane hasn't sent one yet
+    var onLayout: ((_ columns: UInt16, _ rows: UInt16) -> Void)?
     /// Scrolled to within `nearTopRows` of the oldest line: time to load older history.
     var onScrollNearTop: (() -> Void)?
     /// Clicked: the pane becomes the one you're in. Main thread. Only clicks: when the app
@@ -170,12 +173,15 @@ final class MacTerminalView: NSView, NSTextInputClient {
     /// after the pane is ours again: sent as our size, it gave the PTY the other device's
     /// grid for a moment, and the program redrew for it.
     private var lastOtherGrid: (rows: UInt16, columns: UInt16)?
+    /// The pane is ours again and its size hasn't gone out since: the next layout sends it
+    private var ownSizeUnsent = false
 
     func setOtherDeviceGrid(_ grid: (rows: UInt16, columns: UInt16)?) {
         guard grid?.rows != otherDeviceGrid?.rows || grid?.columns != otherDeviceGrid?.columns else { return }
         let wasOther = otherDeviceGrid != nil
         otherDeviceGrid = grid
         if let grid { lastOtherGrid = grid }
+        ownSizeUnsent = grid == nil && wasOther
         if let surface, grid != nil { ghostty_surface_clear_selection(surface) }
         if let grid, let current = gridSize, current.rows != grid.rows || current.columns != grid.columns {
             hold { $0.heldOutputGrid = grid }
@@ -220,7 +226,18 @@ final class MacTerminalView: NSView, NSTextInputClient {
     /// the top left. Returns how much the container should scale it down to fit.
     func layout(in size: NSSize) -> CGFloat {
         guard let grid = otherDeviceGrid, let gridSize = pointSize(of: grid) else {
+            let before = self.gridSize
             frame = NSRect(origin: .zero, size: size)
+            guard let own = self.gridSize else { return 1 }
+            onLayout?(own.columns, own.rows)
+            // Ours again at the grid the terminal already has (the other device's grid
+            // was this pane's own): Ghostty reports no resize, or one that matches the
+            // other device's grid and is dropped as late, so rtach kept the size this
+            // pane sent last. The terminal is already at this grid: send it now.
+            if ownSizeUnsent, before?.columns == own.columns, before?.rows == own.rows {
+                lastOtherGrid = nil
+                didResize(columns: own.columns, rows: own.rows)
+            }
             return 1
         }
         frame = NSRect(origin: .zero, size: gridSize)
@@ -238,6 +255,7 @@ final class MacTerminalView: NSView, NSTextInputClient {
         } else if heldForOwnSize, otherDeviceGrid == nil {
             releaseHeldOutput()
         }
+        if otherDeviceGrid == nil { ownSizeUnsent = false }
         onResize?(columns, rows)
     }
 
