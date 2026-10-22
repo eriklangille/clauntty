@@ -12,12 +12,9 @@ final class WindowState: ObservableObject {
     @Published private(set) var commandHeld = false
 
     private var keyMonitor: Any?
-    private var showShortcuts: DispatchWorkItem?
-    /// Held this long first, so a Cmd shortcut doesn't flash the numbers
-    private static let holdBeforeShortcuts: TimeInterval = 0.3
 
     init() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.keyEvent(event)
             return event
         }
@@ -26,22 +23,16 @@ final class WindowState: ObservableObject {
         }
     }
 
+    /// Shown as Cmd goes down, so you can press one number after another while holding
+    /// it; another modifier with it (a Cmd+Shift shortcut) hides them
     private func keyEvent(_ event: NSEvent) {
-        let alone = event.type == .flagsChanged && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+        let alone = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
         guard alone else { return hideShortcuts() }
-        guard showShortcuts == nil, !commandHeld else { return }
-        let show = DispatchWorkItem { [weak self] in
-            self?.showShortcuts = nil
-            withAnimation(.easeOut(duration: 0.12)) { self?.commandHeld = true }
-        }
-        showShortcuts = show
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.holdBeforeShortcuts, execute: show)
+        if !commandHeld { commandHeld = true }
     }
 
     private func hideShortcuts() {
-        showShortcuts?.cancel()
-        showShortcuts = nil
-        if commandHeld { withAnimation(.easeOut(duration: 0.12)) { commandHeld = false } }
+        if commandHeld { commandHeld = false }
     }
 
     /// Terminals keep their size while the sidebar slides and resize once at the end:

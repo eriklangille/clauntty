@@ -230,16 +230,20 @@ private struct WorkspaceRow: View {
                 .transition(.opacity)
                 .help(images == 1 ? "An image to see" : "\(images) images to see")
             }
+            if group.panes.count > 1 {
+                PaneDots(panes: group.panes, activeId: group.activePaneId)
+                    .opacity(shortcut == nil ? 1 : 0)
+            }
+        }
+        // Over the row's end, so the title keeps its room
+        .overlay(alignment: .trailing) {
             if let shortcut {
                 Text(shortcut)
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
-                    .transition(.opacity)
-            } else if group.panes.count > 1 {
-                PaneDots(panes: group.panes, activeId: group.activePaneId)
+                    .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 4))
             }
         }
         .padding(.vertical, 2)

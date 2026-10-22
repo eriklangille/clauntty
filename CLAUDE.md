@@ -457,8 +457,8 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   bar (always shown; each button's label under it on hover) and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
 - **Settings** (Cmd+,, `MacSettings`): General: what Cmd+1–9 go to (`PaneCommands.NumberKeys`:
-  the nth workspace, the default, or the nth pane; holding Cmd alone for 0.3s shows each
-  workspace's number on its sidebar row, `WindowState.commandHeld`). Appearance: font size (`TerminalViews.setFontSize`,
+  the nth workspace, the default, or the nth pane; while Cmd alone is held, each workspace's
+  number shows on its sidebar row, at once, `WindowState.commandHeld`). Appearance: font size (`TerminalViews.setFontSize`,
   as Cmd +/−) and the theme (`MacGhosttyApp.setTheme`: `ghostty_app_update_config`, remembered as
   `themeId`; the window goes light or dark with it, `ThemeColors.background(theme)`). Sounds: chimes
   on/off, each chime, their volume (`agentChimeVolume`), a play button for each. Notifications:
