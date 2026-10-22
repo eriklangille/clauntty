@@ -9,7 +9,8 @@
 #                                          # and the command that installs it on another Mac
 #   ./scripts/mac.sh run [-- app args]     # build, quit the running app, launch
 #                                          # (CLAUNTTY_SSH_CONFIG=file: another ssh config;
-#                                          #  CLAUNTTY_LOCAL_HOME=dir: This Mac's home)
+#                                          #  This Mac's home: CLAUNTTY_LOCAL_HOME, else
+#                                          #  /tmp/clauntty-local-test, never the real one)
 #   ./scripts/mac.sh quit
 #   ./scripts/mac.sh shot [name]           # window screenshot -> screenshots/mac-<name>.png
 #   ./scripts/mac.sh click X Y [right|double]
@@ -113,11 +114,13 @@ case "$cmd" in
         [ "${1:-}" = "--" ] && shift
         build
         quit_app
-        # CLAUNTTY_SSH_CONFIG points the app at another ssh config, CLAUNTTY_LOCAL_HOME This
-        # Mac's panes at another home (tests use scratch ones)
-        env_args=()
+        # CLAUNTTY_SSH_CONFIG points the app at another ssh config (tests use a scratch one).
+        # This Mac's panes always get a scratch home (CLAUNTTY_LOCAL_HOME), so a test never
+        # lists or attaches to this Mac's real sessions.
+        local_home="${CLAUNTTY_LOCAL_HOME:-/tmp/clauntty-local-test}"
+        mkdir -p "$local_home" && touch "$local_home/.zshrc"
+        env_args=(--env "CLAUNTTY_LOCAL_HOME=$local_home")
         [ -n "${CLAUNTTY_SSH_CONFIG:-}" ] && env_args+=(--env "CLAUNTTY_SSH_CONFIG=$CLAUNTTY_SSH_CONFIG")
-        [ -n "${CLAUNTTY_LOCAL_HOME:-}" ] && env_args+=(--env "CLAUNTTY_LOCAL_HOME=$CLAUNTTY_LOCAL_HOME")
         open -n ${env_args[@]+"${env_args[@]}"} "$APP" --args "$@"
         for _ in $(seq 1 40); do
             curl -sf "$DRIVER/windows?app=$BUNDLE_ID" 2>/dev/null | grep -q '"window"' && { echo "Running."; exit 0; }

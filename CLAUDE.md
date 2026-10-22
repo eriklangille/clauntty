@@ -522,8 +522,9 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   input while the screen is locked. Test against the SSH container with a scratch config, so
   your real hosts aren't touched: `CLAUNTTY_SSH_CONFIG=/tmp/test/config ./scripts/mac.sh run`
   (a `Host` for the container with an `IdentityFile` authorized for testuser there).
-  For This Mac, add `CLAUNTTY_LOCAL_HOME=/tmp/clauntty-local-test` (Debug builds): its panes
-  then live in that home, not the Mac's real ~/.clauntty (put an empty `.zshrc` there).
+  This Mac's panes live in a scratch home under `mac.sh run` (`CLAUNTTY_LOCAL_HOME`, Debug
+  builds; default `/tmp/clauntty-local-test`), never the Mac's real ~/.clauntty. Launched
+  some other way, the Debug app's This Mac is the real one, with the user's live sessions.
 
 ## Key Info
 

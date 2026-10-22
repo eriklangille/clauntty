@@ -202,8 +202,28 @@ struct PaneHeader: View {
     let topLeft: Bool
 
     var body: some View {
+        // The pane's width, the row from its left: a pane too narrow for all of it cuts off
+        // the buttons on the right. Sized by its contents, the row ran off both ends, and
+        // the sidebar toggle went under the window's buttons.
+        Color.clear
+            .frame(height: Self.height)
+            .overlay(alignment: .leading) { row }
+            .clipped()
+            .background {
+                ZStack {
+                    focused || !split ? Color.white.opacity(0.07) : Color.white.opacity(0.02)
+                    WindowDragArea { MainView.show(selection, sessionManager) }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                    .allowsHitTesting(false)
+            }
+    }
+
+    private var row: some View {
         let active = focused || !split
-        HStack(spacing: 8) {
+        return HStack(spacing: 8) {
             if topLeft && window.sidebar == .detailOnly {
                 SidebarToggle()
                     .padding(.leading, SidebarToggle.leading - Self.padding)
@@ -237,16 +257,6 @@ struct PaneHeader: View {
         }
         .padding(.horizontal, Self.padding)
         .frame(height: Self.height)
-        .background {
-            ZStack {
-                active ? Color.white.opacity(0.07) : Color.white.opacity(0.02)
-                WindowDragArea { MainView.show(selection, sessionManager) }
-            }
-        }
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                .allowsHitTesting(false)
-        }
     }
 
     private func button(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {

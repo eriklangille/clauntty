@@ -61,7 +61,7 @@ struct Sidebar: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
             }
-            .padding(.trailing, 12)
+            .padding(.trailing, 4)
             .frame(height: PaneHeader.height)
         }
         // The window has no title bar: that row is ours
@@ -140,13 +140,14 @@ struct Sidebar: View {
 struct SidebarToggle: View {
     @EnvironmentObject private var window: WindowState
     /// From the window's left edge
-    static let leading: CGFloat = 78
+    static let leading: CGFloat = 74
 
     var body: some View {
         Button { window.toggleSidebar() } label: {
+            // The whole height of the title bar row, and some either side
             Image(systemName: "sidebar.left")
                 .font(.callout)
-                .frame(width: 20, height: 20)
+                .frame(width: 28, height: PaneHeader.height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -431,7 +432,7 @@ private struct HostHeader: View {
     private static let dragPrefix = "clauntty-host:"
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             Text(connection.name.uppercased())
                 .font(.caption.weight(.semibold))
                 .tracking(0.6)
@@ -484,6 +485,7 @@ private struct HostHeader: View {
             // menu: pressing the name starts a drag.
             Image(systemName: "ellipsis")
                 .font(.caption2.weight(.semibold))
+                .frame(width: 24, height: 22)
                 .contentShape(Rectangle())
         }
         .menuStyle(.button)
@@ -520,6 +522,8 @@ private struct AddHostMenu: View {
             Button("Reload ~/.ssh/config") { hosts.reload() }
         } label: {
             Image(systemName: "plus")
+                .frame(width: 28, height: PaneHeader.height)
+                .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
