@@ -236,6 +236,15 @@ extension SessionManager {
         lastInteraction[paneId] = now
     }
 
+    /// When a pane's agent finished, while it's done; else when the user last typed in
+    /// any of `paneIds`
+    func since(state: RemotePaneState?, typedIn paneIds: [String]) -> Date? {
+        if state?.state == "done", let doneAt = state?.doneAt {
+            return Date(timeIntervalSince1970: Double(doneAt) / 1000)
+        }
+        return paneIds.compactMap { lastInteraction[$0] }.max()
+    }
+
     /// The user has seen a pane: its finished agent shows as idle from now on
     func markPaneSeen(_ paneId: String) {
         guard noteSeen(paneId),

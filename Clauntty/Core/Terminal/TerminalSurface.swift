@@ -393,9 +393,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     var onTextInput: ((Data) -> Void)? {
         didSet {
             // Also wire up the accessory bar
-            accessoryBar.onKeyInput = onTextInput
+            accessoryBar.onKeyInput = { [weak self] data in
+                self?.onTyped?()
+                self?.onTextInput?(data)
+            }
         }
     }
+
+    /// The user typed or pasted (not the terminal answering a query): the pane's time
+    var onTyped: (() -> Void)?
 
     /// Callback for image paste: uploads the image to the remote host and returns its
     /// path there, which is then pasted
@@ -432,6 +438,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Wire up voice input - send transcribed text to terminal
         accessoryBar.onVoiceInput = { [weak self] text in
             guard let self = self, let data = text.data(using: .utf8) else { return }
+            self.onTyped?()
             self.onTextInput?(data)
         }
 
@@ -1578,6 +1585,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     @objc override func paste(_ sender: Any?) {
         Logger.clauntty.debugOnly("[PASTE] paste() called")
+        onTyped?()
 
         if let string = UIPasteboard.general.string {
             Logger.clauntty.debugOnly("[PASTE] clipboard has string: \(string.count) chars, \(string.utf8.count) bytes")
@@ -2515,6 +2523,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     func insertText(_ text: String) {
         Logger.clauntty.verbose("insertText called: '\(text)' (\(text.count) chars)")
         dropSelectionForTyping()
+        onTyped?()
 
         // Return with the Ctrl or Option toggle on
         if text == "\n" {
@@ -2568,6 +2577,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     func deleteBackward() {
         Logger.clauntty.verbose("deleteBackward called")
         dropSelectionForTyping()
+        onTyped?()
         // Send backspace (ASCII DEL 0x7F or BS 0x08) to SSH
         let backspace = Data([0x7F])  // DEL character
         onTextInput?(backspace)
@@ -2591,6 +2601,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             }
 
             if let data = dataForKey(key) {
+                onTyped?()
                 onTextInput?(data)
                 handled = true
             }

@@ -116,9 +116,14 @@ running the app in the simulator against the test container (see SSH Testing).
 CoreSimulator is out of date. Run `sudo xcodebuild -runFirstLaunch` in a real terminal on the Mac (over
 SSH, `ssh -t`). It asks for a password, so `!` in Claude Code can't run it.
 
-**Agent view** (`AgentSwitcherView`) is the phone's only layout: one window per workspace, drawn as
-its terminal under a glass pill (status glyph, title, pane dots). Tap one to type into it; swipe it to
-switch panes; fullscreen it to work. (The old tab bar was removed on 2026-10-20.)
+**Agent view** (`AgentSwitcherView`) is the phone's only layout: one window per workspace. Not typed
+into, a window is a card like the Mac sidebar's (`SwitcherWindow.card`: glyph, title and time, what
+it's doing, pane dots and page rings), its terminal live but hidden under it, so a tap only grows the
+window and fades the card into its terminal under a glass pill. Holding a card opens its menu (the
+pill is there, unseen: `PillMenu.hidesClosed`). Swipe a window to switch panes; fullscreen it to
+work. The card's text comes from the shared helpers in `PaneModels.swift` (`sidebarTitles`,
+`leadPane`, `detail`, `place`, `shortAge`) and `SessionManager.since`. (The old tab bar was removed
+on 2026-10-20.)
 
 **Workspace tabs:** with rtach, every terminal tab is an rtach workspace (`rtach ws`): a `SessionGroup`
 in `SessionManager+Groups.swift`, its panes the window's dots, swipes and menu sections. A new tab is `ws new` in

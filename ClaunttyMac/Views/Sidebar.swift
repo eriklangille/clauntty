@@ -204,7 +204,7 @@ private struct WorkspaceRow: View {
 
     var body: some View {
         let (title, subtitle) = group.sidebarTitles
-        let lead = leadPane
+        let lead = group.leadPane
         let state = lead.flatMap { sessionManager.paneStates[$0.id] }
         let detail = (lead?.status ?? .none).detail(state: state, title: title, subtitle: subtitle)
         // The status glyph in the middle on the left; the title and its time, one line;
@@ -220,7 +220,7 @@ private struct WorkspaceRow: View {
                     // Context for the state, not a headline: small and quiet, as Mail's times
                     // (a minute's tick, so "4m" becomes "5m" without anything else changing)
                     TimelineView(.everyMinute) { context in
-                        Text(since(state).map { $0.shortAge(now: context.date) } ?? "")
+                        Text(sessionManager.since(state: state, typedIn: group.panes.map(\.id)).map { $0.shortAge(now: context.date) } ?? "")
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
@@ -284,48 +284,6 @@ private struct WorkspaceRow: View {
                 .offset(y: 3)
         }
         .help(subtitle.map { "\(title) · \($0)" } ?? title)
-    }
-
-    /// The pane the card speaks for: the one that needs you most, else the one shown
-    private var leadPane: TabPane? {
-        let shown = group.panes.first { $0.id == group.activePaneId } ?? group.panes.first
-        guard let pressing = group.panes.max(by: { $0.status.urgency < $1.status.urgency }),
-              let shown else { return shown }
-        return pressing.status.urgency > shown.status.urgency ? pressing : shown
-    }
-
-    /// When its agent finished, while it's done; else when you last typed in any of its panes
-    private func since(_ state: RemotePaneState?) -> Date? {
-        if state?.state == "done", let doneAt = state?.doneAt {
-            return Date(timeIntervalSince1970: Double(doneAt) / 1000)
-        }
-        return group.panes.compactMap { sessionManager.lastInteraction[$0.id] }.max()
-    }
-
-}
-
-extension Date {
-    /// How long before `now`: "now", "4m", "2h", "3d"
-    func shortAge(now: Date) -> String {
-        let seconds = max(now.timeIntervalSince(self), 0)
-        if seconds < 60 { return "now" }
-        if seconds < 3600 { return "\(Int(seconds / 60))m" }
-        if seconds < 86400 { return "\(Int(seconds / 3600))h" }
-        return "\(Int(seconds / 86400))d"
-    }
-}
-
-extension SessionGroup {
-    /// The workspace's name and what's running in the pane it shows. Workspaces named
-    /// after a folder (`~`, a path) take the running thing's name instead.
-    var sidebarTitles: (title: String, subtitle: String?) {
-        let shown = panes.first { $0.id == activePaneId } ?? panes.first
-        let paneTitle = shown?.title ?? ""
-        guard !title.isEmpty, title != "~", !title.hasPrefix("/") else {
-            return (paneTitle.isEmpty || paneTitle == "~" ? "shell" : paneTitle, nil)
-        }
-        // A shell at home says nothing more than the name
-        return (title, paneTitle == title || paneTitle == "~" || paneTitle.isEmpty ? nil : paneTitle)
     }
 }
 
@@ -469,42 +427,7 @@ private struct Peekable: ViewModifier {
     }
 }
 
-extension RemotePaneState {
-    /// Where a pane is, for one with nothing else to say: the program in front unless
-    /// it's the shell, and the folder from home ("claude · ~/Projects/clauntty")
-    var place: String? {
-        let folder = Self.folder(cwd)
-        let shells: Set = ["bash", "zsh", "fish", "sh", "dash", "login"]
-        let program = fg.flatMap { $0.isEmpty || shells.contains($0.trimmingCharacters(in: ["-"])) ? nil : $0 }
-        switch (program, folder) {
-        case let (program?, folder?): return "\(program) · \(folder)"
-        case let (program, folder): return program ?? folder
-        }
-    }
-
-    /// A folder from home: "~/Projects/clauntty"
-    static func folder(_ path: String?) -> String? {
-        guard let path, !path.isEmpty else { return nil }
-        let parts = path.split(separator: "/").map(String.init)
-        let home = parts.first == "Users" || parts.first == "home" ? 2 : parts.first == "root" ? 1 : 0
-        guard home > 0, parts.count >= home else { return path }
-        return (["~"] + parts.dropFirst(home)).joined(separator: "/")
-    }
-}
-
 extension PaneStatus {
-    /// What a pane is doing, beside its glyph (which says its state): the task, what it's
-    /// waiting on when it needs you, or a shell's program; nil when there's nothing to say
-    func detail(state: RemotePaneState?, title: String, subtitle: String?) -> String? {
-        // Not when it's already the title (a workspace named after its folder takes it)
-        let task = state?.task.flatMap { $0.isEmpty || title.hasPrefix($0) || $0.hasPrefix(title) ? nil : $0 }
-        switch self {
-        case .blocked: return state?.note.flatMap { $0.isEmpty ? nil : $0 } ?? task
-        case .working, .done, .idle: return task
-        case .none: return subtitle ?? state?.fg
-        }
-    }
-
     /// The phone's status colours
     var color: Color {
         switch self {
@@ -514,25 +437,6 @@ extension PaneStatus {
         case .blocked: return .orange
         case .done: return .green
         }
-    }
-
-    /// Which of two statuses to show for a workspace: what needs you first
-    fileprivate var urgency: Int {
-        switch self {
-        case .blocked: return 4
-        case .done: return 3
-        case .working: return 2
-        case .idle: return 1
-        case .none: return 0
-        }
-    }
-}
-
-extension SessionGroup {
-    /// What needs you most among its panes: one waiting on you beats one that's done,
-    /// which beats one working
-    var mostPressingStatus: PaneStatus {
-        panes.map(\.status).max { $0.urgency < $1.urgency } ?? .none
     }
 }
 

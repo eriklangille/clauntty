@@ -128,8 +128,9 @@ struct AgentSwitcherView: View {
     /// Voice and a new tab, after the windows: the pager's last stop while typing
     static let controlsHeight: CGFloat = 56
 
-    /// How much of the window above stays in view, below the status bar, to tap
-    static let peek: CGFloat = 44
+    /// How much of the window above stays in view, below the status bar, to tap: its
+    /// whole card
+    static var peek: CGFloat { SwitcherWindow.cardHeight + spacing }
     /// Room at the top of each window for its pill
     static let pillStrip: CGFloat = 52
     /// What the terminal keeps at its bottom for the key bar
@@ -548,14 +549,10 @@ struct AgentSwitcherView: View {
             // From where it settles (the first window has nothing above to peek) down to
             // the key bar, so nothing is left to show between them
             if isFocused { return .focused(maxHeight: max(160, barTop(size) - Self.anchor(for: i) - 10)) }
-            return status == .blocked && moving == nil ? .blocked : .collapsed
+            return .collapsed
         }()
-        var height = SwitcherWindow.height(cursor: session.cursorRow, mode: mode, isAgent: isAgent,
+        let height = SwitcherWindow.height(cursor: session.cursorRow, mode: mode, isAgent: isAgent,
                                            terminalSize: terminalSize, windowWidth: width)
-        // Showing its web tab, a collapsed window is a web window's height
-        if !isFocused, webShown(in: tabId) != nil {
-            height = moving != nil ? Self.movingHeight(width: width, size: size) : Self.webHeight(width: width, size: size)
-        }
         return WindowSpec(mode: mode, isAgent: isAgent, status: status, terminalSize: terminalSize, width: width, height: height)
     }
 
@@ -863,16 +860,11 @@ struct AgentSwitcherView: View {
         }
     }
 
-    /// A web window: its pill over the top of the page
-    static func webHeight(width: CGFloat, size: CGSize) -> CGFloat {
-        pillStrip + 200 * (width / size.width) + SwitcherWindow.bottomPad
-    }
+    /// A web window not typed into: a card, as a terminal's
+    static func webHeight(width: CGFloat, size: CGSize) -> CGFloat { SwitcherWindow.cardHeight }
 
-    /// A page's window while one is moved: a collapsed terminal's height
-    static func movingHeight(width: CGFloat, size: CGSize) -> CGFloat {
-        SwitcherWindow.height(cursor: nil, mode: .collapsed, isAgent: false,
-                              terminalSize: CGSize(width: size.width, height: size.height - pillStrip), windowWidth: width)
-    }
+    /// A page's window while one is moved: a card too
+    static func movingHeight(width: CGFloat, size: CGSize) -> CGFloat { SwitcherWindow.cardHeight }
 
     /// A page's size: the screen below the pill, in every mode (so fullscreen is a zoom)
     static func webSize(_ size: CGSize) -> CGSize {
@@ -1281,10 +1273,9 @@ struct SwitcherWindow: View {
     var voice: VoiceAgent.Phase? = nil
 
     enum Mode: Equatable {
-        /// The last couple of lines: what the agent said, or the shell's prompt
+        /// A card: the workspace's glyph, title and time, what it's doing and its panes.
+        /// The terminal stays under it, live but hidden, so opening it is only a layout.
         case collapsed
-        /// More lines, for a prompt that needs an answer
-        case blocked
         /// Typed into: as many lines as fit
         case focused(maxHeight: CGFloat)
         /// The session view
@@ -1297,6 +1288,8 @@ struct SwitcherWindow: View {
     @State private var held = false
 
     static let bottomPad: CGFloat = 8
+    /// A collapsed window: two lines, so many fit
+    static let cardHeight: CGFloat = 62
     /// What the terminal keeps at its bottom for the key bar while the keyboard is up
     static var keyBarReserve: CGFloat { 74 - AgentSwitcherView.keyBarSaving }
 
@@ -1312,6 +1305,75 @@ struct SwitcherWindow: View {
         return false
     }
 
+    private var isCard: Bool { mode == .collapsed }
+
+    /// A page's card, beneath its title: its port (when the title is the page's own) and
+    /// the workspace it's in
+    private func pageLine(_ web: WebTab, workspace: String) -> String {
+        let port = web.pageTitle?.isEmpty == false ? ":\(String(web.remotePort.port))" : nil
+        return [port, workspace].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The collapsed window, as the Mac's sidebar card: the glyph in the middle on the
+    /// left; the title and its time; beneath, what it's doing (or where it is) and the
+    /// pane dots. Showing a page: the page's title and port.
+    private var card: some View {
+        let group = sessionManager.sessionGroup(for: session)
+        let titles = group?.sidebarTitles ?? (title: title, subtitle: nil)
+        let lead = group?.leadPane
+        let state = lead.flatMap { sessionManager.paneStates[$0.id] }
+        let detail = notice?.text
+            ?? (lead?.status ?? status).detail(state: state, title: titles.title, subtitle: titles.subtitle)
+            ?? state?.place
+        return HStack(spacing: 12) {
+            ZStack {
+                if let web {
+                    WebGlyph(webTab: web)
+                } else if voice != nil {
+                    VoiceEyes(status: lead?.status ?? status, size: 12, gaze: CGSize(width: 0, height: 1))
+                        .teleportingEyes()
+                } else {
+                    StatusGlyph(status: lead?.status ?? status)
+                        .frame(width: 10, height: 10)
+                }
+            }
+            .frame(width: 12)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(web.map(\.title) ?? titles.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    // Context, not a headline: small and quiet (a minute's tick)
+                    if web == nil {
+                        TimelineView(.everyMinute) { context in
+                            Text(sessionManager.since(state: state, typedIn: panes.map(\.id))
+                                .map { $0.shortAge(now: context.date) } ?? "")
+                                .font(.system(size: 12).monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .fixedSize()
+                    }
+                }
+                HStack(spacing: 8) {
+                    // A space at worst: every card the same height
+                    Text(web.map { pageLine($0, workspace: titles.title) } ?? detail ?? " ")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if max(1, panes.count) + webPanes > 1 {
+                        PaneDots(panes: panes, activeIndex: activeIndex, webPanes: webPanes, activeWeb: activeWeb)
+                    }
+                }
+            }
+        }
+        .padding(.leading, 16)
+        // Clear of the images' thumbnail
+        .padding(.trailing, images?.items.isEmpty == false ? ImagesThumbnail.size + 16 : 16)
+        .frame(width: windowWidth, height: Self.cardHeight)
+    }
+
     private var scale: CGFloat { windowWidth / terminalSize.width }
 
     private var crop: (bottom: CGFloat, rows: Int, cell: CGFloat) {
@@ -1325,7 +1387,7 @@ struct SwitcherWindow: View {
         let scale = windowWidth / terminalSize.width
         let usable = terminalSize.height - AgentSwitcherView.barReserve
         guard let cursor else {
-            return (usable, mode == .blocked ? 7 : 2, 17)
+            return (usable, 2, 17)
         }
         let cell = cursor.height
         // The last whole row above the key bar's strip
@@ -1336,11 +1398,8 @@ struct SwitcherWindow: View {
         let promptLine = cursor.top + cell
         switch mode {
         case .collapsed:
-            // An agent: the lines above its input box and the blank row Claude leaves
-            // before it. A shell: up to its prompt.
-            return (isAgent ? cursor.top - 2 * cell : promptLine, 2, cell)
-        case .blocked:
-            return (isAgent ? agentBottom : lastRow, 7, cell)
+            // Not shown (the card covers it): where the focused crop will be
+            return (isAgent ? agentBottom : promptLine, 2, cell)
         case .focused(let maxHeight), .fullscreen(let maxHeight):
             // Down to the input (Claude's box and footer, or the prompt), as many rows
             // above it as fit: with the keyboard up the rest of the terminal is under it
@@ -1354,9 +1413,7 @@ struct SwitcherWindow: View {
         if case .fullscreen(let height) = mode { return height }
         // Typing: exactly down to the key bar, the terminal's crop anchored at its bottom
         if case .focused(let maxHeight) = mode { return maxHeight }
-        let c = crop(cursor: cursor, mode: mode, isAgent: isAgent, terminalSize: terminalSize, windowWidth: windowWidth)
-        let scale = windowWidth / terminalSize.width
-        return AgentSwitcherView.pillStrip + CGFloat(c.rows) * c.cell * scale + bottomPad
+        return cardHeight
     }
 
     var body: some View {
@@ -1400,8 +1457,9 @@ struct SwitcherWindow: View {
                 .environmentObject(sessionManager)
                 .environmentObject(appState)
             }
-            // Showing a page, the terminal stays (live, keeping its place) under it
-            .opacity(web == nil ? 1 : 0)
+            // Showing a page, the terminal stays (live, keeping its place) under it; a card
+            // keeps both under it
+            .opacity(web == nil && !isCard ? 1 : 0)
             if let web {
                 ClipHost(passesTouches: !isFullscreen, contentSize: webSize,
                          scale: isFullscreen ? 1 : windowWidth / webSize.width,
@@ -1411,10 +1469,11 @@ struct SwitcherWindow: View {
                         .frame(width: webSize.width, height: webSize.height)
                         .environmentObject(sessionManager)
                 }
+                .opacity(isCard ? 0 : 1)
                 .transition(.opacity)
                 .task(id: web.id) { await sessionManager.reconnectIfClosed(web) }
             }
-            if web == nil, !isFullscreen, let notice {
+            if web == nil, !isFullscreen, !isCard, let notice {
                 // Covers the empty terminal (its own overlays are centered in the whole
                 // terminal, cropped away here)
                 HStack(spacing: 8) {
@@ -1446,6 +1505,12 @@ struct SwitcherWindow: View {
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .allowsHitTesting(false)
             }
+
+            // Always there, so opening fades it out with the window's growth
+            card
+                .frame(maxHeight: .infinity, alignment: .top)
+                .opacity(isCard ? 1 : 0)
+                .allowsHitTesting(false)
 
             if !isFullscreen {
                 // Taps and sideways swipes go to the window, not the terminal; vertical
@@ -1507,18 +1572,21 @@ struct SwitcherWindow: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.top, 8)
+        .padding(.top, isCard ? (Self.cardHeight - ImagesThumbnail.size) / 2 : 8)
         .frame(height: AgentSwitcherView.pillStrip, alignment: .top)
     }
 
     private var pill: some View {
         // Typing into it, the pill is the tab: a tap opens its menu. Any window's opens
         // when held.
+        // On a card it's there to hold (its menu) but unseen until the menu opens
         PillMenu(isOpen: isMenuOpen, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
-                 room: menuRoom - 8, trailing: floatsPill, onOpen: { onMenu(true) }, onClose: { onMenu(false) },
+                 room: menuRoom - 8, trailing: floatsPill, hidesClosed: isCard,
+                 onOpen: { onMenu(true) }, onClose: { onMenu(false) },
                  onTap: { if !isFullscreen { onTap() } }) {
             PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex,
-                     web: web, webPanes: webPanes, activeWeb: activeWeb, glass: false, eyes: voice != nil)
+                     web: web, webPanes: webPanes, activeWeb: activeWeb, glass: false, eyes: voice != nil && !isCard)
+                .opacity(isCard && !isMenuOpen ? 0 : 1)
         }
         .gesture(isFullscreen ? pullGesture : nil)
         .simultaneousGesture(isFullscreen ? nil : swipeGesture)
@@ -1931,13 +1999,7 @@ private struct WebPillLabel: View {
     @ObservedObject var webTab: WebTab
 
     var body: some View {
-        if webTab.isLoading {
-            ProgressView().controlSize(.mini)
-        } else {
-            Image(systemName: "globe")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-        }
+        WebGlyph(webTab: webTab)
         Text(webTab.title)
             .font(.system(size: 14, weight: .semibold))
             .lineLimit(1)
@@ -1994,38 +2056,74 @@ private struct PanePill: View {
                 }
             }
             if max(1, panes.count) + webPanes > 1 {
-                HStack(spacing: 3) {
-                    ForEach(Array(panes.enumerated()), id: \.offset) { index, pane in
-                        let active = activeWeb == nil && index == activeIndex
-                        Capsule()
-                            .fill(dotColor(pane, active: active))
-                            .frame(width: active ? 8 : 4, height: 4)
-                    }
-                    if panes.isEmpty {
-                        Capsule()
-                            .fill(Color.white.opacity(activeWeb == nil ? 0.9 : 0.3))
-                            .frame(width: activeWeb == nil ? 8 : 4, height: 4)
-                    }
-                    ForEach(0..<webPanes, id: \.self) { index in
-                        Image(systemName: "globe")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(activeWeb == index ? 0.9 : 0.4))
-                    }
-                }
-                .padding(.leading, 2)
+                PaneDots(panes: panes, activeIndex: activeIndex, webPanes: webPanes, activeWeb: activeWeb)
+                    .padding(.leading, 2)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .modifier(PillGlass(isOn: glass))
     }
+}
+
+/// One dot per pane, the shown one a short capsule, others orange when they need you and
+/// green when done; then, a little apart, a ring per page (the shown one wider), as on
+/// the Mac
+private struct PaneDots: View {
+    let panes: [TabPane]
+    let activeIndex: Int
+    var webPanes = 0
+    var activeWeb: Int? = nil
+
+    var body: some View {
+        HStack(spacing: 5) {
+            HStack(spacing: 3) {
+                ForEach(Array(panes.enumerated()), id: \.offset) { index, pane in
+                    let active = activeWeb == nil && index == activeIndex
+                    Capsule()
+                        .fill(color(pane, active: active))
+                        .frame(width: active ? 8 : 4, height: 4)
+                }
+                if panes.isEmpty {
+                    Capsule()
+                        .fill(Color.white.opacity(activeWeb == nil ? 0.9 : 0.3))
+                        .frame(width: activeWeb == nil ? 8 : 4, height: 4)
+                }
+            }
+            if webPanes > 0 {
+                HStack(spacing: 3) {
+                    ForEach(0..<webPanes, id: \.self) { index in
+                        let shown = activeWeb == index
+                        Capsule()
+                            .strokeBorder(Color.white.opacity(shown ? 0.9 : 0.45), lineWidth: 1)
+                            .frame(width: shown ? 9 : 5, height: 5)
+                    }
+                }
+            }
+        }
+    }
 
     /// Like the tab bar: other panes that need you or finished show their color
-    private func dotColor(_ pane: TabPane, active: Bool) -> Color {
+    private func color(_ pane: TabPane, active: Bool) -> Color {
         if active { return Color.white.opacity(0.9) }
         switch pane.status {
         case .blocked, .done: return Color(uiColor: pane.status.tint)
         default: return Color.white.opacity(0.3)
+        }
+    }
+}
+
+/// A page's glyph: loading, or a globe
+private struct WebGlyph: View {
+    @ObservedObject var webTab: WebTab
+
+    var body: some View {
+        if webTab.isLoading {
+            ProgressView().controlSize(.mini)
+        } else {
+            Image(systemName: "globe")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
     }
 }

@@ -106,6 +106,7 @@ struct TerminalView: View {
                     onSurfaceReady: { surface in
                         Logger.clauntty.debugOnly("onSurfaceReady called for session \(session.id.uuidString.prefix(8)), state=\(String(describing: session.state))")
                         surfaceHolder.surface = surface
+                        surface.onTyped = { [weak session] in session?.onTyped?() }
                         connectSession(surface: surface)
                     }
                 )

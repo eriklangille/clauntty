@@ -37,6 +37,8 @@ struct PillMenu<Label: View>: View {
     let room: CGFloat
     /// The pill is at the right: the panel grows left from it
     var trailing = false
+    /// Closed, it draws nothing (its label hides itself too): a card's, to hold
+    var hidesClosed = false
     let onOpen: () -> Void
     let onClose: () -> Void
     let onTap: () -> Void
@@ -102,6 +104,7 @@ struct PillMenu<Label: View>: View {
         // The rows stay inside the glass as it grows
         .clipShape(shape)
         .glass(in: shape)
+        .opacity(hidesClosed && !isOpen ? 0 : 1)
         .offset(x: trailing && isOpen ? pill.width + lead - width : -lead, y: -lift)
     }
 

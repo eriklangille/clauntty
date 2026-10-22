@@ -101,7 +101,7 @@ private struct PaneRow: View {
                         .lineLimit(1)
                     Spacer(minLength: 6)
                     TimelineView(.everyMinute) { context in
-                        Text(since(state).map { $0.shortAge(now: context.date) } ?? "")
+                        Text(sessionManager.since(state: state, typedIn: [pane.id]).map { $0.shortAge(now: context.date) } ?? "")
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
@@ -124,14 +124,6 @@ private struct PaneRow: View {
             if inside { window.peekPane = selection } else if window.peekPane == selection { window.peekPane = nil }
         }
         .onTapGesture { MainView.show(PaneSelection(groupId: group.id, paneId: pane.id), sessionManager) }
-    }
-
-    /// When its agent finished, while it's done; else when you last typed in it
-    private func since(_ state: RemotePaneState?) -> Date? {
-        if state?.state == "done", let doneAt = state?.doneAt {
-            return Date(timeIntervalSince1970: Double(doneAt) / 1000)
-        }
-        return sessionManager.lastInteraction[pane.id]
     }
 }
 
