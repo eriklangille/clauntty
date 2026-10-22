@@ -111,7 +111,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.32.5"
+    static let expectedVersion = "2.33.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -883,6 +883,13 @@ struct RemotePaneState: Decodable, Equatable {
     let task: String?
     /// Its master sends push notifications (rtach 2.18.0)
     let pushes: Bool?
+    /// When the agent finished (unix ms), while it's done (rtach 2.33.0)
+    let doneAt: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case fg, cwd, title, agent, state, note, task, pushes
+        case doneAt = "done_at"
+    }
 
     var hasAgent: Bool { agent != nil && agent != "none" }
 }

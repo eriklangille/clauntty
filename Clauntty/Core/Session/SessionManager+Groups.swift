@@ -153,9 +153,32 @@ extension SessionManager {
         switch state.state {
         case "working": return .working
         case "blocked": return .blocked
-        case "done": return unseenDonePanes.contains(paneId) ? .done : .idle
+        case "done":
+            if let doneAt = state.doneAt { return seenDoneAt[paneId] == doneAt ? .idle : .done }
+            return unseenDonePanes.contains(paneId) ? .done : .idle
         default: return .idle
         }
+    }
+
+    /// The pane the user is looking at: the one shown, with the app in front
+    private func paneIsShown(_ paneId: String) -> Bool {
+        #if os(iOS)
+        let appShown = !NotificationManager.shared.appIsBackgrounded
+        #else
+        let appShown = true
+        #endif
+        return activeSession?.pane?.paneId == paneId && appShown
+    }
+
+    /// Record that the user has seen a pane as it is now. True if its glyph changes.
+    @discardableResult
+    private func noteSeen(_ paneId: String) -> Bool {
+        var changed = unseenDonePanes.remove(paneId) != nil
+        if let doneAt = paneStates[paneId]?.doneAt, seenDoneAt[paneId] != doneAt {
+            seenDoneAt[paneId] = doneAt
+            changed = true
+        }
+        return changed
     }
 
     /// `pane;<id>;<json>` from rtach: one pane's state changed. Notifies the user when
@@ -166,17 +189,15 @@ extension SessionManager {
         paneStates[paneId] = state
         guard let index = sessionGroups.firstIndex(where: { $0.panes.contains { $0.id == paneId } }) else { return }
 
-        #if os(iOS)
-        let appShown = !NotificationManager.shared.appIsBackgrounded
-        #else
-        let appShown = true
-        #endif
-        let shown = activeSession?.pane?.paneId == paneId && appShown
-        if state.state == "done", previous?.state != "done", !shown {
+        if paneIsShown(paneId) {
+            noteSeen(paneId)
+        } else if state.state == "done", previous?.state != "done" {
             unseenDonePanes.insert(paneId)
         }
         if state.state != "done" {
             unseenDonePanes.remove(paneId)
+            // Its next finish is a new one
+            if seenDoneAt[paneId] != nil { seenDoneAt[paneId] = nil }
         }
 
         var group = sessionGroups[index]
@@ -209,7 +230,7 @@ extension SessionManager {
 
     /// The user has seen a pane: its finished agent shows as idle from now on
     func markPaneSeen(_ paneId: String) {
-        guard unseenDonePanes.remove(paneId) != nil,
+        guard noteSeen(paneId),
               let index = sessionGroups.firstIndex(where: { $0.panes.contains { $0.id == paneId } }),
               let paneIndex = sessionGroups[index].panes.firstIndex(where: { $0.id == paneId }) else { return }
         sessionGroups[index].panes[paneIndex].status = paneStatus(paneId)
@@ -265,6 +286,7 @@ extension SessionManager {
     func paneEnded(_ paneId: String, config: SavedConnection, refresh: Bool = true) {
         guard endedPanes.insert(paneId).inserted else { return }
         Logger.clauntty.debugOnly("SessionManager: pane \(paneId.prefix(8)) ended")
+        if seenDoneAt[paneId] != nil { seenDoneAt[paneId] = nil }
         if let workspaces = knownWorkspaces[config.id] {
             applyWorkspaces(workspaces, hostName: knownHostNames[config.id], config: config)
         }
@@ -317,12 +339,17 @@ extension SessionManager {
         var shown = Set<UUID>()
         var order: [UUID] = []
 
+        var seen = seenDoneAt
+        for pane in workspaces.flatMap({ $0.tabs.flatMap(\.panes) }) {
+            paneStates[pane.id] = pane.state
+            // Not done: its next finish is a new one
+            if pane.state?.doneAt == nil { seen[pane.id] = nil }
+        }
+        if seen != seenDoneAt { seenDoneAt = seen }
+        // A finish on screen is seen (at launch, the pane shown before its state was known)
+        if let pane = activeSession?.pane?.paneId, paneIsShown(pane) { noteSeen(pane) }
+
         for workspace in workspaces {
-            for tab in workspace.tabs {
-                for pane in tab.panes {
-                    paneStates[pane.id] = pane.state
-                }
-            }
             let panes = workspace.tabs.enumerated().flatMap { tabIndex, tab in
                 tab.panes.map { pane in
                     TabPane(id: pane.id, title: paneTitle(pane.id, fallback: pane.title), status: paneStatus(pane.id), group: tabIndex)
@@ -651,5 +678,7 @@ extension SessionManager {
             sessionGroups.append(group)
             paneSession(for: group, paneId: group.activePaneId, config: config)
         }
+        // Images that were waiting in their viewers
+        windowImages = WaitingImages.load(workspaces: Set(sessionGroups.map(\.id)))
     }
 }

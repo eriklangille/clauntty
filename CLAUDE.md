@@ -449,7 +449,10 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   ran it (`windowImages`, by workspace, as agent mode on the phone). `ImageViewer` shows
   them over that workspace's panes only, when it's on screen; another workspace's wait,
   with a photo badge on its sidebar row, until you go there. Closing the viewer clears
-  them. It opens out of the pane that ran it (`ImageViewerContent.source`,
+  them. Until then they're on disk (`WaitingImages`: Application Support/<bundle id>/Waiting,
+  a folder per workspace, synced from `windowImages`' didSet, loaded with the saved
+  workspaces), so a restart doesn't lose them; the host's inbox entry is gone once
+  downloaded. The phone's windows keep theirs the same way. It opens out of the pane that ran it (`ImageViewerContent.source`,
   `TerminalViews.frameInWindow`). Zoom, paging, the
   bar (always shown; each button's label under it on hover) and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
@@ -458,6 +461,9 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   pane is on screen with the app in front (a banner when it's in another workspace). One per pane:
   showing the pane, or its agent working again, clears it. Clicking one brings the app forward
   on the pane. The Dock icon counts the panes waiting at a menu or question.
+  A finished agent's green dot lasts until its pane is seen: rtach's state has `done_at` (2.33.0)
+  and `SessionManager.seenDoneAt` (UserDefaults) the finish each pane last showed, so a
+  restart keeps the dot, and an agent that finished while the app was closed gets one.
   Each plays a chime: `agent-done.wav` when an agent finishes, `agent-needs-you.wav` when it
   needs you (`ClaunttyMac/Sounds`, synthesized by `scripts/make-chimes.py`: edit its notes and
   rerun it). A pane on screen with the app in front gets the chime alone (`willPresent`: sound,

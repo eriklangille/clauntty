@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // Models for panes and tabs that Core (SessionManager) and the views of both apps use.
 
@@ -146,22 +147,27 @@ enum TabItem: Identifiable, Equatable {
 /// Images sent from a remote host with `clauntty show`
 struct ImageViewerContent: Identifiable {
     struct Item: Identifiable {
-        let id = UUID()
+        let id: UUID
         let name: String
         let image: PlatformImage?
         /// Why the image couldn't be shown (download failed, not an image)
         let error: String?
+        let arrived: Date
 
-        init(name: String, image: PlatformImage) {
+        init(id: UUID = UUID(), name: String, image: PlatformImage, arrived: Date = Date()) {
+            self.id = id
             self.name = name
             self.image = image
             self.error = nil
+            self.arrived = arrived
         }
 
         init(name: String, error: String) {
+            self.id = UUID()
             self.name = name
             self.image = nil
             self.error = error
+            self.arrived = Date()
         }
     }
 
@@ -172,4 +178,101 @@ struct ImageViewerContent: Identifiable {
     var selection = 0
     /// The session that ran `clauntty show`: the Mac opens the viewer out of its pane
     var source: UUID?
+}
+
+/// Images waiting in a workspace's viewer, kept on disk so they're still there after the
+/// app restarts: `Application Support/<bundle id>/Waiting/<workspace>/`, each image's
+/// bytes as downloaded (named by its item's id) and `manifest.json`. A workspace whose
+/// viewer is closed loses its folder.
+enum WaitingImages {
+    private struct Manifest: Codable {
+        struct Item: Codable {
+            let id: UUID
+            let name: String
+            let arrived: Date
+        }
+        let host: String
+        let source: UUID?
+        let items: [Item]
+    }
+
+    private static let manifestName = "manifest.json"
+
+    private static var directory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent(Bundle.main.bundleIdentifier ?? "Clauntty", isDirectory: true)
+            .appendingPathComponent("Waiting", isDirectory: true)
+    }
+
+    private static func folder(_ workspace: UUID) -> URL {
+        directory.appendingPathComponent(workspace.uuidString, isDirectory: true)
+    }
+
+    /// Keep a downloaded image's bytes, for `save` to list
+    static func store(_ data: Data, item: UUID, workspace: UUID) {
+        let folder = folder(workspace)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            // Not worth a backup: the host had them for 6 hours at most
+            var root = directory
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? root.setResourceValues(values)
+            try data.write(to: folder.appendingPathComponent(item.uuidString), options: .atomic)
+        } catch {
+            Logger.clauntty.warning("WaitingImages: couldn't keep an image: \(error.localizedDescription)")
+        }
+    }
+
+    /// Match the disk to what each workspace's viewer holds: a manifest of its images
+    /// that were stored, and no folder for a workspace with none
+    static func save(_ contents: [UUID: ImageViewerContent]) {
+        let fileManager = FileManager.default
+        let folders = (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for folder in folders {
+            guard let workspace = UUID(uuidString: folder.lastPathComponent),
+                  let content = contents[workspace] else {
+                try? fileManager.removeItem(at: folder)
+                continue
+            }
+            let files = Set((try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? [])
+            let items = content.items.filter { files.contains($0.id.uuidString) }
+            guard !items.isEmpty else {
+                try? fileManager.removeItem(at: folder)
+                continue
+            }
+            let manifest = Manifest(host: content.host, source: content.source,
+                                    items: items.map { .init(id: $0.id, name: $0.name, arrived: $0.arrived) })
+            if let data = try? JSONEncoder().encode(manifest) {
+                try? data.write(to: folder.appendingPathComponent(manifestName), options: .atomic)
+            }
+            // Images the viewer no longer has
+            let kept = Set(items.map(\.id.uuidString)).union([manifestName])
+            for file in files where !kept.contains(file) {
+                try? fileManager.removeItem(at: folder.appendingPathComponent(file))
+            }
+        }
+    }
+
+    /// What was waiting when the app last ran, for these workspaces, without anything
+    /// older than the host keeps an inbox entry
+    static func load(workspaces: Set<UUID>) -> [UUID: ImageViewerContent] {
+        let folders = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        var contents: [UUID: ImageViewerContent] = [:]
+        for folder in folders {
+            guard let workspace = UUID(uuidString: folder.lastPathComponent), workspaces.contains(workspace),
+                  let data = try? Data(contentsOf: folder.appendingPathComponent(manifestName)),
+                  let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else { continue }
+            let items = manifest.items.compactMap { item -> ImageViewerContent.Item? in
+                guard Date().timeIntervalSince(item.arrived) < ImageInbox.maxAge,
+                      let bytes = try? Data(contentsOf: folder.appendingPathComponent(item.id.uuidString)),
+                      let image = PlatformImage(data: bytes) else { return nil }
+                return .init(id: item.id, name: item.name, image: image, arrived: item.arrived)
+            }
+            if !items.isEmpty {
+                contents[workspace] = ImageViewerContent(host: manifest.host, items: items, source: manifest.source)
+            }
+        }
+        return contents
+    }
 }

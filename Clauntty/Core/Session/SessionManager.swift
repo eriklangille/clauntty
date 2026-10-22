@@ -24,8 +24,11 @@ class SessionManager: ObservableObject {
     @Published var imageViewer: ImageViewerContent?
 
     /// Agent mode: each window's images (by its tab id), shown in its corner until cleared.
-    /// The Mac always keeps them here, by workspace.
-    @Published var windowImages: [UUID: ImageViewerContent] = [:]
+    /// The Mac always keeps them here, by workspace. Kept on disk until cleared
+    /// (`WaitingImages`), so a restart doesn't lose them.
+    @Published var windowImages: [UUID: ImageViewerContent] = [:] {
+        didSet { WaitingImages.save(windowImages) }
+    }
     /// A window whose images should open (a notification for them was tapped)
     @Published var openImagesWindow: UUID?
 
@@ -204,8 +207,15 @@ class SessionManager: ObservableObject {
     @Published var workspaceMessage: String?
     /// Each pane's last state from rtach
     var paneStates: [String: RemotePaneState] = [:]
-    /// Panes whose agent finished while the user wasn't looking: shown as done until seen
+    /// Panes whose agent finished while the user wasn't looking, on a host without
+    /// `done_at` (rtach before 2.33.0): shown as done until seen
     var unseenDonePanes: Set<String> = []
+    /// The finish (`done_at`) the user last saw in each pane, kept across launches: a pane
+    /// whose agent finished since shows as done
+    var seenDoneAt: [String: Int64] = UserDefaults.standard.dictionary(forKey: SessionManager.seenDoneAtKey) as? [String: Int64] ?? [:] {
+        didSet { UserDefaults.standard.set(seenDoneAt, forKey: Self.seenDoneAtKey) }
+    }
+    static let seenDoneAtKey = "clauntty_seen_done_at"
 
     /// UserDefaults key for persisted tabs
     private let persistedWebTabsKey = "clauntty_persisted_web_tabs"
@@ -1264,14 +1274,18 @@ class SessionManager: ObservableObject {
         var finished: [(session: Session, id: String)] = []
         for pending in batch {
             let (session, path, inboxId) = (pending.session, pending.path, pending.inboxId)
-            windows.append(imageWindow(pane: pending.pane, from: session))
+            let window = imageWindow(pane: pending.pane, from: session)
+            windows.append(window)
             panes.append(sessions.first { pending.pane != nil && $0.rtachSessionId == pending.pane }?.id ?? session.id)
             let name = (path as NSString).lastPathComponent
             var retry = false
             do {
                 let data = try await session.downloadFile(path, maxBytes: Self.maxImageBytes)
                 if let image = PlatformImage(data: data) {
-                    images.append(.init(name: name, image: image))
+                    let item = ImageViewerContent.Item(name: name, image: image)
+                    // Its window's viewer keeps it until it's closed, across restarts
+                    if let window { WaitingImages.store(data, item: item.id, workspace: window) }
+                    images.append(item)
                 } else {
                     images.append(.init(name: name, error: data.isEmpty ? "File not found or empty" : "Not an image"))
                 }
