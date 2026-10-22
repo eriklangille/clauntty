@@ -79,6 +79,9 @@ struct ImageViewer: View {
         .onReceive(NotificationCenter.default.publisher(for: Self.zoomCommand)) { note in
             zoomCommand((note.object as? NSNumber)?.floatValue)
         }
+        // Markup's keys come through the backdrop
+        .onChange(of: marking == nil) { _, done in if !done { focused = true } }
+        .onChange(of: marking?.typing != nil) { _, typing in if typing { focused = true } }
     }
 
     // MARK: Pieces
@@ -102,14 +105,30 @@ struct ImageViewer: View {
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
-            .onKeyPress(.leftArrow) { if marking == nil { turn(by: -1) }; return .handled }
-            .onKeyPress(.rightArrow) { if marking == nil { turn(by: 1) }; return .handled }
-            // Marking up: Esc leaves Markup, not the viewer
-            .onKeyPress(.escape) {
-                if marking != nil { marking = nil } else { close() }
+            // Marking up, keys are Markup's (the others step aside)
+            .onKeyPress(phases: [.down, .repeat]) { press in markupKey(press) }
+            .onKeyPress(.leftArrow) {
+                guard marking == nil else { return .ignored }
+                turn(by: -1)
                 return .handled
             }
-            .onKeyPress(.space) { if marking == nil { close() }; return .handled }
+            .onKeyPress(.rightArrow) {
+                guard marking == nil else { return .ignored }
+                turn(by: 1)
+                return .handled
+            }
+            .onKeyPress(.escape) {
+                guard marking == nil else { return .ignored }
+                close()
+                return .handled
+            }
+            .onKeyPress(.space) {
+                guard marking == nil else { return .ignored }
+                close()
+                return .handled
+            }
+            // Backspace comes as the delete command, not a key press
+            .onDeleteCommand { marking?.deleteBackward() }
             .onKeyPress(characters: CharacterSet(charactersIn: "s")) { press in
                 guard press.modifiers.contains(.command), let item = shownItem else { return .ignored }
                 save(item)
@@ -172,6 +191,8 @@ struct ImageViewer: View {
             .offset(clamped(zoom.pan, image: size, area: area.size))
             .gesture(pinch)
             .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { tap in
+                // Marking up, a double-click is text
+                guard marking == nil else { return }
                 doubleClicked(at: tap.location, image: image, fit: fit, area: area)
             })
         return Group {
@@ -496,10 +517,32 @@ struct ImageViewer: View {
 
     // MARK: Actions
 
-    /// The marked-up image, flattened at full size
+    /// Marking up: Return finishes text being typed, else sends; Esc drops the text being
+    /// typed, else leaves Markup (not the viewer); the rest types or picks a tool or color
+    private func markupKey(_ press: KeyPress) -> KeyPress.Result {
+        guard var state = marking, press.modifiers.isDisjoint(with: [.command, .control]) else { return .ignored }
+        switch press.key {
+        case .return where state.typing == nil:
+            if send != nil { sendMarkup() }
+            return .handled
+        case .return:
+            state.commitTyping()
+        case .escape where state.typing == nil:
+            marking = nil
+            return .handled
+        case .escape:
+            state.cancelTyping()
+        default:
+            guard state.type(press) else { return .ignored }
+        }
+        marking = state
+        return .handled
+    }
+
+    /// The marked-up image, flattened at full size, with text being typed
     private var markedImage: (NSImage, ImageViewerContent.Item)? {
         guard let marking, let item = content?.items.first(where: { $0.id == marking.itemId }),
-              let image = item.image, let marked = Mark.render(image, marks: marking.marks) else { return nil }
+              let image = item.image, let marked = Mark.render(image, marks: marking.allMarks) else { return nil }
         return (marked, item)
     }
 

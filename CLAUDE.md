@@ -458,7 +458,12 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   NSImageView; its bytes kept to save or copy as a GIF) or a video (mp4, mov, m4v: downloaded
   to a file, 200 MB cap, played muted in `AVPlayerView`, its first frame the thumbnail).
   **Markup** (stills): pen, circle, arrow and text over the image (`Markup.swift`; marks in
-  fractions of the image, so they follow zoom). Send to Claude (Return) flattens them at full
+  fractions of the image, so they follow zoom). Keys: P, C, A, T for the tools and 1–6 for the
+  colors. Text starts with a click (Text tool) or a double-click (any tool), and is typed
+  straight into the image: no text field, the layer draws it and a caret as it'll be flattened,
+  with keys from the viewer's `markupKey` (backspace comes as `onDeleteCommand`). Dragging text
+  moves it; clicking it with Text types into it again. Return finishes the text, then sends;
+  Esc drops the text, then leaves Markup. Send to Claude (Return) flattens them at full
   size (`Mark.render`), pastes it into the pane that sent the image as Cmd+V would (upload,
   path typed, not sent), and keeps the marked-up copy as the workspace's newest image. It opens out of the pane that ran it (`ImageViewerContent.source`,
   `TerminalViews.frameInWindow`). Zoom, paging, the

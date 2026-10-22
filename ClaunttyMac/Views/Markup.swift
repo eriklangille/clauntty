@@ -22,6 +22,11 @@ struct Mark: Identifiable {
     static func lineWidth(_ size: CGSize) -> CGFloat { max(2, 0.006 * max(size.width, size.height)) }
     static func fontSize(_ size: CGSize) -> CGFloat { max(12, 0.032 * max(size.width, size.height)) }
 
+    /// How much room text takes, drawn on an image this size
+    static func textSize(_ text: String, _ size: CGSize) -> CGSize {
+        (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: fontSize(size), weight: .bold)])
+    }
+
     static func draw(_ marks: [Mark], in context: GraphicsContext, size: CGSize) {
         let width = lineWidth(size)
         let style = StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
@@ -101,33 +106,109 @@ struct MarkupState {
             case .text: return "Text"
             }
         }
+
+        /// Picks it while marking up and not typing
+        var key: Character {
+            switch self {
+            case .pen: return "p"
+            case .ellipse: return "c"
+            case .arrow: return "a"
+            case .text: return "t"
+            }
+        }
     }
 
+    /// Picked with 1 to 6
     static let colors: [Color] = [.red, .yellow, .green, .blue, .white, .black]
+
+    /// Text being typed: drawn by the layer, with a caret, and a mark once committed
+    struct Typing {
+        var text = ""
+        /// The middle of its left edge, as a fraction of the image
+        var at: CGPoint
+        /// The text mark being changed, put back as it was on Esc
+        var original: Mark?
+    }
 
     /// The image being marked up
     let itemId: UUID
     var marks: [Mark] = []
-    var tool = Tool.ellipse
+    /// Another tool keeps text being typed
+    var tool = Tool.ellipse { didSet { commitTyping() } }
     var color = Color.red
+    var typing: Typing?
+
+    /// The marks, and the text being typed
+    var allMarks: [Mark] {
+        guard let typing, !typing.text.isEmpty else { return marks }
+        return marks + [Mark(kind: .text(typing.text, typing.at), color: color)]
+    }
+
+    mutating func commitTyping() {
+        guard let typing else { return }
+        self.typing = nil
+        let text = typing.text.trimmingCharacters(in: .whitespaces)
+        if !text.isEmpty { marks.append(Mark(kind: .text(text, typing.at), color: color)) }
+    }
+
+    mutating func cancelTyping() {
+        if let original = typing?.original { marks.append(original) }
+        typing = nil
+    }
+
+    mutating func undo() {
+        if typing != nil { cancelTyping() } else { _ = marks.popLast() }
+    }
+
+    /// Backspace: the last character typed
+    mutating func deleteBackward() {
+        if typing?.text.isEmpty == false { typing?.text.removeLast() }
+    }
+
+    /// A key while marking up: a character for the text being typed, else a tool's or a
+    /// color's key. False when it's none of those.
+    mutating func type(_ press: KeyPress) -> Bool {
+        if typing != nil {
+            // Not arrows and other function keys (private use characters), nor Tab
+            let printable = !press.characters.isEmpty && press.characters.unicodeScalars.allSatisfy {
+                !CharacterSet.controlCharacters.contains($0) && !(0xF700...0xF8FF).contains($0.value)
+            }
+            guard printable else { return false }
+            typing?.text += press.characters
+            return true
+        }
+        let key = press.characters.lowercased()
+        if let tool = Tool.allCases.first(where: { String($0.key) == key }) {
+            self.tool = tool
+            return true
+        }
+        if let number = Int(key), (1...Self.colors.count).contains(number) {
+            color = Self.colors[number - 1]
+            return true
+        }
+        return false
+    }
 }
 
-/// Over the image while marking it up: draws what's dragged with the tool, and takes
-/// text where it's clicked
+/// Over the image while marking up: draws what's dragged with the tool, moves text that's
+/// dragged, and starts text where it's clicked (with Text, or a double-click with any tool).
+/// Keys go to the viewer, which hands them to `MarkupState.type`, and the text is drawn here
+/// as it'll be flattened, so typing doesn't move it.
 struct MarkupLayer: View {
     @Binding var state: MarkupState
     /// The mark being dragged out
     @State private var draft: Mark?
-    /// Where text is being typed, as a fraction of the image
-    @State private var textAt: CGPoint?
-    @State private var text = ""
-    @FocusState private var typing: Bool
+    /// A text mark being dragged: its id, and where it was
+    @State private var moving: (id: UUID, from: CGPoint)?
+    /// The drag's first change has been seen
+    @State private var began = false
 
     var body: some View {
         GeometryReader { geometry in
             let size = geometry.size
             Canvas { context, size in
-                Mark.draw(state.marks + (draft.map { [$0] } ?? []), in: context, size: size)
+                Mark.draw(state.allMarks + (draft.map { [$0] } ?? []), in: context, size: size)
+                if let typing = state.typing { caret(typing, in: context, size: size) }
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
@@ -135,33 +216,53 @@ struct MarkupLayer: View {
             }.onEnded { drag in
                 ended(drag, size: size)
             })
-            .overlay(alignment: .topLeading) {
-                if let textAt {
-                    TextField("Text", text: $text)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: Mark.fontSize(size), weight: .bold))
-                        .foregroundStyle(state.color)
-                        .frame(minWidth: 120)
-                        .fixedSize()
-                        .focused($typing)
-                        .onSubmit { commitText() }
-                        .onExitCommand { self.textAt = nil }
-                        .offset(x: textAt.x * size.width, y: textAt.y * size.height - Mark.fontSize(size) * 0.6)
-                        .onAppear { typing = true }
-                }
-            }
         }
-        // Another tool, or another color: text being typed is kept first
-        .onChange(of: state.tool) { _, _ in commitText() }
+    }
+
+    /// After the text being typed, as tall as its letters
+    private func caret(_ typing: MarkupState.Typing, in context: GraphicsContext, size: CGSize) {
+        var context = context
+        let font = Mark.fontSize(size)
+        let x = typing.at.x * size.width + Mark.textSize(typing.text, size).width + 2
+        let rect = CGRect(x: x, y: typing.at.y * size.height - font * 0.55, width: max(2, font * 0.08), height: font * 1.1)
+        context.addFilter(.shadow(color: .black.opacity(0.45), radius: 2))
+        context.fill(Path(roundedRect: rect, cornerRadius: rect.width / 2), with: .color(state.color))
     }
 
     private func fraction(_ location: CGPoint, _ size: CGSize) -> CGPoint {
         CGPoint(x: min(max(location.x / size.width, 0), 1), y: min(max(location.y / size.height, 0), 1))
     }
 
+    /// The text mark under a point, the one on top
+    private func textMark(at location: CGPoint, size: CGSize) -> Mark? {
+        state.marks.last { mark in
+            guard case .text(let text, let at) = mark.kind else { return false }
+            let box = Mark.textSize(text, size)
+            return CGRect(x: at.x * size.width, y: at.y * size.height - box.height / 2, width: box.width, height: box.height)
+                .insetBy(dx: -6, dy: -6)
+                .contains(location)
+        }
+    }
+
     private func dragged(_ drag: DragGesture.Value, size: CGSize) {
+        if !began {
+            began = true
+            // A click anywhere finishes the text being typed, which can then be dragged
+            state.commitTyping()
+            if let mark = textMark(at: drag.startLocation, size: size), case .text(_, let at) = mark.kind {
+                moving = (mark.id, at)
+            }
+        }
         let start = fraction(drag.startLocation, size)
         let now = fraction(drag.location, size)
+        if let moving {
+            guard let index = state.marks.firstIndex(where: { $0.id == moving.id }),
+                  case .text(let text, _) = state.marks[index].kind else { return }
+            let to = fraction(CGPoint(x: moving.from.x * size.width + drag.translation.width,
+                                      y: moving.from.y * size.height + drag.translation.height), size)
+            state.marks[index].kind = .text(text, to)
+            return
+        }
         switch state.tool {
         case .pen:
             if case .pen(var points) = draft?.kind {
@@ -180,25 +281,28 @@ struct MarkupLayer: View {
     }
 
     private func ended(_ drag: DragGesture.Value, size: CGSize) {
-        defer { draft = nil }
-        if state.tool == .text {
-            commitText()
-            textAt = fraction(drag.location, size)
+        defer {
+            draft = nil
+            moving = nil
+            began = false
+        }
+        let moved = hypot(drag.translation.width, drag.translation.height)
+        if moved > 3 {
+            if moving == nil, let draft { state.marks.append(draft) }
             return
         }
-        // A click, not a drag: nothing to draw
-        let moved = hypot(drag.location.x - drag.startLocation.x, drag.location.y - drag.startLocation.y)
-        if let draft, moved > 3 { state.marks.append(draft) }
-    }
-
-    private func commitText() {
-        defer {
-            textAt = nil
-            text = ""
+        // A click: text there, with the Text tool or a double-click with any. On a text
+        // mark, that text is typed into again.
+        let clicks = NSApp.currentEvent?.clickCount ?? 1
+        guard state.tool == .text || clicks >= 2 else { return }
+        if let id = moving?.id, let index = state.marks.firstIndex(where: { $0.id == id }),
+           case .text(let text, let at) = state.marks[index].kind {
+            let mark = state.marks.remove(at: index)
+            state.color = mark.color
+            state.typing = MarkupState.Typing(text: text, at: at, original: mark)
+        } else {
+            state.typing = MarkupState.Typing(at: fraction(drag.location, size))
         }
-        let typed = text.trimmingCharacters(in: .whitespaces)
-        guard let textAt, !typed.isEmpty else { return }
-        state.marks.append(Mark(kind: .text(typed, textAt), color: state.color))
     }
 }
 
@@ -219,14 +323,21 @@ struct MarkupBar: View {
                             .frame(width: 30, height: 26)
                             .background(state.tool == tool ? Color.white.opacity(0.22) : .clear,
                                         in: RoundedRectangle(cornerRadius: 6))
+                            // Its key, small in the corner
+                            .overlay(alignment: .bottomTrailing) {
+                                Text(String(tool.key).uppercased())
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.trailing, 2)
+                            }
                     }
                     .buttonStyle(.plain)
-                    .help(tool.label)
+                    .help("\(tool.label) (\(String(tool.key).uppercased()))")
                 }
             }
             Divider().frame(height: 20)
             HStack(spacing: 6) {
-                ForEach(MarkupState.colors, id: \.self) { color in
+                ForEach(Array(MarkupState.colors.enumerated()), id: \.offset) { number, color in
                     Button { state.color = color } label: {
                         Circle()
                             .fill(color)
@@ -236,27 +347,31 @@ struct MarkupBar: View {
                             .padding(3)
                     }
                     .buttonStyle(.plain)
+                    .help("\(number + 1)")
                 }
             }
             Divider().frame(height: 20)
-            Button { _ = state.marks.popLast() } label: { Image(systemName: "arrow.uturn.backward") }
+            Button { state.undo() } label: { Image(systemName: "arrow.uturn.backward") }
                 .buttonStyle(.plain)
                 // Here, so it works wherever the keyboard is in the viewer
                 .keyboardShortcut("z", modifiers: .command)
-                .disabled(state.marks.isEmpty)
+                .disabled(state.marks.isEmpty && state.typing == nil)
                 .help("Undo (⌘Z)")
-            Button { state.marks.removeAll() } label: { Image(systemName: "trash") }
+            Button {
+                state.marks.removeAll()
+                state.typing = nil
+            } label: { Image(systemName: "trash") }
                 .buttonStyle(.plain)
-                .disabled(state.marks.isEmpty)
+                .disabled(state.marks.isEmpty && state.typing == nil)
                 .help("Clear")
             Divider().frame(height: 20)
             Button("Cancel", action: cancel)
                 .help("Esc")
             Button("Copy", action: copy)
-                .disabled(state.marks.isEmpty)
+                .disabled(state.allMarks.isEmpty)
             if let send {
+                // Return is the viewer's: it finishes text being typed first
                 Button("Send to Claude", action: send)
-                    .keyboardShortcut(.return, modifiers: [])
                     .buttonStyle(.borderedProminent)
                     .help("Pastes it into the pane (Return)")
             }
