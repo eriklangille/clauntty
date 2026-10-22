@@ -230,6 +230,15 @@ class SessionManager: ObservableObject {
         didSet { UserDefaults.standard.set(seenDoneAt, forKey: Self.seenDoneAtKey) }
     }
     static let seenDoneAtKey = "clauntty_seen_done_at"
+    /// When the user last typed or pasted into each pane from this app, kept across
+    /// launches: the Mac sidebar's "4m". rtach doesn't record it yet, so other devices'
+    /// typing doesn't count.
+    @Published var lastInteraction: [String: Date] =
+        (UserDefaults.standard.dictionary(forKey: SessionManager.lastInteractionKey) as? [String: Double] ?? [:])
+            .mapValues { Date(timeIntervalSince1970: $0) } {
+        didSet { UserDefaults.standard.set(lastInteraction.mapValues(\.timeIntervalSince1970), forKey: Self.lastInteractionKey) }
+    }
+    static let lastInteractionKey = "clauntty_last_interaction"
 
     /// UserDefaults key for persisted tabs
     private let persistedWebTabsKey = "clauntty_persisted_web_tabs"
@@ -450,6 +459,10 @@ class SessionManager: ObservableObject {
         }
         session.onPaneStateChanged = { [weak self] paneId, json in
             self?.paneStateChanged(paneId: paneId, json: json)
+        }
+        session.onTyped = { [weak self, weak session] in
+            guard let pane = session?.pane?.paneId else { return }
+            self?.noteInteraction(pane)
         }
         session.onWorkspaceChanged = { [weak self, weak session] workspaceId, paneId in
             guard let self = self, let session = session else { return }
@@ -853,11 +866,11 @@ class SessionManager: ObservableObject {
         return webTab
     }
 
-    /// Open a remote port in a web tab: switches to an existing tab for it, or creates one.
-    /// A background forward of the port is handed over to the tab since both bind the
-    /// same local port.
+    /// Open a remote port in a web tab: switches to an existing tab for it, or creates one
+    /// (in `workspace`, by default the one shown). A background forward of the port is
+    /// handed over to the tab since both bind the same local port.
     @discardableResult
-    func openPortInTab(_ port: RemotePort, config: SavedConnection) async throws -> WebTab {
+    func openPortInTab(_ port: RemotePort, config: SavedConnection, workspace: UUID?? = nil) async throws -> WebTab {
         // Any tab for the port, including restored ones that haven't reconnected yet
         if let existing = webTabs(on: config).first(where: { $0.remotePort.port == port.port }) {
             switchTo(existing)
@@ -870,7 +883,7 @@ class SessionManager: ObservableObject {
             let forwarded = forwardedPorts.remove(at: index)
             await forwarded.stopForwarding()
         }
-        return try await createWebTab(for: port, config: config)
+        return try await createWebTab(for: port, config: config, workspace: workspace)
     }
 
     /// Close a web tab

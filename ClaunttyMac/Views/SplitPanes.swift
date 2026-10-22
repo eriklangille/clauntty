@@ -190,8 +190,6 @@ private struct PaneTile: View {
 struct PaneHeader: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var window: WindowState
-    /// The window's title bar height, so the window's buttons sit in the top one
-    static let height: CGFloat = 28
     private static let padding: CGFloat = 10
     let pane: TabPane
     let selection: PaneSelection
@@ -200,13 +198,14 @@ struct PaneHeader: View {
     let split: Bool
     let zoomed: Bool
     let topLeft: Bool
+    @State private var hovering = false
 
     var body: some View {
         // The pane's width, the row from its left: a pane too narrow for all of it cuts off
         // the buttons on the right. Sized by its contents, the row ran off both ends, and
         // the sidebar toggle went under the window's buttons.
         Color.clear
-            .frame(height: Self.height)
+            .frame(height: window.titleBarHeight)
             .overlay(alignment: .leading) { row }
             .clipped()
             .background {
@@ -219,6 +218,7 @@ struct PaneHeader: View {
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
                     .allowsHitTesting(false)
             }
+            .onHover { hovering = $0 }
     }
 
     private var row: some View {
@@ -226,7 +226,7 @@ struct PaneHeader: View {
         return HStack(spacing: 8) {
             if topLeft && window.sidebar == .detailOnly {
                 SidebarToggle()
-                    .padding(.leading, SidebarToggle.leading - Self.padding)
+                    .padding(.leading, window.toggleLeading - Self.padding)
             }
             Group {
                 StatusGlyph(status: pane.status)
@@ -253,17 +253,21 @@ struct PaneHeader: View {
                     MainView.closePane(selection, title: pane.title, sessionManager)
                 }
             }
-            .foregroundStyle(active ? .secondary : .tertiary)
+            .foregroundStyle(.secondary)
+            // The focused pane's, or one under the pointer: in place, so the title stays put
+            .opacity(active || hovering ? 1 : 0)
+            .allowsHitTesting(active || hovering)
+            .animation(.easeOut(duration: 0.12), value: active || hovering)
         }
         .padding(.horizontal, Self.padding)
-        .frame(height: Self.height)
+        .frame(height: window.titleBarHeight)
     }
 
     private func button(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.callout)
-                .frame(width: 20, height: 20)
+                .font(.system(size: 11))
+                .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -22,8 +22,29 @@ struct MainView: View {
                 .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
+                // Where the terminal side is, up into the title bar as the panes are
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { _, frame in
+                            window.detailFrame = frame
+                        }
+                    }
+                    .ignoresSafeArea(.container, edges: .top)
+                }
         }
         .navigationTitle(title)
+        // The window's buttons placed and measured, for the top rows
+        .background(WindowButtonsRoom())
+        .overlay(alignment: .top) {
+            if window.portPickerShown, let group = portPickerGroup {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.001)
+                        .onTapGesture { window.portPickerShown = false }
+                    PortPicker(group: group)
+                        .padding(.top, 70)
+                }
+            }
+        }
         .overlay(alignment: .top) {
             if window.switcherShown {
                 ZStack(alignment: .top) {
@@ -35,6 +56,20 @@ struct MainView: View {
                 }
             }
         }
+        // The pane under the pointer in the peek, outlined where it is
+        .overlay { PeekPaneOutline().ignoresSafeArea() }
+        // The sidebar card under the pointer: its panes and pages, beside the sidebar
+        .overlay(alignment: .topLeading) {
+            GeometryReader { geometry in
+                if window.peekShown, let peek = window.peek {
+                    let origin = geometry.frame(in: .global).origin
+                    WorkspacePeek(peek: peek)
+                        .offset(x: peek.frame.maxX - origin.x - 2,
+                                y: max(8, peek.frame.minY - origin.y - 8))
+                }
+            }
+            .ignoresSafeArea()
+        }
         .overlay {
             ImageViewer(content: $sessionManager.imageViewer) { views.frameInWindow(of: $0) }
                 .ignoresSafeArea()
@@ -42,6 +77,31 @@ struct MainView: View {
         // Closed: typing goes back to the pane you're in
         .onChange(of: window.switcherShown) { _, shown in
             if !shown { refocus() }
+        }
+        .onChange(of: window.portPickerShown) { _, shown in
+            if !shown { refocus() }
+        }
+        // Cmd+arrows in a Cmd+number peek: the workspace's next or previous pane, or
+        // page, in the peek's order (its panes, then its pages)
+        .onAppear {
+            window.movePane = { [weak sessionManager, weak window] groupId, offset in
+                guard let sessionManager, let window,
+                      let group = sessionManager.sessionGroups.first(where: { $0.id == groupId }) else { return }
+                let pages = sessionManager.webTabs.filter { $0.workspaceId == groupId }
+                let count = group.panes.count + pages.count
+                guard count > 0 else { return }
+                let current = pages.firstIndex { $0.id == sessionManager.activeWebTab?.id }.map { group.panes.count + $0 }
+                    ?? group.panes.firstIndex { $0.id == group.activePaneId } ?? 0
+                let next = (current + offset + count) % count
+                if next < group.panes.count {
+                    let selection = PaneSelection(groupId: groupId, paneId: group.panes[next].id)
+                    MainView.show(selection, sessionManager)
+                    window.peekPane = selection
+                } else {
+                    sessionManager.switchTo(pages[next - group.panes.count])
+                    window.peekPane = nil
+                }
+            }
         }
         .onChange(of: sessionManager.shownImages == nil) { _, closed in
             if closed { refocus() }
@@ -54,6 +114,10 @@ struct MainView: View {
         }
         .onChange(of: sessionManager.sessions.map(\.id)) { _, ids in
             views.prune(keeping: Set(ids))
+        }
+        // A closed page's web view goes with it
+        .onChange(of: sessionManager.webTabs.map(\.id)) { _, ids in
+            WebViews.prune(keeping: Set(ids))
         }
         // Another pane, or a split from the host: every pane in the tab runs
         .onChange(of: sessionManager.activeSessionId) { _, _ in sessionManager.showSplitPanes() }
@@ -120,6 +184,12 @@ struct MainView: View {
     private func refocus() {
         guard let session = sessionManager.activeSession else { return }
         DispatchQueue.main.async { views.focus(session) }
+    }
+
+    /// Open Port's workspace: the one asked for, else the one shown (or the page's)
+    private var portPickerGroup: SessionGroup? {
+        let id = window.portPickerWorkspace ?? sessionManager.activeSession?.groupId ?? sessionManager.activeWebTab?.workspaceId
+        return sessionManager.sessionGroups.first { $0.id == id }
     }
 
     private var shownLayout: PaneLayout? {
@@ -269,7 +339,8 @@ extension View {
         if #available(macOS 26, *) {
             glassEffect(.regular, in: shape)
         } else {
-            background(.regularMaterial, in: shape)
+            // Solid: a material over a white page goes light grey under light text
+            background(Color(nsColor: .windowBackgroundColor), in: shape)
         }
     }
 }

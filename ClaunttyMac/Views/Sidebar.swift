@@ -20,32 +20,34 @@ struct Sidebar: View {
         let shortcuts = window.commandHeld ? shortcuts() : [:]
         List(selection: selection) {
             ForEach(hosts.opened) { connection in
-                let rows = rows(on: connection)
+                let groups = sessionManager.orderedGroups(on: connection)
                 Section {
-                    ForEach(rows) { row in
-                        switch row {
-                        case .workspace(let group):
-                            WorkspaceRow(group: group, images: sessionManager.windowImages[group.id]?.items.count ?? 0,
-                                         shortcut: shortcuts[group.id])
-                                .tag(SidebarItem.workspace(group.id))
-                                .contextMenu {
-                                    if let recent = sessionManager.recentImages[group.id] {
-                                        Button(recent.items.count == 1 ? "Reopen Image" : "Reopen \(recent.items.count) Images") {
-                                            MainView.show(PaneSelection(groupId: group.id, paneId: group.activePaneId), sessionManager)
-                                            sessionManager.reopenImages(group.id)
-                                        }
+                    ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                        let pages = sessionManager.webTabs.filter { $0.workspaceId == group.id }
+                        let next = index + 1 < groups.count ? groups[index + 1].id : nil
+                        WorkspaceRow(group: group, images: sessionManager.windowImages[group.id]?.items.count ?? 0,
+                                     shortcut: shortcuts[group.id],
+                                     selected: selection.wrappedValue == .workspace(group.id),
+                                     pages: pages,
+                                     pageShown: pages.first { $0.id == sessionManager.activeWebTab?.id }?.id,
+                                     beforeLit: next.map(isLit) ?? false)
+                            .tag(SidebarItem.workspace(group.id))
+                            .contextMenu {
+                                Button("Open Port…") {
+                                    window.portPickerWorkspace = group.id
+                                    window.portPickerShown = true
+                                }
+                                if let recent = sessionManager.recentImages[group.id] {
+                                    Button(recent.items.count == 1 ? "Reopen Image" : "Reopen \(recent.items.count) Images") {
+                                        MainView.show(PaneSelection(groupId: group.id, paneId: group.activePaneId), sessionManager)
+                                        sessionManager.reopenImages(group.id)
                                     }
                                 }
-                        case .web(let webTab, let nested):
-                            WebTabRow(webTab: webTab)
-                                .padding(.leading, nested ? WorkspaceRow.titleInset : 0)
-                                // They go with their workspace
-                                .moveDisabled(true)
-                        }
+                            }
                     }
-                    .onMove { source, destination in move(in: rows, from: source, to: destination) }
+                    .onMove { source, destination in move(in: groups, from: source, to: destination) }
                 } header: {
-                    HostHeader(connection: connection)
+                    HostHeader(connection: connection, pages: loosePages(on: connection))
                 }
             }
         }
@@ -54,15 +56,15 @@ struct Sidebar: View {
         .safeAreaInset(edge: .top, spacing: 8) {
             HStack(spacing: 0) {
                 SidebarToggle()
-                    .padding(.leading, SidebarToggle.leading)
+                    .padding(.leading, window.toggleLeading)
                 Spacer()
                 AddHostMenu()
                     .fixedSize()
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
             }
-            .padding(.trailing, 4)
-            .frame(height: PaneHeader.height)
+            .padding(.trailing, 8)
+            .frame(height: window.titleBarHeight)
         }
         // The window has no title bar: that row is ours
         .ignoresSafeArea(.container, edges: .top)
@@ -84,31 +86,24 @@ struct Sidebar: View {
         return labels
     }
 
-    /// A host's workspaces in your order, each followed by the pages it opened, then
-    /// pages opened outside any workspace shown here
-    private func rows(on connection: SavedConnection) -> [SidebarRow] {
-        let groups = sessionManager.orderedGroups(on: connection)
-        var rows: [SidebarRow] = []
-        for group in groups {
-            rows.append(.workspace(group))
-            for webTab in sessionManager.webTabs where webTab.workspaceId == group.id {
-                rows.append(.web(webTab, nested: true))
-            }
-        }
+    /// The workspace is shown, or a page it opened: its card is lit
+    private func isLit(_ id: UUID) -> Bool {
+        selection.wrappedValue == .workspace(id) || sessionManager.activeWebTab?.workspaceId == id
+    }
+
+    /// Pages opened outside any workspace shown here: rings in the host's header
+    private func loosePages(on connection: SavedConnection) -> [WebTab] {
         let groupIds = Set(sessionManager.sessionGroups.map(\.id))
-        for webTab in sessionManager.webTabs(on: connection) where webTab.workspaceId.map({ !groupIds.contains($0) }) ?? true {
-            rows.append(.web(webTab, nested: false))
-        }
-        return rows
+        return sessionManager.webTabs(on: connection).filter { $0.workspaceId.map { !groupIds.contains($0) } ?? true }
     }
 
     /// A workspace dragged to `destination`: it goes before the next workspace there,
     /// or after the host's last one
-    private func move(in rows: [SidebarRow], from source: IndexSet, to destination: Int) {
-        guard let index = source.first, case .workspace(let moved) = rows[index] else { return }
-        let workspaces = rows.compactMap(\.groupId)
-        let next = rows[min(destination, rows.count)...].lazy.compactMap(\.groupId).first { $0 != moved.id }
-        sessionManager.moveWorkspace(moved.id, before: next, among: workspaces)
+    private func move(in groups: [SessionGroup], from source: IndexSet, to destination: Int) {
+        guard let index = source.first else { return }
+        let moved = groups[index].id
+        let next = groups[min(destination, groups.count)...].lazy.map(\.id).first { $0 != moved }
+        sessionManager.moveWorkspace(moved, before: next, among: groups.map(\.id))
     }
 
     /// The workspace or page shown, as the list's selection; picking a row shows it.
@@ -139,38 +134,18 @@ struct Sidebar: View {
 /// buttons: in the sidebar when it's shown, else in the top-left title bar.
 struct SidebarToggle: View {
     @EnvironmentObject private var window: WindowState
-    /// From the window's left edge
-    static let leading: CGFloat = 74
 
     var body: some View {
         Button { window.toggleSidebar() } label: {
             // The whole height of the title bar row, and some either side
             Image(systemName: "sidebar.left")
                 .font(.callout)
-                .frame(width: 28, height: PaneHeader.height)
+                .frame(width: 28, height: window.titleBarHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .help(window.sidebar == .detailOnly ? "Show Sidebar (⌃⌘S)" : "Hide Sidebar (⌃⌘S)")
-    }
-}
-
-/// A row in a host's section
-private enum SidebarRow: Identifiable {
-    case workspace(SessionGroup)
-    case web(WebTab, nested: Bool)
-
-    var id: UUID {
-        switch self {
-        case .workspace(let group): return group.id
-        case .web(let webTab, _): return webTab.id
-        }
-    }
-
-    var groupId: UUID? {
-        if case .workspace(let group) = self { return group.id }
-        return nil
     }
 }
 
@@ -207,45 +182,77 @@ extension SessionManager {
     }
 }
 
-/// A workspace: its name (or what's running, for one named after a folder), its most
-/// pressing status, and a dot per pane as on the phone's tab.
+/// A workspace as a card, spaced like macOS Weather's cities: its name, and where the
+/// temperature goes how long since you last typed in it (or since its agent finished);
+/// beneath, what its agent is doing and a dot per pane. Hovered, its peek shows its
+/// panes and pages beside the sidebar.
 private struct WorkspaceRow: View {
+    @EnvironmentObject private var sessionManager: SessionManager
     let group: SessionGroup
     /// Images its panes sent with `clauntty show`, waiting to be seen
     var images = 0
     /// Its Cmd+number, while Cmd is held
     var shortcut: String?
-    private static let glyphSpacing: CGFloat = 9
-    /// Where the title starts, for the rows nested under it
-    static let titleInset = StatusGlyph.defaultSize + glyphSpacing
+    /// Shown: its card is lit, with no line under it
+    var selected = false
+    /// The pages it opened (`clauntty tab`): a ring each after the pane dots; the peek lists them
+    var pages: [WebTab] = []
+    /// The one of them shown, if any: the card is lit
+    var pageShown: UUID?
+    /// The card under it is lit: no line between them either
+    var beforeLit = false
 
     var body: some View {
         let (title, subtitle) = group.sidebarTitles
-        // One line, so every row is the same height; what runs in a named workspace is
-        // in its pane's title bar, and in the tooltip
-        HStack(spacing: Self.glyphSpacing) {
-            StatusGlyph(status: group.mostPressingStatus)
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            if images > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "photo")
-                    if images > 1 { Text("\(images)") }
-                }
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .transition(.opacity)
-                .help(images == 1 ? "An image to see" : "\(images) images to see")
-            }
-            if group.panes.count > 1 {
-                PaneDots(panes: group.panes, activeId: group.activePaneId)
+        let lead = leadPane
+        let state = lead.flatMap { sessionManager.paneStates[$0.id] }
+        let detail = (lead?.status ?? .none).detail(state: state, title: title, subtitle: subtitle)
+        // The status glyph in the middle on the left; the title and its time, one line;
+        // beneath it the task and the pane dots
+        HStack(spacing: 9) {
+            StatusGlyph(status: lead?.status ?? .none)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    // Context for the state, not a headline: small and quiet, as Mail's times
+                    // (a minute's tick, so "4m" becomes "5m" without anything else changing)
+                    TimelineView(.everyMinute) { context in
+                        Text(since(state).map { $0.shortAge(now: context.date) } ?? "")
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .fixedSize()
                     .opacity(shortcut == nil ? 1 : 0)
+                }
+                HStack(spacing: 6) {
+                    // Where it is when it has nothing to say; a space at worst: every card
+                    // the same height
+                    Text(detail ?? state?.place ?? " ")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if images > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "photo")
+                            if images > 1 { Text("\(images)") }
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
+                        .help(images == 1 ? "An image to see" : "\(images) images to see")
+                    }
+                    if group.panes.count > 1 || !pages.isEmpty {
+                        PaneDots(panes: group.panes, activeId: group.activePaneId, pages: pages, pageShown: pageShown)
+                    }
+                }
             }
         }
-        // Over the row's end, so the title keeps its room
-        .overlay(alignment: .trailing) {
+        // Over the title's end while Cmd is held
+        .overlay(alignment: .topTrailing) {
             if let shortcut {
                 Text(shortcut)
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
@@ -255,8 +262,56 @@ private struct WorkspaceRow: View {
                     .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 4))
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 5)
+        .padding(.horizontal, 4)
+        // A page of its shown: lit as the list lights the shown workspace
+        .background {
+            if pageShown != nil {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(0.1))
+                    .padding(.horizontal, -6)
+            }
+        }
+        .contentShape(Rectangle())
+        // Its panes and pages beside the sidebar, when it has more than the card says
+        .peekable(.workspace(group.id), when: group.panes.count > 1 || !pages.isEmpty)
+        // A hairline between cards, short of their edges; none touching the lit one
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(selected || pageShown != nil || beforeLit ? 0 : 1))
+                .frame(height: 1)
+                .padding(.horizontal, 4)
+                .offset(y: 3)
+        }
         .help(subtitle.map { "\(title) · \($0)" } ?? title)
+    }
+
+    /// The pane the card speaks for: the one that needs you most, else the one shown
+    private var leadPane: TabPane? {
+        let shown = group.panes.first { $0.id == group.activePaneId } ?? group.panes.first
+        guard let pressing = group.panes.max(by: { $0.status.urgency < $1.status.urgency }),
+              let shown else { return shown }
+        return pressing.status.urgency > shown.status.urgency ? pressing : shown
+    }
+
+    /// When its agent finished, while it's done; else when you last typed in any of its panes
+    private func since(_ state: RemotePaneState?) -> Date? {
+        if state?.state == "done", let doneAt = state?.doneAt {
+            return Date(timeIntervalSince1970: Double(doneAt) / 1000)
+        }
+        return group.panes.compactMap { sessionManager.lastInteraction[$0.id] }.max()
+    }
+
+}
+
+extension Date {
+    /// How long before `now`: "now", "4m", "2h", "3d"
+    func shortAge(now: Date) -> String {
+        let seconds = max(now.timeIntervalSince(self), 0)
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m" }
+        if seconds < 86400 { return "\(Int(seconds / 3600))h" }
+        return "\(Int(seconds / 86400))d"
     }
 }
 
@@ -331,22 +386,41 @@ struct StatusGlyph: View {
 }
 
 /// One dot per pane, as under the phone's tab title: the shown pane a short capsule,
-/// the others orange when they need you and green when done.
+/// the others orange when they need you and green when done. Then, a little apart, a
+/// ring per page it opened; a shown page is an outlined capsule.
 private struct PaneDots: View {
     let panes: [TabPane]
     let activeId: String
+    var pages: [WebTab] = []
+    /// The page shown, if it's one of these: then no pane is
+    var pageShown: UUID?
 
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(panes.prefix(7), id: \.id) { pane in
-                let active = pane.id == activeId
-                Capsule()
-                    .fill(color(pane, active: active))
-                    .frame(width: active ? 10 : 4, height: 4)
+        HStack(spacing: 5) {
+            if !panes.isEmpty {
+                HStack(spacing: 3) {
+                    ForEach(panes.prefix(7), id: \.id) { pane in
+                        let active = pageShown == nil && pane.id == activeId
+                        Capsule()
+                            .fill(color(pane, active: active))
+                            .frame(width: active ? 10 : 4, height: 4)
+                    }
+                }
+            }
+            if !pages.isEmpty {
+                HStack(spacing: 3) {
+                    ForEach(pages.prefix(5)) { page in
+                        let shown = page.id == pageShown
+                        Capsule()
+                            .strokeBorder(Color.primary.opacity(shown ? 0.9 : 0.45), lineWidth: 1)
+                            .frame(width: shown ? 10 : 5, height: 5)
+                    }
+                }
             }
         }
         // Switching panes: the capsule springs across, as the phone's slides
         .animation(.spring(response: 0.35, dampingFraction: 0.55), value: activeId)
+        .animation(.spring(response: 0.35, dampingFraction: 0.55), value: pageShown)
     }
 
     private func color(_ pane: TabPane, active: Bool) -> Color {
@@ -358,36 +432,79 @@ private struct PaneDots: View {
     }
 }
 
-/// A forwarded port's page; closing it stops the forward.
-private struct WebTabRow: View {
-    @EnvironmentObject private var sessionManager: SessionManager
-    @ObservedObject var webTab: WebTab
+extension View {
+    /// Shows `subject`'s peek beside the sidebar while the pointer is over this (and
+    /// `when` holds), placed by this view's frame in the window
+    func peekable(_ subject: Peek.Subject, when: Bool = true) -> some View {
+        modifier(Peekable(subject: subject, enabled: when))
+    }
+}
 
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "globe")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Text(webTab.title)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 0)
-            // The title is the port until the page has loaded once
-            if webTab.title != ":\(String(webTab.remotePort.port))" {
-                Text(":\(String(webTab.remotePort.port))")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
+private struct Peekable: ViewModifier {
+    @EnvironmentObject private var window: WindowState
+    let subject: Peek.Subject
+    let enabled: Bool
+    @State private var frame: CGRect = .zero
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { _, new in
+                        frame = new
+                        window.cardFrames[subject] = enabled ? new : nil
+                        if hovering { show() }
+                    }
+                }
             }
+            .onHover { inside in
+                hovering = inside
+                if inside { show() } else if window.peekTarget?.subject == subject { window.peekTarget = nil }
+            }
+    }
+
+    private func show() {
+        window.peekTarget = enabled ? Peek(subject: subject, frame: frame) : nil
+    }
+}
+
+extension RemotePaneState {
+    /// Where a pane is, for one with nothing else to say: the program in front unless
+    /// it's the shell, and the folder from home ("claude · ~/Projects/clauntty")
+    var place: String? {
+        let folder = Self.folder(cwd)
+        let shells: Set = ["bash", "zsh", "fish", "sh", "dash", "login"]
+        let program = fg.flatMap { $0.isEmpty || shells.contains($0.trimmingCharacters(in: ["-"])) ? nil : $0 }
+        switch (program, folder) {
+        case let (program?, folder?): return "\(program) · \(folder)"
+        case let (program, folder): return program ?? folder
         }
-        .padding(.vertical, 2)
-        .tag(SidebarItem.web(webTab.id))
-        .contextMenu {
-            Button("Close Page") { sessionManager.closeWebTab(webTab) }
-        }
+    }
+
+    /// A folder from home: "~/Projects/clauntty"
+    static func folder(_ path: String?) -> String? {
+        guard let path, !path.isEmpty else { return nil }
+        let parts = path.split(separator: "/").map(String.init)
+        let home = parts.first == "Users" || parts.first == "home" ? 2 : parts.first == "root" ? 1 : 0
+        guard home > 0, parts.count >= home else { return path }
+        return (["~"] + parts.dropFirst(home)).joined(separator: "/")
     }
 }
 
 extension PaneStatus {
+    /// What a pane is doing, beside its glyph (which says its state): the task, what it's
+    /// waiting on when it needs you, or a shell's program; nil when there's nothing to say
+    func detail(state: RemotePaneState?, title: String, subtitle: String?) -> String? {
+        // Not when it's already the title (a workspace named after its folder takes it)
+        let task = state?.task.flatMap { $0.isEmpty || title.hasPrefix($0) || $0.hasPrefix(title) ? nil : $0 }
+        switch self {
+        case .blocked: return state?.note.flatMap { $0.isEmpty ? nil : $0 } ?? task
+        case .working, .done, .idle: return task
+        case .none: return subtitle ?? state?.fg
+        }
+    }
+
     /// The phone's status colours
     var color: Color {
         switch self {
@@ -426,6 +543,8 @@ private struct HostHeader: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
     let connection: SavedConnection
+    /// Its pages that no workspace here opened: a ring each, and its peek lists them
+    var pages: [WebTab] = []
     @State private var dropTargeted = false
 
     /// A dragged host, as text only these headers take
@@ -438,6 +557,14 @@ private struct HostHeader: View {
                 .tracking(0.6)
             menu
             Spacer(minLength: 0)
+            if !pages.isEmpty {
+                PaneDots(panes: [], activeId: "", pages: pages, pageShown: sessionManager.activeWebTab?.id)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .contentShape(Rectangle())
+                    .peekable(.host(connection.id))
+                    .padding(.trailing, 16)
+            }
         }
         // In line with the rows' status glyphs, and clear of the first row: the sections
         // are already spaced apart
@@ -499,6 +626,7 @@ private struct HostHeader: View {
 private struct AddHostMenu: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
+    @EnvironmentObject private var window: WindowState
 
     var body: some View {
         Menu {
@@ -522,11 +650,59 @@ private struct AddHostMenu: View {
             Button("Reload ~/.ssh/config") { hosts.reload() }
         } label: {
             Image(systemName: "plus")
-                .frame(width: 28, height: PaneHeader.height)
+                .frame(width: 28, height: window.titleBarHeight)
                 .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .help("Open Host")
+    }
+}
+
+/// Gives the window an empty compact toolbar, so its buttons sit a little lower and
+/// further in than a bare title bar's, then measures them: the window's top rows (the
+/// sidebar's and each pane's title bar) are as tall as twice the buttons' middle, and
+/// the sidebar toggle sits just past them.
+struct WindowButtonsRoom: NSViewRepresentable {
+    @EnvironmentObject private var window: WindowState
+
+    func makeNSView(context: Context) -> RoomView { RoomView() }
+
+    func updateNSView(_ view: RoomView, context: Context) {
+        view.onMeasure = { [window] height, end in
+            if window.titleBarHeight != height { window.titleBarHeight = height }
+            if window.buttonsEnd != end { window.buttonsEnd = end }
+        }
+    }
+
+    final class RoomView: NSView {
+        var onMeasure: ((_ height: CGFloat, _ buttonsEnd: CGFloat) -> Void)?
+        private var watching: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            if window.toolbar == nil { window.toolbar = NSToolbar(identifier: "clauntty.buttons-room") }
+            window.toolbarStyle = .unifiedCompact
+            measure()
+            // AppKit places the buttons after the toolbar changes, and again on resizes
+            // and full screen: measure each time they move
+            if let watching { NotificationCenter.default.removeObserver(watching) }
+            guard let close = window.standardWindowButton(.closeButton) else { return }
+            close.postsFrameChangedNotifications = true
+            watching = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: close, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.measure() }
+            }
+        }
+
+        /// Twice the close button's middle from the window's top, and the zoom button's
+        /// right edge
+        private func measure() {
+            guard let window, let close = window.standardWindowButton(.closeButton),
+                  let zoom = window.standardWindowButton(.zoomButton) else { return }
+            let middle = window.frame.height - close.convert(close.bounds, to: nil).midY
+            guard middle > 0 else { return }
+            onMeasure?((middle * 2).rounded(), zoom.convert(zoom.bounds, to: nil).maxX.rounded())
+        }
     }
 }

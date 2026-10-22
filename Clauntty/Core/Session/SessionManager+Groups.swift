@@ -228,6 +228,14 @@ extension SessionManager {
         #endif
     }
 
+    /// The user typed or pasted into a pane. To the half minute: the sidebar counts in
+    /// minutes, and doesn't redraw on every key.
+    func noteInteraction(_ paneId: String) {
+        let now = Date()
+        if let last = lastInteraction[paneId], now.timeIntervalSince(last) < 30 { return }
+        lastInteraction[paneId] = now
+    }
+
     /// The user has seen a pane: its finished agent shows as idle from now on
     func markPaneSeen(_ paneId: String) {
         guard noteSeen(paneId),

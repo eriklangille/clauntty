@@ -408,6 +408,9 @@ class Session: ObservableObject, Identifiable {
     /// A session's state changed (`pane;<id>;<json>`): any pane on the host, not only this one
     var onPaneStateChanged: ((_ paneId: String, _ json: String) -> Void)?
 
+    /// The user typed or pasted into this pane (the Mac's terminal view)
+    var onTyped: (() -> Void)?
+
     /// rtach tracks an agent in this session (hooks): its state drives notifications,
     /// not the idle guess
     var agentTracked = false

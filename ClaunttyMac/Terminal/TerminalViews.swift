@@ -147,6 +147,7 @@ final class TerminalViews {
         session.onScrollbackReceived = { [weak view] data in view?.prependHistory(data) }
         view.onScrollNearTop = { [weak session] in session?.loadMoreScrollbackIfNeeded() }
         view.onInput = { [weak session] data in session?.sendData(data) }
+        view.onTyped = { [weak session] in session?.onTyped?() }
         // Session skips this while another device has the pane
         view.onResize = { [weak session] columns, rows in
             session?.sendWindowChange(rows: rows, columns: columns)

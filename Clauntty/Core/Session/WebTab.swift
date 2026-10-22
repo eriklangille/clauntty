@@ -132,7 +132,8 @@ class WebTab: ObservableObject, Identifiable {
     /// URL string for display in expanded tab bar (port + path)
     var urlDisplayString: String {
         if let url = currentURL {
-            var path = url.path
+            // As typed: URL.path drops a trailing slash
+            var path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? url.path
             if let query = url.query {
                 path += "?\(query)"
             }

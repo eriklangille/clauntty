@@ -26,6 +26,8 @@ final class MacTerminalView: NSView, NSTextInputClient {
     var onFocus: (() -> Void)?
     /// Images pasted or dropped: uploaded to the host, then `pasteText` their paths
     var onPasteImages: (([NSImage]) -> Void)?
+    /// A key pressed or something pasted: the user, not the terminal answering a query
+    var onTyped: (() -> Void)?
     private let nearTopRows: UInt = 100
 
     /// Program output goes through here: ghostty_surface_write_pty_output can
@@ -362,6 +364,7 @@ final class MacTerminalView: NSView, NSTextInputClient {
     // MARK: Keyboard
 
     override func keyDown(with event: NSEvent) {
+        onTyped?()
         guard surface != nil else {
             interpretKeyEvents([event])
             return
@@ -619,6 +622,7 @@ final class MacTerminalView: NSView, NSTextInputClient {
     /// Text goes through Ghostty (bracketed paste). Images can't: they're uploaded to the
     /// host and their paths pasted, which Claude Code attaches, as on the phone.
     @objc func paste(_ sender: Any?) {
+        onTyped?()
         if let images = Self.images(on: NSPasteboard.general) {
             onPasteImages?(images)
         } else {

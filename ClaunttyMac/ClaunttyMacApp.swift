@@ -131,6 +131,12 @@ struct PaneCommands: Commands {
             Button("Go to Pane…") { window.switcherShown.toggle() }
                 .keyboardShortcut("k")
                 .disabled(sessionManager.sessionGroups.isEmpty)
+            Button("Open Port…") {
+                window.portPickerWorkspace = nil
+                window.portPickerShown.toggle()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(activeGroup == nil && sessionManager.activeWebTab?.workspaceId == nil)
             Divider()
             Button("New Workspace") { newWorkspace() }
                 .keyboardShortcut("t")
@@ -228,11 +234,14 @@ struct PaneCommands: Commands {
         let all = panes
         guard all.indices.contains(index) else { return }
         MainView.show(all[index], sessionManager)
+        window.showKeyPeek(all[index].groupId, paneId: all[index].paneId)
     }
 
     private func showWorkspace(at index: Int) {
         let groups = Self.groups(sessionManager, hosts)
         guard groups.indices.contains(index) else { return }
         MainView.show(PaneSelection(groupId: groups[index].id, paneId: groups[index].activePaneId), sessionManager)
+        // Its panes beside it while Cmd is held; Cmd+arrows move through them
+        window.showKeyPeek(groups[index].id, paneId: groups[index].activePaneId)
     }
 }

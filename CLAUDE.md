@@ -440,20 +440,33 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
 - **Another device's size:** when rtach says the PTY isn't ours (`Session.ptySize`), the
   terminal is drawn at that grid and `PaneHostView` scales it down from the top left; a
   click takes the pane back. Output waits for the resize, as on the phone.
-- **Sidebar:** one single-line row per workspace (its name, or what runs in its shown pane
-  for one named after a folder; the status of its most pressing pane; its pane dots); panes are in the split, each under a title bar with split,
-  zoom and close. Zoom (`WindowState.zoomedPane`) is local only. Dragging a divider
-  (`DividerHandle`) resizes the split here and on the host (`ws resize`), holding the
-  terminals' sizes until the drag stops. Workspaces drag to reorder; hosts do too, by
+- **Sidebar:** a two-line card per workspace (`WorkspaceRow`): the status glyph of its most
+  pressing pane on the left; its name (or what runs in its shown pane, for one named after
+  a folder) and a small time; beneath, the task (else the program and folder,
+  `RemotePaneState.place`) and a dot per pane, then a ring per page it opened. The time is
+  when its agent finished (`done_at`) or when you last typed in it here
+  (`SessionManager.lastInteraction`, this Mac's typing only until rtach records it).
+  Panes are in the split, each under a title bar with split, zoom and close (shown on the
+  focused or hovered pane). Zoom (`WindowState.zoomedPane`) is local only. Dragging a
+  divider (`DividerHandle`) resizes the split here and on the host (`ws resize`), holding
+  the terminals' sizes until the drag stops. Workspaces drag to reorder; hosts do too, by
   the name in their header, dropped on another host's (`HostHeader`; the order is this
   Mac's, kept in `ConnectionStore`). The "…" after the name is its menu (New Workspace,
-  Refresh, Remove Host); the section's own hover chevron folds it. `StatusGlyph` draws the phone's `PaneStatusIndicator` in SwiftUI; change both
-  together.
-- **No title bar** (`.hiddenTitleBar`): the pane title bars (and a web page's address bar)
-  are the top of the window, `PaneHeader.height` to line up with the window's buttons, and
-  move the window through `WindowDragArea`. The sidebar's toggle and + sit beside the
-  window's buttons. Toggle the sidebar with `WindowState.toggleSidebar()`: it holds every
-  terminal's size (`PaneHostView.holdResizes`) until the slide ends, so each resizes once.
+  Refresh, Remove Host); the section's own hover chevron folds it. `StatusGlyph` draws the
+  phone's `PaneStatusIndicator` in SwiftUI; change both together.
+- **Peek** (`WorkspacePeek`): hovering a card with more than one pane or a page shows a row
+  per pane and its pages beside the sidebar; hovering a row outlines that pane where it
+  sits in its split (`PeekPaneOutline`, also for a workspace not on screen). Cmd+number
+  shows it too while Cmd is held, and Cmd+arrows move through its panes and pages
+  (`WindowState.keyPeek`). Open Port (⇧⌘O, or a card's menu) lists the host's listening
+  ports (`PortPicker`); a page's address bar takes a path, a URL or another port.
+- **No title bar** (`.hiddenTitleBar`, with an empty compact toolbar for the window
+  buttons' room): the pane title bars (and a web page's address bar) are the top of the
+  window, `WindowState.titleBarHeight` (measured from the buttons by `WindowButtonsRoom`)
+  to line up with them, and move the window through `WindowDragArea`. The sidebar's toggle
+  and + sit beside the window's buttons. Toggle the sidebar with
+  `WindowState.toggleSidebar()`: it holds every terminal's size
+  (`PaneHostView.holdResizes`) until the slide ends, so each resizes once.
 - **Pasting images:** Cmd+V, Ctrl+V (only with nothing but an image on the clipboard) and
   dropping image files upload to the host's /tmp (`Session.uploadImage`) and paste the
   path, as the phone does, so Claude Code attaches it.
