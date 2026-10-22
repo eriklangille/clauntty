@@ -262,6 +262,8 @@ class SessionManager: ObservableObject {
 
     /// Offer spawnd for a Mac host that doesn't have it, once per run
     func offerSpawndIfNeeded(_ deployer: RtachDeployer, config: SavedConnection) {
+        // The app is already in the desktop session, where signing works
+        guard !config.isLocal else { return }
         let key = deployer.spawndHostName ?? connectionKey(for: config)
         guard deployer.spawndInstalled == false, !spawndOffered.contains(key) else { return }
         spawndOffered.insert(key)
@@ -1823,6 +1825,8 @@ class ForwardedPort: Identifiable, ObservableObject {
 
     /// Start port forwarding
     func startForwarding() async throws {
+        // This Mac's ports are already here
+        if connectionConfig.isLocal { return }
         guard let connection = sshConnection,
               let channel = connection.nioChannel else {
             throw ForwardedPortError.noConnection

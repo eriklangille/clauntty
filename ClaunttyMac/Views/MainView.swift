@@ -150,7 +150,7 @@ enum ThemeColors {
     }
 }
 
-/// Hosts from ~/.ssh/config, to open one.
+/// This Mac and the hosts from ~/.ssh/config, to open one.
 struct HostPicker: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
@@ -159,33 +159,22 @@ struct HostPicker: View {
         VStack(spacing: 14) {
             Text("Open a host")
                 .font(.title2.weight(.semibold))
-            if hosts.addable.isEmpty {
+            if hosts.addable.isEmpty && !hosts.canOpenThisMac {
                 Text("No hosts in ~/.ssh/config")
                     .foregroundStyle(.secondary)
             } else {
                 ScrollView {
                     VStack(spacing: 6) {
-                        ForEach(hosts.addable) { host in
-                            Button {
-                                let connection = hosts.open(host)
-                                Task { await MainView.openHost(connection, sessionManager) }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "server.rack")
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(host.alias)
-                                        Text("\(host.user)@\(host.hostName)\(host.port == 22 ? "" : ":\(host.port)")")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .contentShape(Rectangle())
+                        if hosts.canOpenThisMac {
+                            row("This Mac", detail: "Terminals here, no SSH", symbol: "desktopcomputer") {
+                                hosts.openThisMac()
                             }
-                            .buttonStyle(.plain)
-                            .glass(in: .rect(cornerRadius: 10))
+                        }
+                        ForEach(hosts.addable) { host in
+                            row(host.alias, detail: "\(host.user)@\(host.hostName)\(host.port == 22 ? "" : ":\(host.port)")",
+                                symbol: "server.rack") {
+                                hosts.open(host)
+                            }
                         }
                     }
                     .frame(maxWidth: 360)
@@ -195,6 +184,30 @@ struct HostPicker: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func row(_ name: String, detail: String, symbol: String,
+                     open: @escaping () -> SavedConnection) -> some View {
+        Button {
+            let connection = open()
+            Task { await MainView.openHost(connection, sessionManager) }
+        } label: {
+            HStack {
+                Image(systemName: symbol)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .glass(in: .rect(cornerRadius: 10))
     }
 }
 

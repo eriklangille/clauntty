@@ -419,13 +419,50 @@ extension SessionGroup {
 }
 
 /// The host's name in small caps, with a "…": its menu (New Workspace, Refresh,
-/// Remove Host).
+/// Remove Host). Dragged by its name onto another host's header, the host takes that
+/// one's place.
 private struct HostHeader: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
     let connection: SavedConnection
+    @State private var dropTargeted = false
+
+    /// A dragged host, as text only these headers take
+    private static let dragPrefix = "clauntty-host:"
 
     var body: some View {
+        HStack(spacing: 4) {
+            Text(connection.name.uppercased())
+                .font(.caption.weight(.semibold))
+                .tracking(0.6)
+            menu
+            Spacer(minLength: 0)
+        }
+        // In line with the rows' status glyphs, and clear of the first row: the sections
+        // are already spaced apart
+        .padding(.leading, 2)
+        .padding(.bottom, 4)
+        .contentShape(Rectangle())
+        .background {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color.accentColor.opacity(dropTargeted ? 0.25 : 0))
+                .padding(.horizontal, -6)
+                .padding(.vertical, -2)
+        }
+        .draggable(Self.dragPrefix + connection.id.uuidString) {
+            Text(connection.name.uppercased())
+                .font(.caption.weight(.semibold))
+                .tracking(0.6)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let item = items.first, item.hasPrefix(Self.dragPrefix),
+                  let id = UUID(uuidString: String(item.dropFirst(Self.dragPrefix.count))) else { return false }
+            hosts.move(id, to: connection.id)
+            return true
+        } isTargeted: { dropTargeted = $0 }
+    }
+
+    private var menu: some View {
         Menu {
             Button("New Workspace") {
                 Task { await sessionManager.newWorkspace(on: connection, folder: "~") }
@@ -443,34 +480,33 @@ private struct HostHeader: View {
                 hosts.remove(connection)
             }
         } label: {
-            HStack(spacing: 4) {
-                Text(connection.name.uppercased())
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.6)
-                // Not a chevron: the section's own folds it, on hover
-                Image(systemName: "ellipsis")
-                    .font(.caption2.weight(.semibold))
-            }
-            .contentShape(Rectangle())
+            // Not a chevron: the section's own folds it, on hover. Only this opens the
+            // menu: pressing the name starts a drag.
+            Image(systemName: "ellipsis")
+                .font(.caption2.weight(.semibold))
+                .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        // In line with the rows' status glyphs, and clear of the first row: the sections
-        // are already spaced apart
-        .padding(.leading, 2)
-        .padding(.bottom, 4)
     }
 }
 
-/// Opens another host from ~/.ssh/config: the + in the sidebar's toolbar.
+/// Opens This Mac or another host from ~/.ssh/config: the + in the sidebar's toolbar.
 private struct AddHostMenu: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
 
     var body: some View {
         Menu {
+            if hosts.canOpenThisMac {
+                Button("This Mac") {
+                    let connection = hosts.openThisMac()
+                    Task { await MainView.openHost(connection, sessionManager) }
+                }
+                Divider()
+            }
             if hosts.addable.isEmpty {
                 Text("No other hosts in ~/.ssh/config")
             }

@@ -190,15 +190,7 @@ extension SessionManager {
         // listed: one who looked again before the opener resumed spun on the main actor
         let connecting = Task { () throws -> SSHConnection in
             defer { connectingHosts[key] = nil }
-            let connection = SSHConnection(
-                host: config.host,
-                port: config.port,
-                username: config.username,
-                authMethod: config.authMethod,
-                connectionId: config.id,
-                useTailscale: config.useTailscale,
-                proxyCommand: config.proxyCommand
-            )
+            let connection = makeConnection(for: config)
             try await connection.connect()
             hostConnections[key] = liveConnections(key) + [connection]
             Logger.clauntty.debugOnly("SessionManager: connected to \(key) (\(self.hostConnections[key]?.count ?? 0) connection(s))")
@@ -206,5 +198,21 @@ extension SessionManager {
         }
         connectingHosts[key] = connecting
         return try await connecting.value
+    }
+
+    /// This Mac is a LocalHost (no SSH); every other host is an SSH connection
+    private func makeConnection(for config: SavedConnection) -> SSHConnection {
+        #if os(macOS)
+        if config.isLocal { return LocalHost(config: config) }
+        #endif
+        return SSHConnection(
+            host: config.host,
+            port: config.port,
+            username: config.username,
+            authMethod: config.authMethod,
+            connectionId: config.id,
+            useTailscale: config.useTailscale,
+            proxyCommand: config.proxyCommand
+        )
     }
 }

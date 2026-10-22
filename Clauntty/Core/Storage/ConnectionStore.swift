@@ -42,6 +42,15 @@ class ConnectionStore: ObservableObject {
         save()
     }
 
+    /// Put a connection where `target` is, moving the ones between along
+    func move(_ id: UUID, to target: UUID) {
+        guard id != target,
+              let from = connections.firstIndex(where: { $0.id == id }),
+              let to = connections.firstIndex(where: { $0.id == target }) else { return }
+        connections.insert(connections.remove(at: from), at: to)
+        save()
+    }
+
     func updateLastConnected(_ connection: SavedConnection) {
         var updated = connection
         updated.lastConnected = Date()

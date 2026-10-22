@@ -1,8 +1,8 @@
 import Foundation
 
-/// The hosts the Mac app shows: ones you've opened from ~/.ssh/config, kept in the
-/// shared ConnectionStore. Each is re-read from the config at launch, so editing
-/// the config (a new HostName, another key) takes effect without re-adding it.
+/// The hosts the Mac app shows: ones you've opened from ~/.ssh/config, and This Mac,
+/// kept in the shared ConnectionStore. Each is re-read from the config at launch, so
+/// editing the config (a new HostName, another key) takes effect without re-adding it.
 @MainActor
 final class MacHosts: ObservableObject {
     let store: ConnectionStore
@@ -23,11 +23,16 @@ final class MacHosts: ObservableObject {
         return configHosts.filter { !ids.contains(Self.connectionId(alias: $0.alias)) }
     }
 
+    /// This Mac isn't open yet
+    var canOpenThisMac: Bool {
+        !store.connections.contains(where: \.isLocal)
+    }
+
     /// Re-read ~/.ssh/config and refresh the opened hosts from it
     func reload() {
         let config = SSHConfig()
         configHosts = config.hosts.filter { !$0.isGitOnly }
-        for connection in store.connections {
+        for connection in store.connections where !connection.isLocal {
             let fresh = Self.connection(for: config.resolve(connection.name), lastConnected: connection.lastConnected)
             if fresh != connection { store.update(fresh) }
         }
@@ -39,6 +44,32 @@ final class MacHosts: ObservableObject {
         if let existing = store.connections.first(where: { $0.id == connection.id }) { return existing }
         store.add(connection)
         return connection
+    }
+
+    /// Terminals on this Mac, in its own ~/.clauntty: rtach sessions that a phone or a
+    /// terminal here opens too
+    @discardableResult
+    func openThisMac() -> SavedConnection {
+        if let existing = store.connections.first(where: \.isLocal) { return existing }
+        let connection = SavedConnection(
+            id: SavedConnection.thisMacId,
+            name: "This Mac",
+            host: "localhost",
+            // No SSH port: its key (user@host:port) is never an ssh_config host's
+            port: 0,
+            username: NSUserName(),
+            authMethod: .password
+        )
+        store.add(connection)
+        return connection
+    }
+
+    /// A host dragged onto another's header takes its place: before it when dragged up,
+    /// after it when dragged down
+    func move(_ id: UUID, to target: UUID) {
+        // The sidebar watches us, not the store
+        objectWillChange.send()
+        store.move(id, to: target)
     }
 
     func remove(_ connection: SavedConnection) {

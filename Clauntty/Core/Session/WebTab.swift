@@ -179,6 +179,12 @@ class WebTab: ObservableObject, Identifiable {
 
     /// Start port forwarding for this tab
     func startForwarding() async throws {
+        // This Mac's ports are already here
+        if connectionConfig.isLocal {
+            localPort = remotePort.port
+            state = .connected
+            return
+        }
         guard let connection = sshConnection else {
             Logger.clauntty.error("WebTab: no SSH connection")
             state = .error("SSH connection not available")

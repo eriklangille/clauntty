@@ -54,6 +54,11 @@ struct SavedConnection: Codable, Identifiable, Hashable {
         proxyCommand = try c.decodeIfPresent(String.self, forKey: .proxyCommand)
     }
 
+    /// "This Mac" (the Mac app): no SSH, its panes run here (`LocalHost`)
+    static let thisMacId = UUID(uuidString: "6F1D2C3B-5A4E-4B7D-9C8E-2F0A1B3C4D5E")!
+
+    var isLocal: Bool { id == Self.thisMacId }
+
     /// Whether the host looks like a tailnet address (100.64.0.0/10 or MagicDNS)
     static func looksLikeTailnetHost(_ host: String) -> Bool {
         let host = host.lowercased()

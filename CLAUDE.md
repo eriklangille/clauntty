@@ -418,6 +418,17 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   opened ones are kept in the shared `ConnectionStore`. Key files via `.sshKey(keyId:
   "file:<path>")`; `ProxyCommand` (and `ProxyJump`, as `ssh -W`) runs as a process that SSH
   goes over. With no key, auth falls back to "none", which is all Tailscale SSH needs.
+- **This Mac** (`LocalHost`, a subclass of `SSHConnection`): terminals on the Mac itself, added
+  from the + menu or the empty window's picker (`MacHosts.openThisMac`, the fixed
+  `SavedConnection.thisMacId`). Commands run through the user's shell as sshd would, and a
+  pane is `rtach --proxy` on a terminal device of its own (`LocalTerminal`: `openpty`,
+  `posix_spawn` in a new session) behind a NIO pipe channel that looks like an SSH channel
+  (`LocalTerminalHandler`: `SSHChannelData`, window changes as `TIOCSWINSZ` plus SIGWINCH,
+  the exit status). posix_spawn can't make it the controlling terminal, as sshd does, so the
+  signals that would give are sent by hand.
+  So everything above the connection is unchanged, and the sessions are rtach's in this
+  Mac's own ~/.clauntty, which the phone and the `clauntty` picker open too. Its pages
+  open localhost directly (no forward), and there's no spawnd offer.
 - **Sessions:** the shared `SessionManager` (workspaces, panes, reconnects) drives the
   sidebar; `TerminalViews` keeps one terminal view per session object.
 - **Splits:** the detail shows the whole tab the active pane is in, laid out from rtach's
@@ -433,9 +444,10 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   for one named after a folder; the status of its most pressing pane; its pane dots); panes are in the split, each under a title bar with split,
   zoom and close. Zoom (`WindowState.zoomedPane`) is local only. Dragging a divider
   (`DividerHandle`) resizes the split here and on the host (`ws resize`), holding the
-  terminals' sizes until the drag stops. Workspaces drag to reorder; the host's name
-  has a "…" menu (New Workspace, Refresh, Remove Host); the section's own hover chevron
-  folds it. `StatusGlyph` draws the phone's `PaneStatusIndicator` in SwiftUI; change both
+  terminals' sizes until the drag stops. Workspaces drag to reorder; hosts do too, by
+  the name in their header, dropped on another host's (`HostHeader`; the order is this
+  Mac's, kept in `ConnectionStore`). The "…" after the name is its menu (New Workspace,
+  Refresh, Remove Host); the section's own hover chevron folds it. `StatusGlyph` draws the phone's `PaneStatusIndicator` in SwiftUI; change both
   together.
 - **No title bar** (`.hiddenTitleBar`): the pane title bars (and a web page's address bar)
   are the top of the window, `PaneHeader.height` to line up with the window's buttons, and
@@ -510,6 +522,8 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   input while the screen is locked. Test against the SSH container with a scratch config, so
   your real hosts aren't touched: `CLAUNTTY_SSH_CONFIG=/tmp/test/config ./scripts/mac.sh run`
   (a `Host` for the container with an `IdentityFile` authorized for testuser there).
+  For This Mac, add `CLAUNTTY_LOCAL_HOME=/tmp/clauntty-local-test` (Debug builds): its panes
+  then live in that home, not the Mac's real ~/.clauntty (put an empty `.zshrc` there).
 
 ## Key Info
 

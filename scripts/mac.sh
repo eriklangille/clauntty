@@ -8,7 +8,8 @@
 #   ./scripts/mac.sh release               # Release build (arm64 + x86_64), zipped to build/mac/Clauntty.zip,
 #                                          # and the command that installs it on another Mac
 #   ./scripts/mac.sh run [-- app args]     # build, quit the running app, launch
-#                                          # (CLAUNTTY_SSH_CONFIG=file: another ssh config)
+#                                          # (CLAUNTTY_SSH_CONFIG=file: another ssh config;
+#                                          #  CLAUNTTY_LOCAL_HOME=dir: This Mac's home)
 #   ./scripts/mac.sh quit
 #   ./scripts/mac.sh shot [name]           # window screenshot -> screenshots/mac-<name>.png
 #   ./scripts/mac.sh click X Y [right|double]
@@ -112,9 +113,11 @@ case "$cmd" in
         [ "${1:-}" = "--" ] && shift
         build
         quit_app
-        # CLAUNTTY_SSH_CONFIG points the app at another ssh config (tests use a scratch one)
+        # CLAUNTTY_SSH_CONFIG points the app at another ssh config, CLAUNTTY_LOCAL_HOME This
+        # Mac's panes at another home (tests use scratch ones)
         env_args=()
-        [ -n "${CLAUNTTY_SSH_CONFIG:-}" ] && env_args=(--env "CLAUNTTY_SSH_CONFIG=$CLAUNTTY_SSH_CONFIG")
+        [ -n "${CLAUNTTY_SSH_CONFIG:-}" ] && env_args+=(--env "CLAUNTTY_SSH_CONFIG=$CLAUNTTY_SSH_CONFIG")
+        [ -n "${CLAUNTTY_LOCAL_HOME:-}" ] && env_args+=(--env "CLAUNTTY_LOCAL_HOME=$CLAUNTTY_LOCAL_HOME")
         open -n ${env_args[@]+"${env_args[@]}"} "$APP" --args "$@"
         for _ in $(seq 1 40); do
             curl -sf "$DRIVER/windows?app=$BUNDLE_ID" 2>/dev/null | grep -q '"window"' && { echo "Running."; exit 0; }
