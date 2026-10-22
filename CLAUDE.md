@@ -466,9 +466,10 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   restart keeps the dot, and an agent that finished while the app was closed gets one.
   Each plays a chime: `agent-done.wav` when an agent finishes, `agent-needs-you.wav` when it
   needs you (`ClaunttyMac/Sounds`, synthesized by `scripts/make-chimes.py`: edit its notes and
-  rerun it). A pane on screen with the app in front gets the chime alone (`willPresent`: sound,
-  no banner). The sound goes through the notification, so Focus and the app's notification
-  sound setting apply. Pane > Chime When Agents Finish turns it off (`agentChime`).
+  rerun it). A pane on screen with the app in front gets the chime alone, no notification. The
+  app plays it (`NSSound`), not the notification, so it's heard with notifications off or a
+  Focus on (the user keeps one on all day); those only hold back the banner. Pane > Chime When
+  Agents Finish turns it off (`agentChime`).
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
   One surface has focus at a time (`focusedView`): it blinks, the others draw a hollow box, and
