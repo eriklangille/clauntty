@@ -48,8 +48,8 @@ struct MainView: View {
         }
         // An ended workspace's images go with it
         .onChange(of: sessionManager.sessionGroups.map(\.id)) { _, ids in
-            for workspace in sessionManager.windowImages.keys where !ids.contains(workspace) {
-                sessionManager.windowImages[workspace] = nil
+            for workspace in sessionManager.imageWindows where !ids.contains(workspace) {
+                sessionManager.dropImages(workspace)
             }
         }
         .onChange(of: sessionManager.sessions.map(\.id)) { _, ids in
@@ -79,7 +79,9 @@ struct MainView: View {
                 // Images its panes sent: over this workspace only, so the sidebar stays
                 // and another workspace's don't interrupt. A new one each workspace.
                 .overlay {
-                    ImageViewer(content: $sessionManager.windowImages[group.id]) { views.frameInWindow(of: $0) }
+                    ImageViewer(content: $sessionManager.windowImages[group.id],
+                                paneFrame: { views.frameInWindow(of: $0) },
+                                send: { marked, original in sendMarkup(marked, replacing: original, in: group) })
                         .ignoresSafeArea(.container, edges: .top)
                         .id(group.id)
                 }
@@ -90,6 +92,29 @@ struct MainView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Markup's Send to Claude: the marked-up image takes the original's place (so
+    /// reopening brings it back, the original with it), the viewer closes, and it's
+    /// pasted into the pane that sent the image, as Cmd+V would, for the user to add words
+    private func sendMarkup(_ marked: NSImage, replacing original: ImageViewerContent.Item, in group: SessionGroup) {
+        let item = ImageViewerContent.Item(name: original.name, image: marked)
+        if let png = marked.platformPNGData() { WaitingImages.store(png, item: item.id, workspace: group.id) }
+        let source = sessionManager.windowImages[group.id]?.source
+        if var content = sessionManager.windowImages[group.id], let index = content.items.firstIndex(where: { $0.id == original.id }) {
+            content.items[index] = item
+            sessionManager.windowImages[group.id] = content
+        }
+        sessionManager.windowImages[group.id] = nil
+
+        let target = source.flatMap { id in sessionManager.sessions.first { $0.id == id && $0.groupId == group.id } }
+            ?? sessionManager.activeSession
+        guard let target else { return }
+        if let pane = target.pane?.paneId, sessionManager.activeSessionId != target.id {
+            MainView.show(PaneSelection(groupId: group.id, paneId: pane), sessionManager)
+        }
+        views.pasteImage(marked, into: target)
+        DispatchQueue.main.async { views.focus(target) }
     }
 
     private func refocus() {

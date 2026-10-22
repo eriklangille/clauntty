@@ -448,11 +448,19 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
 - **Images and pages:** `clauntty show` images go with the workspace of the pane that
   ran it (`windowImages`, by workspace, as agent mode on the phone). `ImageViewer` shows
   them over that workspace's panes only, when it's on screen; another workspace's wait,
-  with a photo badge on its sidebar row, until you go there. Closing the viewer clears
-  them. Until then they're on disk (`WaitingImages`: Application Support/<bundle id>/Waiting,
-  a folder per workspace, synced from `windowImages`' didSet, loaded with the saved
-  workspaces), so a restart doesn't lose them; the host's inbox entry is gone once
-  downloaded. The phone's windows keep theirs the same way. It opens out of the pane that ran it (`ImageViewerContent.source`,
+  with a photo badge on its sidebar row, until you go there. Closing the viewer moves
+  them to the workspace's recent images (`recentImages`, the last 20): Pane > Reopen Images
+  (Cmd+Shift+T) or the row's menu brings them back. Open and closed both stay on disk
+  (`WaitingImages`: Application Support/<bundle id>/Waiting, a folder per workspace, synced
+  from the didSets, loaded with the saved workspaces), so a restart doesn't lose them; the
+  host's inbox entry is gone once downloaded. The phone's windows keep theirs the same way,
+  and reopen from the window menu. An item is a still, an animated GIF (`AnimatedImage`,
+  NSImageView; its bytes kept to save or copy as a GIF) or a video (mp4, mov, m4v: downloaded
+  to a file, 200 MB cap, played muted in `AVPlayerView`, its first frame the thumbnail).
+  **Markup** (stills): pen, circle, arrow and text over the image (`Markup.swift`; marks in
+  fractions of the image, so they follow zoom). Send to Claude (Return) flattens them at full
+  size (`Mark.render`), pastes it into the pane that sent the image as Cmd+V would (upload,
+  path typed, not sent), and keeps the marked-up copy as the workspace's newest image. It opens out of the pane that ran it (`ImageViewerContent.source`,
   `TerminalViews.frameInWindow`). Zoom, paging, the
   bar (always shown; each button's label under it on hover) and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).

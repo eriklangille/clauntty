@@ -1,4 +1,5 @@
 import os
+import AVKit
 import Photos
 import SwiftUI
 import UIKit
@@ -51,7 +52,9 @@ struct ImageViewerView: View {
 
     @ViewBuilder
     private func pageView(_ item: ImageViewerContent.Item) -> some View {
-        if let image = item.image {
+        if case .video(let file) = item.kind {
+            VideoPage(file: file)
+        } else if let image = item.image {
             ZoomableImageView(image: image, isZoomed: $isZoomed)
         } else {
             VStack(spacing: 12) {
@@ -100,11 +103,17 @@ struct ImageViewerView: View {
                         .disabled(saved.contains(item.id))
                     }
                     if items.indices.contains(page), let image = items[page].image {
-                        ShareLink(
-                            item: Image(uiImage: image),
-                            preview: SharePreview(items[page].name, image: Image(uiImage: image))
-                        ) {
-                            Image(systemName: "square.and.arrow.up")
+                        if case .video(let file) = items[page].kind {
+                            ShareLink(item: file, preview: SharePreview(items[page].name, image: Image(uiImage: image))) {
+                                Image(systemName: "square.and.arrow.up")
+                            }
+                        } else {
+                            ShareLink(
+                                item: Image(uiImage: image),
+                                preview: SharePreview(items[page].name, image: Image(uiImage: image))
+                            ) {
+                                Image(systemName: "square.and.arrow.up")
+                            }
                         }
                     }
                 }
@@ -154,7 +163,15 @@ struct ImageViewerView: View {
             do {
                 guard status == .authorized || status == .limited else { throw CocoaError(.userCancelled) }
                 try await PHPhotoLibrary.shared().performChanges {
-                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                    switch item.kind {
+                    case .still:
+                        PHAssetChangeRequest.creationRequestForAsset(from: image)
+                    case .animated(let gif):
+                        // As a GIF, so it still plays in Photos
+                        PHAssetCreationRequest.forAsset().addResource(with: .photo, data: gif, options: nil)
+                    case .video(let file):
+                        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file)
+                    }
                 }
                 saved.insert(item.id)
                 saveFailed.remove(item.id)
@@ -164,6 +181,23 @@ struct ImageViewerView: View {
                 Logger.clauntty.warning("ImageViewer: couldn't save \(item.name) to Photos: \(error.localizedDescription)")
             }
         }
+    }
+}
+
+/// A video with the system's controls, muted at first, paused when paged away
+private struct VideoPage: View {
+    let file: URL
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .onAppear {
+                let player = AVPlayer(url: file)
+                player.isMuted = true
+                player.play()
+                self.player = player
+            }
+            .onDisappear { player?.pause() }
     }
 }
 

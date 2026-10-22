@@ -1,5 +1,12 @@
+import AVFoundation
 import Foundation
+import ImageIO
 import os
+#if canImport(UIKit)
+import UIKit
+#else
+import AppKit
+#endif
 
 // Models for panes and tabs that Core (SessionManager) and the views of both apps use.
 
@@ -147,19 +154,32 @@ enum TabItem: Identifiable, Equatable {
 /// Images sent from a remote host with `clauntty show`
 struct ImageViewerContent: Identifiable {
     struct Item: Identifiable {
+        /// What it is: the viewer shows each its own way
+        enum Kind: Equatable {
+            case still
+            /// A GIF with frames: `image` has them all (on the phone an animated UIImage);
+            /// the bytes are the GIF, to save or copy as one
+            case animated(Data)
+            /// Played from its file; `image` is its first frame
+            case video(URL)
+        }
+
         let id: UUID
         let name: String
+        /// The picture; a video's first frame
         let image: PlatformImage?
         /// Why the image couldn't be shown (download failed, not an image)
         let error: String?
         let arrived: Date
+        var kind = Kind.still
 
-        init(id: UUID = UUID(), name: String, image: PlatformImage, arrived: Date = Date()) {
+        init(id: UUID = UUID(), name: String, image: PlatformImage, arrived: Date = Date(), kind: Kind = .still) {
             self.id = id
             self.name = name
             self.image = image
             self.error = nil
             self.arrived = arrived
+            self.kind = kind
         }
 
         init(name: String, error: String) {
@@ -180,20 +200,91 @@ struct ImageViewerContent: Identifiable {
     var source: UUID?
 }
 
-/// Images waiting in a workspace's viewer, kept on disk so they're still there after the
-/// app restarts: `Application Support/<bundle id>/Waiting/<workspace>/`, each image's
-/// bytes as downloaded (named by its item's id) and `manifest.json`. A workspace whose
-/// viewer is closed loses its folder.
+extension ImageViewerContent.Item {
+    /// Videos `clauntty show` takes (rtach's `isMediaPath`): what AVFoundation plays
+    static let videoExtensions: Set<String> = ["mp4", "mov", "m4v"]
+
+    static func isVideo(_ name: String) -> Bool {
+        videoExtensions.contains((name as NSString).pathExtension.lowercased())
+    }
+
+    /// An image's bytes: a still, or a GIF's frames to animate. Nil if it isn't an image.
+    static func image(id: UUID = UUID(), name: String, data: Data, arrived: Date = Date()) -> Self? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        if CGImageSourceGetCount(source) > 1, let animated = animatedImage(source, data: data) {
+            return .init(id: id, name: name, image: animated, arrived: arrived, kind: .animated(data))
+        }
+        guard let image = PlatformImage(data: data) else { return nil }
+        return .init(id: id, name: name, image: image, arrived: arrived)
+    }
+
+    /// A video file, with its first frame to show. Nil if AVFoundation can't read it.
+    static func video(id: UUID = UUID(), name: String, file: URL, arrived: Date = Date()) async -> Self? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+        generator.appliesPreferredTrackTransform = true
+        guard let frame = try? await generator.image(at: .zero).image else { return nil }
+        return video(id: id, name: name, file: file, poster: platformImage(frame), arrived: arrived)
+    }
+
+    static func video(id: UUID, name: String, file: URL, poster: PlatformImage, arrived: Date) -> Self {
+        .init(id: id, name: name, image: poster, arrived: arrived, kind: .video(file))
+    }
+
+    private static func platformImage(_ cgImage: CGImage) -> PlatformImage {
+        #if canImport(UIKit)
+        UIImage(cgImage: cgImage)
+        #else
+        NSImage(cgImage: cgImage, size: .zero)
+        #endif
+    }
+
+    private static func animatedImage(_ source: CGImageSource, data: Data) -> PlatformImage? {
+        #if canImport(UIKit)
+        // UIImage keeps one frame: build an animated one, timed by the frames' delays
+        var frames: [UIImage] = []
+        var duration: TimeInterval = 0
+        for index in 0..<CGImageSourceGetCount(source) {
+            guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            frames.append(UIImage(cgImage: frame))
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+            let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+            let delay = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double) ?? 0.1
+            // As browsers do: a delay under 20ms plays at 100ms
+            duration += delay < 0.02 ? 0.1 : delay
+        }
+        return frames.count > 1 ? UIImage.animatedImage(with: frames, duration: duration) : nil
+        #else
+        // NSImage keeps a GIF's frames, and NSImageView plays them
+        return NSImage(data: data)
+        #endif
+    }
+}
+
+/// A workspace's images, kept on disk so they're still there after the app restarts:
+/// those waiting in its viewer and those closed, to reopen.
+/// `Application Support/<bundle id>/Waiting/<workspace>/` has each image's bytes as
+/// downloaded (named by its item's id; a video as `<id>.<ext>` with its first frame in
+/// `<id>.poster`) and `manifest.json`. A workspace with neither loses its folder.
 enum WaitingImages {
     private struct Manifest: Codable {
         struct Item: Codable {
             let id: UUID
             let name: String
             let arrived: Date
+            /// A video's file in the folder
+            var video: String?
         }
+        struct Group: Codable {
+            let host: String
+            let source: UUID?
+            let items: [Item]
+        }
+        // The open images, at the top as before closed ones were kept
         let host: String
         let source: UUID?
         let items: [Item]
+        /// Closed, to reopen
+        let recent: Group?
     }
 
     private static let manifestName = "manifest.json"
@@ -210,69 +301,125 @@ enum WaitingImages {
 
     /// Keep a downloaded image's bytes, for `save` to list
     static func store(_ data: Data, item: UUID, workspace: UUID) {
-        let folder = folder(workspace)
+        guard let folder = makeFolder(workspace) else { return }
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            // Not worth a backup: the host had them for 6 hours at most
-            var root = directory
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            try? root.setResourceValues(values)
             try data.write(to: folder.appendingPathComponent(item.uuidString), options: .atomic)
         } catch {
             Logger.clauntty.warning("WaitingImages: couldn't keep an image: \(error.localizedDescription)")
         }
     }
 
-    /// Match the disk to what each workspace's viewer holds: a manifest of its images
-    /// that were stored, and no folder for a workspace with none
-    static func save(_ contents: [UUID: ImageViewerContent]) {
+    /// Where a video goes once downloaded (AVFoundation plays files): with its workspace's
+    /// images, or for one with no workspace, the temporary folder
+    static func videoFile(item: UUID, name: String, workspace: UUID?) -> URL? {
+        let ext = (name as NSString).pathExtension.lowercased()
+        let folder = workspace.flatMap(makeFolder)
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("clauntty-media", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("\(item.uuidString).\(ext)")
+    }
+
+    /// A video's first frame, so a restart shows it without reading the video
+    static func storePoster(_ image: PlatformImage, item: UUID, workspace: UUID) {
+        guard let folder = makeFolder(workspace), let data = image.platformPNGData() else { return }
+        try? data.write(to: folder.appendingPathComponent("\(item.uuidString).poster"), options: .atomic)
+    }
+
+    private static func makeFolder(_ workspace: UUID) -> URL? {
+        let folder = folder(workspace)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            Logger.clauntty.warning("WaitingImages: no folder: \(error.localizedDescription)")
+            return nil
+        }
+        // Not worth a backup: the host had them for 6 hours at most
+        var root = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? root.setResourceValues(values)
+        return folder
+    }
+
+    /// The item a file belongs to: its name starts with the item's id
+    private static func itemId(_ file: String) -> String { String(file.prefix(36)) }
+
+    /// Match the disk to each workspace's images: a manifest of those that were stored,
+    /// open and closed, and no folder for a workspace with none
+    static func save(open: [UUID: ImageViewerContent], recent: [UUID: ImageViewerContent]) {
         let fileManager = FileManager.default
         let folders = (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         for folder in folders {
-            guard let workspace = UUID(uuidString: folder.lastPathComponent),
-                  let content = contents[workspace] else {
-                try? fileManager.removeItem(at: folder)
-                continue
-            }
+            let workspace = UUID(uuidString: folder.lastPathComponent)
             let files = Set((try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? [])
-            let items = content.items.filter { files.contains($0.id.uuidString) }
-            guard !items.isEmpty else {
+            let stored = Set(files.map(itemId))
+            let opened = workspace.flatMap { open[$0] }
+            let closed = workspace.flatMap { recent[$0] }
+            let openItems = opened?.items.filter { stored.contains($0.id.uuidString) } ?? []
+            let closedItems = closed?.items.filter { stored.contains($0.id.uuidString) } ?? []
+            guard !openItems.isEmpty || !closedItems.isEmpty else {
                 try? fileManager.removeItem(at: folder)
                 continue
             }
-            let manifest = Manifest(host: content.host, source: content.source,
-                                    items: items.map { .init(id: $0.id, name: $0.name, arrived: $0.arrived) })
+            let manifest = Manifest(
+                host: opened?.host ?? closed?.host ?? "",
+                source: opened?.source ?? closed?.source,
+                items: openItems.map(entry),
+                recent: closed.map { .init(host: $0.host, source: $0.source, items: closedItems.map(entry)) }
+            )
             if let data = try? JSONEncoder().encode(manifest) {
                 try? data.write(to: folder.appendingPathComponent(manifestName), options: .atomic)
             }
-            // Images the viewer no longer has
-            let kept = Set(items.map(\.id.uuidString)).union([manifestName])
-            for file in files where !kept.contains(file) {
+            // Images neither has any more
+            let kept = Set((openItems + closedItems).map(\.id.uuidString))
+            for file in files where file != manifestName && !kept.contains(itemId(file)) {
                 try? fileManager.removeItem(at: folder.appendingPathComponent(file))
             }
         }
     }
 
-    /// What was waiting when the app last ran, for these workspaces, without anything
+    private static func entry(_ item: ImageViewerContent.Item) -> Manifest.Item {
+        var entry = Manifest.Item(id: item.id, name: item.name, arrived: item.arrived)
+        if case .video(let file) = item.kind { entry.video = file.lastPathComponent }
+        return entry
+    }
+
+    /// Each workspace's images when the app last ran, open and closed, without anything
     /// older than the host keeps an inbox entry
-    static func load(workspaces: Set<UUID>) -> [UUID: ImageViewerContent] {
+    static func load(workspaces: Set<UUID>) -> (open: [UUID: ImageViewerContent], recent: [UUID: ImageViewerContent]) {
         let folders = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        var contents: [UUID: ImageViewerContent] = [:]
+        var open: [UUID: ImageViewerContent] = [:]
+        var recent: [UUID: ImageViewerContent] = [:]
         for folder in folders {
             guard let workspace = UUID(uuidString: folder.lastPathComponent), workspaces.contains(workspace),
                   let data = try? Data(contentsOf: folder.appendingPathComponent(manifestName)),
                   let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else { continue }
-            let items = manifest.items.compactMap { item -> ImageViewerContent.Item? in
-                guard Date().timeIntervalSince(item.arrived) < ImageInbox.maxAge,
-                      let bytes = try? Data(contentsOf: folder.appendingPathComponent(item.id.uuidString)),
-                      let image = PlatformImage(data: bytes) else { return nil }
-                return .init(id: item.id, name: item.name, image: image, arrived: item.arrived)
-            }
+            let items = images(manifest.items, in: folder)
             if !items.isEmpty {
-                contents[workspace] = ImageViewerContent(host: manifest.host, items: items, source: manifest.source)
+                open[workspace] = ImageViewerContent(host: manifest.host, items: items, source: manifest.source)
+            }
+            if let group = manifest.recent {
+                let items = images(group.items, in: folder)
+                if !items.isEmpty {
+                    recent[workspace] = ImageViewerContent(host: group.host, items: items, source: group.source)
+                }
             }
         }
-        return contents
+        return (open, recent)
+    }
+
+    private static func images(_ entries: [Manifest.Item], in folder: URL) -> [ImageViewerContent.Item] {
+        entries.compactMap { item in
+            guard Date().timeIntervalSince(item.arrived) < ImageInbox.maxAge else { return nil }
+            if let video = item.video {
+                let file = folder.appendingPathComponent(video)
+                guard FileManager.default.fileExists(atPath: file.path),
+                      let bytes = try? Data(contentsOf: folder.appendingPathComponent("\(item.id.uuidString).poster")),
+                      let poster = PlatformImage(data: bytes) else { return nil }
+                return .video(id: item.id, name: item.name, file: file, poster: poster, arrived: item.arrived)
+            }
+            guard let bytes = try? Data(contentsOf: folder.appendingPathComponent(item.id.uuidString)) else { return nil }
+            return .image(id: item.id, name: item.name, data: bytes, arrived: item.arrived)
+        }
     }
 }

@@ -27,8 +27,22 @@ class SessionManager: ObservableObject {
     /// The Mac always keeps them here, by workspace. Kept on disk until cleared
     /// (`WaitingImages`), so a restart doesn't lose them.
     @Published var windowImages: [UUID: ImageViewerContent] = [:] {
-        didSet { WaitingImages.save(windowImages) }
+        didSet {
+            guard !restoringImages else { return }
+            keepClosedImages(from: oldValue)
+            WaitingImages.save(open: windowImages, recent: recentImages)
+        }
     }
+    /// Each window's images that were closed, oldest first, to reopen (Pane > Reopen
+    /// Images): the last `recentImagesKept`, for as long as the host keeps an inbox entry
+    @Published private(set) var recentImages: [UUID: ImageViewerContent] = [:] {
+        didSet { if !restoringImages { WaitingImages.save(open: windowImages, recent: recentImages) } }
+    }
+    /// Both are being set from disk: a save between them would drop the other's files
+    private var restoringImages = false
+    static let recentImagesKept = 20
+    /// Windows with images, open or closed
+    var imageWindows: Set<UUID> { Set(windowImages.keys).union(recentImages.keys) }
     /// A window whose images should open (a notification for them was tapped)
     @Published var openImagesWindow: UUID?
 
@@ -1219,6 +1233,24 @@ class SessionManager: ObservableObject {
 
     /// Largest image `clauntty show` will download
     private static let maxImageBytes = 20 * 1024 * 1024
+    /// Largest video
+    private static let maxVideoBytes = 200 * 1024 * 1024
+
+    /// A downloaded video, written where its window keeps its images (AVFoundation plays
+    /// files), with its first frame
+    private func videoItem(name: String, data: Data, window: UUID?) async -> ImageViewerContent.Item {
+        let id = UUID()
+        guard let file = WaitingImages.videoFile(item: id, name: name, workspace: window),
+              (try? data.write(to: file, options: .atomic)) != nil else {
+            return .init(name: name, error: "Couldn't save the video")
+        }
+        guard let item = await ImageViewerContent.Item.video(id: id, name: name, file: file) else {
+            try? FileManager.default.removeItem(at: file)
+            return .init(name: name, error: "Can't play this video")
+        }
+        if let window, let poster = item.image { WaitingImages.storePoster(poster, item: id, workspace: window) }
+        return item
+    }
 
     /// Queue an image from `clauntty show`; paths arriving together open as one viewer
     private func handleShowImageRequest(from session: Session, path: String, inboxId: String?, pane: String?) {
@@ -1263,6 +1295,53 @@ class SessionManager: ObservableObject {
         }
     }
 
+    /// Images that left a window's viewer go to its recent images, unless the window
+    /// went too (`dropImages`)
+    private func keepClosedImages(from old: [UUID: ImageViewerContent]) {
+        var recent = recentImages
+        var changed = false
+        for (window, content) in old {
+            let still = Set(windowImages[window]?.items.map(\.id) ?? [])
+            let closed = content.items.filter { $0.image != nil && !still.contains($0.id) }
+            guard !closed.isEmpty else { continue }
+            let kept = (recent[window]?.items ?? []).filter { item in !closed.contains { $0.id == item.id } }
+            recent[window] = ImageViewerContent(host: content.host, items: Array((kept + closed).suffix(Self.recentImagesKept)),
+                                                source: content.source)
+            changed = true
+        }
+        if changed { recentImages = recent }
+    }
+
+    /// The last run's images, open and closed (`WaitingImages.load`)
+    func restoreImages(open: [UUID: ImageViewerContent], recent: [UUID: ImageViewerContent]) {
+        restoringImages = true
+        recentImages = recent
+        windowImages = open
+        restoringImages = false
+        WaitingImages.save(open: windowImages, recent: recentImages)
+    }
+
+    /// Open a window's recent images again, the newest shown
+    func reopenImages(_ window: UUID) {
+        guard var recent = recentImages[window], !recent.items.isEmpty else { return }
+        // The newest closed one
+        recent.selection = recent.items.count - 1
+        if let open = windowImages[window] {
+            // Others came meanwhile: the closed ones go before them
+            recent.items += open.items
+        }
+        // Open first, so their files are never in neither
+        windowImages[window] = recent
+        recentImages[window] = nil
+    }
+
+    /// A window that's gone: its images, open or closed, go with it
+    func dropImages(_ window: UUID) {
+        windowImages[window] = nil
+        // Including those just closed: there's nothing to reopen them in
+        recentImages[window] = nil
+    }
+
     private func showImages(_ batch: [PendingImage]) async {
         var images: [ImageViewerContent.Item] = []
         // Where each image goes in agent mode: its pane's window
@@ -1280,14 +1359,18 @@ class SessionManager: ObservableObject {
             let name = (path as NSString).lastPathComponent
             var retry = false
             do {
-                let data = try await session.downloadFile(path, maxBytes: Self.maxImageBytes)
-                if let image = PlatformImage(data: data) {
-                    let item = ImageViewerContent.Item(name: name, image: image)
+                let video = ImageViewerContent.Item.isVideo(name)
+                let data = try await session.downloadFile(path, maxBytes: video ? Self.maxVideoBytes : Self.maxImageBytes)
+                if data.isEmpty {
+                    images.append(.init(name: name, error: "File not found or empty"))
+                } else if video {
+                    images.append(await videoItem(name: name, data: data, window: window))
+                } else if let item = ImageViewerContent.Item.image(name: name, data: data) {
                     // Its window's viewer keeps it until it's closed, across restarts
                     if let window { WaitingImages.store(data, item: item.id, workspace: window) }
                     images.append(item)
                 } else {
-                    images.append(.init(name: name, error: data.isEmpty ? "File not found or empty" : "Not an image"))
+                    images.append(.init(name: name, error: "Not an image"))
                 }
             } catch {
                 images.append(.init(name: name, error: error.localizedDescription))

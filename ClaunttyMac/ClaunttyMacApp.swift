@@ -147,6 +147,10 @@ struct PaneCommands: Commands {
             Button(window.zoomedPane == nil ? "Zoom Pane" : "Show All Panes") { toggleZoom() }
                 .keyboardShortcut(.return, modifiers: [.command, .shift])
                 .disabled(activeGroup.map { $0.shownLayout.paneIds.count < 2 } ?? true)
+            // As a browser reopens a closed tab
+            Button("Reopen Images") { activeGroup.map { sessionManager.reopenImages($0.id) } }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(activeGroup.map { sessionManager.recentImages[$0.id] == nil } ?? true)
             Divider()
             Button("Next Pane") { move(by: 1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])

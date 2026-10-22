@@ -72,6 +72,11 @@ final class TerminalViews {
         window.makeFirstResponder(view)
     }
 
+    /// An image into the session's pane as Cmd+V pastes one: uploaded, then its path typed
+    func pasteImage(_ image: NSImage, into session: Session) {
+        views[session.id]?.view.onPasteImages?([image])
+    }
+
     /// Where the session's pane is in its window, from the top left, if it's on screen
     func frameInWindow(of sessionId: UUID) -> CGRect? {
         guard let pane = views[sessionId]?.view.superview, let window = pane.window,

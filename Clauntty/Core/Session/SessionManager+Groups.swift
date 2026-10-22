@@ -678,7 +678,8 @@ extension SessionManager {
             sessionGroups.append(group)
             paneSession(for: group, paneId: group.activePaneId, config: config)
         }
-        // Images that were waiting in their viewers
-        windowImages = WaitingImages.load(workspaces: Set(sessionGroups.map(\.id)))
+        // Images that were waiting in their viewers, and those closed
+        let images = WaitingImages.load(workspaces: Set(sessionGroups.map(\.id)))
+        restoreImages(open: images.open, recent: images.recent)
     }
 }

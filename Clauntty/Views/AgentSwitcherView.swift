@@ -376,8 +376,8 @@ struct AgentSwitcherView: View {
                 if let menuWindow, !ids.contains(menuWindow) { self.menuWindow = nil }
                 if let moving, !ids.contains(moving) { self.moving = nil }
                 // A closed window's images go with it
-                for window in sessionManager.windowImages.keys where !ids.contains(window) {
-                    sessionManager.windowImages[window] = nil
+                for window in sessionManager.imageWindows where !ids.contains(window) {
+                    sessionManager.dropImages(window)
                 }
                 if let focused, !ids.contains(focused) {
                     if webReturn != nil { return exitWeb() }
@@ -1182,6 +1182,13 @@ struct AgentSwitcherView: View {
                 actions.append(.init(id: "new", title: "New Tab", icon: "plus", perform: onNewTab))
             }
             actions.append(.init(id: "ports", title: "Ports", icon: "globe") { onPorts(session) })
+            // Images closed in this window, to see again
+            if sessionManager.recentImages[tabId] != nil {
+                actions.append(.init(id: "images", title: "Images", icon: "photo.on.rectangle") {
+                    sessionManager.reopenImages(tabId)
+                    sessionManager.openImagesWindow = tabId
+                })
+            }
             actions.append(.init(id: "close", title: "Close", icon: "xmark", isDestructive: true) {
                 // Ends the pane shown; its window goes (or shows the next pane) right away
                 sessionManager.closeTab(session)

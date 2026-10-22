@@ -28,6 +28,14 @@ struct Sidebar: View {
                             WorkspaceRow(group: group, images: sessionManager.windowImages[group.id]?.items.count ?? 0,
                                          shortcut: shortcuts[group.id])
                                 .tag(SidebarItem.workspace(group.id))
+                                .contextMenu {
+                                    if let recent = sessionManager.recentImages[group.id] {
+                                        Button(recent.items.count == 1 ? "Reopen Image" : "Reopen \(recent.items.count) Images") {
+                                            MainView.show(PaneSelection(groupId: group.id, paneId: group.activePaneId), sessionManager)
+                                            sessionManager.reopenImages(group.id)
+                                        }
+                                    }
+                                }
                         case .web(let webTab, let nested):
                             WebTabRow(webTab: webTab)
                                 .padding(.leading, nested ? WorkspaceRow.titleInset : 0)

@@ -1,4 +1,5 @@
 import AppKit
+import AVKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -16,6 +17,9 @@ struct ImageViewer: View {
     /// Where a session's pane is in the window (from its top left), to open out of and
     /// close back into
     let paneFrame: (UUID) -> CGRect?
+    /// Markup's Send to Claude: the marked-up image and the item it was made from. Nil
+    /// where there's no pane to send it to.
+    var send: ((NSImage, ImageViewerContent.Item) -> Void)?
 
     /// Cmd+= (+1), Cmd+− (−1) and Cmd+0 (nil) from the View menu, as an NSNumber
     static let zoomCommand = Notification.Name("ImageViewer.zoom")
@@ -31,6 +35,8 @@ struct ImageViewer: View {
     @State private var scrollMonitor: Any?
     /// A two-finger swipe so far, in points
     @State private var swipe: CGFloat = 0
+    /// Marking up the image shown (Markup), else nil
+    @State private var marking: MarkupState?
     @FocusState private var focused: Bool
 
     /// How far the image is zoomed past fitting the window, and where it's moved to
@@ -84,7 +90,7 @@ struct ImageViewer: View {
             .overlay(Color.black.opacity(0.35))
             .environment(\.colorScheme, .dark)
             .contentShape(Rectangle())
-            .onTapGesture { close() }
+            .onTapGesture { if marking == nil { close() } }
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
@@ -96,18 +102,23 @@ struct ImageViewer: View {
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
-            .onKeyPress(.leftArrow) { turn(by: -1); return .handled }
-            .onKeyPress(.rightArrow) { turn(by: 1); return .handled }
-            .onKeyPress(.escape) { close(); return .handled }
-            .onKeyPress(.space) { close(); return .handled }
+            .onKeyPress(.leftArrow) { if marking == nil { turn(by: -1) }; return .handled }
+            .onKeyPress(.rightArrow) { if marking == nil { turn(by: 1) }; return .handled }
+            // Marking up: Esc leaves Markup, not the viewer
+            .onKeyPress(.escape) {
+                if marking != nil { marking = nil } else { close() }
+                return .handled
+            }
+            .onKeyPress(.space) { if marking == nil { close() }; return .handled }
             .onKeyPress(characters: CharacterSet(charactersIn: "s")) { press in
                 guard press.modifiers.contains(.command), let item = shownItem else { return .ignored }
                 save(item)
                 return .handled
             }
             .onCopyCommand {
-                guard let image = shownItem?.image else { return [] }
-                return [NSItemProvider(object: image)]
+                guard let item = shownItem else { return [] }
+                if item.kind == .still, let image = item.image { return [NSItemProvider(object: image)] }
+                return Self.file(for: item).flatMap { NSItemProvider(contentsOf: $0) }.map { [$0] } ?? []
             }
     }
 
@@ -116,7 +127,9 @@ struct ImageViewer: View {
     private func stage(_ item: ImageViewerContent.Item, area: CGRect) -> some View {
         ZStack {
             Group {
-                if let image = item.image {
+                if case .video(let file) = item.kind, let poster = item.image {
+                    video(file, poster: poster, area: area)
+                } else if let image = item.image {
                     picture(image, item: item, area: area)
                 } else {
                     Label(item.error ?? "Can't show this image", systemImage: "exclamationmark.triangle")
@@ -139,10 +152,21 @@ struct ImageViewer: View {
     private func picture(_ image: NSImage, item: ImageViewerContent.Item, area: CGRect) -> some View {
         let fit = fitted(image, in: area)
         let size = CGSize(width: fit.width * zoom.scale, height: fit.height * zoom.scale)
-        let shown = Image(nsImage: image)
-            .resizable()
-            .interpolation(.high)
+        let shown = Group {
+            if case .animated = item.kind {
+                AnimatedImage(image: image)
+            } else {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+            }
+        }
             .frame(width: size.width, height: size.height)
+            .overlay {
+                if marking?.itemId == item.id {
+                    MarkupLayer(state: Binding { marking ?? MarkupState(itemId: item.id) } set: { marking = $0 })
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: zoom.isZoomed ? 0 : 10))
             .shadow(color: .black.opacity(zoom.isZoomed ? 0 : 0.5), radius: 30, y: 12)
             .offset(clamped(zoom.pan, image: size, area: area.size))
@@ -151,7 +175,10 @@ struct ImageViewer: View {
                 doubleClicked(at: tap.location, image: image, fit: fit, area: area)
             })
         return Group {
-            if zoom.isZoomed {
+            if marking != nil {
+                // Drags draw
+                shown
+            } else if zoom.isZoomed {
                 // Dragging moves around a zoomed image
                 shown.gesture(DragGesture().onChanged { drag in
                     let start = panStart ?? zoom.pan
@@ -167,6 +194,15 @@ struct ImageViewer: View {
         }
     }
 
+    /// A video, fitted, with the player's own controls; no zooming
+    private func video(_ file: URL, poster: NSImage, area: CGRect) -> some View {
+        let fit = fitted(poster, in: area)
+        return VideoPlayerView(file: file)
+            .frame(width: fit.width, height: fit.height)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.5), radius: 30, y: 12)
+    }
+
     /// The bar, the side arrows (when the mouse comes near) and the thumbnails
     private func chrome(_ content: ImageViewerContent, index: Int, size: CGSize) -> some View {
         let items = content.items
@@ -177,21 +213,29 @@ struct ImageViewer: View {
                 topBar(items[index], host: content.host, index: index, count: items.count)
                     .padding(.top, 14)
                 Spacer()
-                if items.count > 1 {
+                if marking != nil {
+                    MarkupBar(state: Binding { marking ?? MarkupState(itemId: items[index].id) } set: { marking = $0 },
+                              send: send == nil ? nil : { sendMarkup() },
+                              copy: { copyMarkup() },
+                              cancel: { marking = nil })
+                        .padding(.bottom, 18)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if items.count > 1 {
                     thumbnails(items, index: index)
                         .padding(.bottom, 18)
                 }
             }
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: marking == nil)
             HStack {
                 SideArrow(symbol: "chevron.left", help: "Previous (←)") { turn(by: -1) }
-                    .opacity(nearLeft ? 1 : 0)
+                    .opacity(nearLeft && marking == nil ? 1 : 0)
                     .scaleEffect(nearLeft ? 1 : 0.8)
-                    .allowsHitTesting(nearLeft)
+                    .allowsHitTesting(nearLeft && marking == nil)
                 Spacer()
                 SideArrow(symbol: "chevron.right", help: "Next (→)") { turn(by: 1) }
-                    .opacity(nearRight ? 1 : 0)
+                    .opacity(nearRight && marking == nil ? 1 : 0)
                     .scaleEffect(nearRight ? 1 : 0.8)
-                    .allowsHitTesting(nearRight)
+                    .allowsHitTesting(nearRight && marking == nil)
             }
             .padding(.horizontal, 18)
             .animation(.spring(response: 0.3, dampingFraction: 0.75), value: nearLeft)
@@ -214,13 +258,28 @@ struct ImageViewer: View {
             .padding(.leading, 8)
             Spacer(minLength: 16)
             if let image = item.image {
-                ChromeButton(symbol: "doc.on.doc", label: "Copy (⌘C)") { copy(image) }
+                ChromeButton(symbol: "doc.on.doc", label: "Copy (⌘C)") { copy(item) }
                 ChromeButton(symbol: "square.and.arrow.down", label: "Save… (⌘S)") { save(item) }
-                ShareLink(item: Image(nsImage: image), preview: SharePreview(item.name, image: Image(nsImage: image))) {
-                    HoverIcon(symbol: "square.and.arrow.up", label: "Share")
+                if item.kind == .still {
+                    ShareLink(item: Image(nsImage: image), preview: SharePreview(item.name, image: Image(nsImage: image))) {
+                        HoverIcon(symbol: "square.and.arrow.up", label: "Share")
+                    }
+                    .buttonStyle(PressStyle())
+                } else if let file = Self.file(for: item) {
+                    // The GIF or the video itself
+                    ShareLink(item: file, preview: SharePreview(item.name, image: Image(nsImage: image))) {
+                        HoverIcon(symbol: "square.and.arrow.up", label: "Share")
+                    }
+                    .buttonStyle(PressStyle())
                 }
-                .buttonStyle(PressStyle())
-                ChromeButton(symbol: "arrow.up.forward.app", label: "Open in Preview") { openInPreview(item) }
+                ChromeButton(symbol: "arrow.up.forward.app", label: Self.isVideo(item) ? "Open in QuickTime Player" : "Open in Preview") {
+                    openInPreview(item)
+                }
+                if item.kind == .still && marking == nil {
+                    ChromeButton(symbol: "pencil.tip.crop.circle", label: "Markup") {
+                        marking = MarkupState(itemId: item.id)
+                    }
+                }
             }
             ChromeButton(symbol: "xmark", label: "Close (Esc)") { close() }
         }
@@ -411,6 +470,7 @@ struct ImageViewer: View {
             page = index
             zoom = Zoom()
         }
+        marking = nil
     }
 
     private func didOpen() {
@@ -427,6 +487,7 @@ struct ImageViewer: View {
         if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
         scrollMonitor = nil
         pointer = nil
+        marking = nil
     }
 
     private func close() {
@@ -435,24 +496,59 @@ struct ImageViewer: View {
 
     // MARK: Actions
 
-    private func copy(_ image: NSImage) {
+    /// The marked-up image, flattened at full size
+    private var markedImage: (NSImage, ImageViewerContent.Item)? {
+        guard let marking, let item = content?.items.first(where: { $0.id == marking.itemId }),
+              let image = item.image, let marked = Mark.render(image, marks: marking.marks) else { return nil }
+        return (marked, item)
+    }
+
+    private func sendMarkup() {
+        guard let (marked, item) = markedImage else { return }
+        marking = nil
+        send?(marked, item)
+    }
+
+    private func copyMarkup() {
+        guard let (marked, _) = markedImage else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects([image])
+        NSPasteboard.general.writeObjects([marked])
+    }
+
+    /// A still as an image; a GIF or a video as its file, so it stays one
+    private func copy(_ item: ImageViewerContent.Item) {
+        NSPasteboard.general.clearContents()
+        if item.kind == .still, let image = item.image {
+            NSPasteboard.general.writeObjects([image])
+        } else if let file = Self.file(for: item) {
+            NSPasteboard.general.writeObjects([file as NSURL])
+        }
     }
 
     private func save(_ item: ImageViewerContent.Item) {
-        guard let data = item.image.flatMap(Self.png) else { return }
+        guard let file = Self.file(for: item) else { return }
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = Self.pngName(item.name)
-        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = file.lastPathComponent
+        panel.allowedContentTypes = UTType(filenameExtension: file.pathExtension).map { [$0] } ?? []
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? data.write(to: url)
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.copyItem(at: file, to: url)
     }
 
+    /// A video in its default player (QuickTime Player), an image in Preview
     private func openInPreview(_ item: ImageViewerContent.Item) {
-        guard let url = Self.file(for: item),
-              let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else { return }
+        guard let url = Self.file(for: item) else { return }
+        if Self.isVideo(item) {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        guard let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else { return }
         NSWorkspace.shared.open([url], withApplicationAt: preview, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    private static func isVideo(_ item: ImageViewerContent.Item) -> Bool {
+        if case .video = item.kind { return true }
+        return false
     }
 
     /// As a file, so Finder takes it as one
@@ -464,14 +560,28 @@ struct ImageViewer: View {
         return provider
     }
 
-    /// The image as a PNG in a temporary folder, for Preview and dragging out
+    /// The item as a file, for saving, Preview, sharing and dragging out: a video's own;
+    /// a GIF's bytes, or a still as a PNG, in a temporary folder
     private static func file(for item: ImageViewerContent.Item) -> URL? {
-        guard let data = item.image.flatMap(png) else { return nil }
+        let data: Data
+        let name: String
+        switch item.kind {
+        case .video(let file):
+            return file
+        case .animated(let gif):
+            data = gif
+            name = fileName(item.name, ext: "gif")
+        case .still:
+            guard let png = item.image.flatMap(png) else { return nil }
+            data = png
+            name = fileName(item.name, ext: "png")
+        }
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("Clauntty Images", isDirectory: true)
             .appendingPathComponent(item.id.uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(pngName(item.name))
+        let url = folder.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: url.path) { return url }
         guard (try? data.write(to: url)) != nil else { return nil }
         return url
     }
@@ -481,9 +591,9 @@ struct ImageViewer: View {
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    private static func pngName(_ name: String) -> String {
+    private static func fileName(_ name: String, ext: String) -> String {
         let base = (name as NSString).deletingPathExtension
-        return (base.isEmpty ? "image" : base) + ".png"
+        return (base.isEmpty ? "image" : base) + "." + ext
     }
 }
 
@@ -607,5 +717,52 @@ private struct Thumbnail: View {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { self.hovering = hovering }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selected)
+    }
+}
+
+// MARK: - Media
+
+/// A GIF, playing: NSImageView animates an NSImage's frames, SwiftUI's Image doesn't.
+/// Clicks and drags go through to the viewer's gestures.
+private struct AnimatedImage: NSViewRepresentable {
+    let image: NSImage
+
+    func makeNSView(context: Context) -> NSImageView {
+        let view = PassThroughImageView()
+        view.imageScaling = .scaleAxesIndependently
+        view.animates = true
+        view.image = image
+        return view
+    }
+
+    func updateNSView(_ view: NSImageView, context: Context) {
+        if view.image !== image { view.image = image }
+    }
+
+    private final class PassThroughImageView: NSImageView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+/// A video with the system's controls. It starts muted, so a screen recording doesn't
+/// blare, and plays once.
+private struct VideoPlayerView: NSViewRepresentable {
+    let file: URL
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .floating
+        view.showsFullScreenToggleButton = true
+        let player = AVPlayer(url: file)
+        player.isMuted = true
+        view.player = player
+        player.play()
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {}
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        view.player?.pause()
     }
 }
