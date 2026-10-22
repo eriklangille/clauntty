@@ -14,9 +14,19 @@ final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private weak var sessionManager: SessionManager?
 
-    /// Pane > Chime When Agents Finish (on unless turned off)
+    /// Pane > Chime When Agents Finish, Settings > Sounds (on unless turned off)
     static let chimeKey = "agentChime"
-    static var chimes: Bool { UserDefaults.standard.object(forKey: chimeKey) as? Bool ?? true }
+    static var chimes: Bool { flag(chimeKey) }
+    /// Each chime on its own (Settings > Sounds)
+    static let doneChimeKey = "agentChimeDone"
+    static let needsYouChimeKey = "agentChimeNeedsYou"
+    /// 0–1, the chimes' own volume, under the Mac's
+    static let chimeVolumeKey = "agentChimeVolume"
+    static var chimeVolume: Float { Float(UserDefaults.standard.object(forKey: chimeVolumeKey) as? Double ?? 1) }
+    /// Banners for agents out of sight (Settings > Notifications); the chime doesn't need them
+    static let bannersKey = "agentBanners"
+
+    private static func flag(_ key: String) -> Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
 
     /// Kept, so a chime isn't let go while it plays
     private let doneChime = NSSound(named: "agent-done")
@@ -46,15 +56,13 @@ final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
         updateBadge()
         // Working again (answered here or on another device): its notice is old news
         guard let body else { return seen(paneId: paneId) }
-        if Self.chimes, let chime = needsYou ? needsYouChime : doneChime {
-            // Another agent's, just before: start it again
-            chime.stop()
-            chime.play()
+        if Self.chimes, Self.flag(needsYou ? Self.needsYouChimeKey : Self.doneChimeKey) {
+            playChime(needsYou: needsYou)
         }
         // On screen with the app in front: the window shows it already
         let onScreen = NSApp.isActive && sessionManager?.isPaneOnScreen(paneId) == true
         macLog.info("Notifications: \(needsYou ? "needs you" : "done", privacy: .public), chime \(Self.chimes, privacy: .public), on screen \(onScreen, privacy: .public)")
-        if onScreen { return }
+        if onScreen || !Self.flag(Self.bannersKey) { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
@@ -65,6 +73,21 @@ final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
         center.add(request) { error in
             if let error { macLog.warning("Notifications: couldn't post: \(error.localizedDescription)") }
         }
+    }
+
+    /// A chime at the set volume (Settings plays them to try)
+    func playChime(needsYou: Bool) {
+        guard let chime = needsYou ? needsYouChime : doneChime else { return }
+        // Another agent's, just before: start it again
+        chime.stop()
+        chime.volume = Self.chimeVolume
+        chime.play()
+    }
+
+    /// Whether macOS lets the app post banners (Settings shows it)
+    func bannersAllowed() async -> Bool {
+        let settings = await center.notificationSettings()
+        return settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
     }
 
     /// The Dock icon: how many panes are waiting at a menu or question

@@ -12,6 +12,7 @@ struct MainView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
     @EnvironmentObject private var window: WindowState
+    @EnvironmentObject private var ghostty: MacGhosttyApp
     let views: TerminalViews
 
     var body: some View {
@@ -73,7 +74,7 @@ struct MainView: View {
         } else if let session = sessionManager.activeSession, let group = sessionManager.sessionGroup(for: session) {
             // Up into the title bar's place: the pane title bars are the window's
             SplitPanes(group: group, views: views)
-                .background(ThemeColors.background)
+                .background(ThemeColors.background(ghostty.theme))
                 .ignoresSafeArea(.container, edges: .top)
                 // Images its panes sent: over this workspace only, so the sidebar stays
                 // and another workspace's don't interrupt. A new one each workspace.
@@ -118,8 +119,9 @@ struct MainView: View {
 /// The theme's background, behind the terminal and as it resizes.
 @MainActor
 enum ThemeColors {
-    static var background: Color {
-        ThemeManager.shared.defaultTheme(dark: true)?.backgroundColor ?? .black
+    /// Behind the terminals, so a pane being laid out doesn't flash another color
+    static func background(_ theme: Theme?) -> Color {
+        theme?.backgroundColor ?? .black
     }
 }
 

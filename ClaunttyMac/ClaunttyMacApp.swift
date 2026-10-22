@@ -28,9 +28,10 @@ struct ClaunttyMacApp: App {
             .environmentObject(sessionManager)
             .environmentObject(hosts)
             .environmentObject(window)
+            .environmentObject(ghostty)
             .frame(minWidth: 640, minHeight: 360)
-            // Dark like the terminal and the phone app
-            .preferredColorScheme(.dark)
+            // Light or dark like the terminals' theme
+            .preferredColorScheme(ghostty.theme?.isLight == true ? .light : .dark)
             .task { await start() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 // Back at the Mac: the panes on screen take their size back from the phone,
@@ -70,6 +71,12 @@ struct ClaunttyMacApp: App {
                     .keyboardShortcut("0")
             }
         }
+
+        Settings {
+            MacSettings()
+                .environmentObject(ghostty)
+                .preferredColorScheme(ghostty.theme?.isLight == true ? .light : .dark)
+        }
     }
 
     /// The image shown, if the viewer is open, else the terminals' font
@@ -108,6 +115,16 @@ struct PaneCommands: Commands {
     @ObservedObject var hosts: MacHosts
     @ObservedObject var window: WindowState
     @AppStorage(MacNotifications.chimeKey) private var chimes = true
+    @AppStorage(Self.numberKeysKey) private var numberKeys = NumberKeys.workspace
+
+    /// What Cmd+1–9 go to (Settings > General)
+    enum NumberKeys: String {
+        /// The nth workspace in the sidebar, on the pane it shows
+        case workspace
+        /// The nth pane, counting every workspace's
+        case pane
+    }
+    static let numberKeysKey = "numberKeys"
 
     var body: some Commands {
         CommandMenu("Pane") {
@@ -137,8 +154,10 @@ struct PaneCommands: Commands {
                 .keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()
             ForEach(1..<10) { n in
-                Button("Pane \(n)") { show(at: n - 1) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(n)")))
+                Button(numberKeys == .workspace ? "Workspace \(n)" : "Pane \(n)") {
+                    numberKeys == .workspace ? showWorkspace(at: n - 1) : show(at: n - 1)
+                }
+                .keyboardShortcut(KeyEquivalent(Character("\(n)")))
             }
             Divider()
             Toggle("Chime When Agents Finish", isOn: $chimes)
@@ -205,5 +224,11 @@ struct PaneCommands: Commands {
         let all = panes
         guard all.indices.contains(index) else { return }
         MainView.show(all[index], sessionManager)
+    }
+
+    private func showWorkspace(at index: Int) {
+        let groups = Self.groups(sessionManager, hosts)
+        guard groups.indices.contains(index) else { return }
+        MainView.show(PaneSelection(groupId: groups[index].id, paneId: groups[index].activePaneId), sessionManager)
     }
 }

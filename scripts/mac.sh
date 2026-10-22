@@ -16,6 +16,7 @@
 #   ./scripts/mac.sh scroll X Y DY [DX]    # lines, +DY scrolls down
 #   ./scripts/mac.sh type "text"
 #   ./scripts/mac.sh key cmd+t             # combos: cmd/shift/ctrl/opt + key name or char
+#   ./scripts/mac.sh hold cmd [SECONDS]    # hold a modifier alone (returns at once; shot meanwhile)
 #   ./scripts/mac.sh size W H [X Y]        # resize (and move) the window
 #   ./scripts/mac.sh window                # the window's frame
 #   ./scripts/mac.sh logs [30s]            # the app's log
@@ -150,6 +151,10 @@ case "$cmd" in
         ;;
     key)
         post key "{\"app\":\"$BUNDLE_ID\",\"combo\":$(json_string "$1")}"
+        ;;
+    hold)
+        # In the background, so a shot can be taken while it's held
+        post hold "{\"app\":\"$BUNDLE_ID\",\"key\":$(json_string "$1"),\"seconds\":${2:-1}}" &
         ;;
     size)
         pos=""

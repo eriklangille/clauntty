@@ -13,8 +13,11 @@ enum SidebarItem: Hashable {
 struct Sidebar: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var hosts: MacHosts
+    @EnvironmentObject private var window: WindowState
+    @AppStorage(PaneCommands.numberKeysKey) private var numberKeys = PaneCommands.NumberKeys.workspace
 
     var body: some View {
+        let shortcuts = window.commandHeld ? shortcuts() : [:]
         List(selection: selection) {
             ForEach(hosts.opened) { connection in
                 let rows = rows(on: connection)
@@ -22,7 +25,8 @@ struct Sidebar: View {
                     ForEach(rows) { row in
                         switch row {
                         case .workspace(let group):
-                            WorkspaceRow(group: group, images: sessionManager.windowImages[group.id]?.items.count ?? 0)
+                            WorkspaceRow(group: group, images: sessionManager.windowImages[group.id]?.items.count ?? 0,
+                                         shortcut: shortcuts[group.id])
                                 .tag(SidebarItem.workspace(group.id))
                         case .web(let webTab, let nested):
                             WebTabRow(webTab: webTab)
@@ -54,6 +58,22 @@ struct Sidebar: View {
         }
         // The window has no title bar: that row is ours
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// Each workspace's Cmd+number, as the Pane menu counts them: ⌘4, or ⌘4–6 for its
+    /// panes when the numbers go to panes. Only 1 to 9.
+    private func shortcuts() -> [UUID: String] {
+        var labels: [UUID: String] = [:]
+        var next = 1
+        for group in PaneCommands.groups(sessionManager, hosts) {
+            let count = numberKeys == .workspace ? 1 : group.panes.count
+            let last = min(next + count - 1, 9)
+            if next <= 9 {
+                labels[group.id] = last > next ? "⌘\(next)–\(last)" : "⌘\(next)"
+            }
+            next += count
+        }
+        return labels
     }
 
     /// A host's workspaces in your order, each followed by the pages it opened, then
@@ -184,6 +204,8 @@ private struct WorkspaceRow: View {
     let group: SessionGroup
     /// Images its panes sent with `clauntty show`, waiting to be seen
     var images = 0
+    /// Its Cmd+number, while Cmd is held
+    var shortcut: String?
     private static let glyphSpacing: CGFloat = 9
     /// Where the title starts, for the rows nested under it
     static let titleInset = StatusGlyph.defaultSize + glyphSpacing
@@ -208,7 +230,15 @@ private struct WorkspaceRow: View {
                 .transition(.opacity)
                 .help(images == 1 ? "An image to see" : "\(images) images to see")
             }
-            if group.panes.count > 1 {
+            if let shortcut {
+                Text(shortcut)
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                    .transition(.opacity)
+            } else if group.panes.count > 1 {
                 PaneDots(panes: group.panes, activeId: group.activePaneId)
             }
         }

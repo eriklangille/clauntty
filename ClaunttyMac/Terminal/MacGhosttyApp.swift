@@ -10,18 +10,20 @@ final class MacGhosttyApp: ObservableObject {
     @Published private(set) var app: ghostty_app_t?
     /// The app's terminal views, once Ghostty is up
     @Published private(set) var terminalViews: TerminalViews?
+    /// The terminals' theme (Settings > Appearance); the window's chrome follows it
+    @Published private(set) var theme: Theme?
     private var config: ghostty_config_t?
 
+    static let themeKey = "themeId"
+
     init() {
-        guard let cfg = ghostty_config_new() else {
+        // The one picked, else the phone's default dark theme, so both look alike
+        theme = UserDefaults.standard.string(forKey: Self.themeKey).flatMap { ThemeManager.shared.theme(withId: $0) }
+            ?? ThemeManager.shared.defaultTheme(dark: true)
+        guard let cfg = Self.makeConfig(theme) else {
             macLog.error("ghostty_config_new failed")
             return
         }
-        // The phone's default dark theme, so both look alike
-        if let theme = ThemeManager.shared.defaultTheme(dark: true) {
-            ThemeManager.shared.applyTheme(theme, to: cfg)
-        }
-        ghostty_config_finalize(cfg)
         config = cfg
 
         var runtime = ghostty_runtime_config_s(
@@ -44,8 +46,26 @@ final class MacGhosttyApp: ObservableObject {
             return
         }
         self.app = app
-        ghostty_app_set_color_scheme(app, GHOSTTY_COLOR_SCHEME_DARK)
+        ghostty_app_set_color_scheme(app, theme?.isLight == true ? GHOSTTY_COLOR_SCHEME_LIGHT : GHOSTTY_COLOR_SCHEME_DARK)
         terminalViews = TerminalViews(app: app)
+    }
+
+    private static func makeConfig(_ theme: Theme?) -> ghostty_config_t? {
+        guard let cfg = ghostty_config_new() else { return nil }
+        if let theme { ThemeManager.shared.applyTheme(theme, to: cfg) }
+        ghostty_config_finalize(cfg)
+        return cfg
+    }
+
+    /// Every pane takes the theme at once, and it's remembered
+    func setTheme(_ theme: Theme) {
+        guard let app, let cfg = Self.makeConfig(theme) else { return }
+        ghostty_app_update_config(app, cfg)
+        ghostty_app_set_color_scheme(app, theme.isLight ? GHOSTTY_COLOR_SCHEME_LIGHT : GHOSTTY_COLOR_SCHEME_DARK)
+        if let old = config { ghostty_config_free(old) }
+        config = cfg
+        self.theme = theme
+        UserDefaults.standard.set(theme.id, forKey: Self.themeKey)
     }
 
     nonisolated static func wakeup(_ userdata: UnsafeMutableRawPointer?) {

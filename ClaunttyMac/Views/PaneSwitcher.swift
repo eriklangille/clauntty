@@ -8,6 +8,41 @@ final class WindowState: ObservableObject {
     @Published var zoomedPane: String?
     /// The sidebar, shown or not; change it with `toggleSidebar()`
     @Published var sidebar: NavigationSplitViewVisibility = .all
+    /// Cmd held down on its own: the sidebar shows each workspace's Cmd+number
+    @Published private(set) var commandHeld = false
+
+    private var keyMonitor: Any?
+    private var showShortcuts: DispatchWorkItem?
+    /// Held this long first, so a Cmd shortcut doesn't flash the numbers
+    private static let holdBeforeShortcuts: TimeInterval = 0.3
+
+    init() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
+            self?.keyEvent(event)
+            return event
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hideShortcuts() }
+        }
+    }
+
+    private func keyEvent(_ event: NSEvent) {
+        let alone = event.type == .flagsChanged && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+        guard alone else { return hideShortcuts() }
+        guard showShortcuts == nil, !commandHeld else { return }
+        let show = DispatchWorkItem { [weak self] in
+            self?.showShortcuts = nil
+            withAnimation(.easeOut(duration: 0.12)) { self?.commandHeld = true }
+        }
+        showShortcuts = show
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.holdBeforeShortcuts, execute: show)
+    }
+
+    private func hideShortcuts() {
+        showShortcuts?.cancel()
+        showShortcuts = nil
+        if commandHeld { withAnimation(.easeOut(duration: 0.12)) { commandHeld = false } }
+    }
 
     /// Terminals keep their size while the sidebar slides and resize once at the end:
     /// a TUI redraws badly at every step in between

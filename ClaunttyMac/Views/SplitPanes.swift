@@ -147,6 +147,7 @@ private struct DividerHandle: NSViewRepresentable {
 
 private struct PaneTile: View {
     @EnvironmentObject private var sessionManager: SessionManager
+    @EnvironmentObject private var ghostty: MacGhosttyApp
     let group: SessionGroup
     let paneId: String
     let views: TerminalViews
@@ -177,10 +178,10 @@ private struct PaneTile: View {
                 }
                 .clipped()
             } else {
-                ThemeColors.background
+                ThemeColors.background(ghostty.theme)
             }
         }
-        .background(ThemeColors.background)
+        .background(ThemeColors.background(ghostty.theme))
     }
 }
 

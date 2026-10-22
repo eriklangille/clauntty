@@ -34,10 +34,18 @@ final class TerminalViews {
         self.app = app
     }
 
+    /// The size panes are drawn at
+    var effectiveFontSize: Float { fontSize == 0 ? Self.defaultFontSize : fontSize }
+    static let fontSizes: ClosedRange<Float> = 8...36
+
     /// Bigger (+1), smaller (-1), or back to the default (nil), in every pane.
     func adjustFontSize(by step: Float?) {
-        let current = fontSize == 0 ? Self.defaultFontSize : fontSize
-        fontSize = step.map { min(36, max(8, current + $0)) } ?? 0
+        setFontSize(step.map { effectiveFontSize + $0 })
+    }
+
+    /// A size in points, or the default (nil), in every pane
+    func setFontSize(_ points: Float?) {
+        fontSize = points.map { min(Self.fontSizes.upperBound, max(Self.fontSizes.lowerBound, $0)) } ?? 0
         UserDefaults.standard.set(fontSize, forKey: "fontSize")
         let action = fontSize == 0 ? "reset_font_size" : "set_font_size:\(fontSize)"
         for entry in views.values { entry.view.perform(action) }

@@ -456,6 +456,13 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   `TerminalViews.frameInWindow`). Zoom, paging, the
   bar (always shown; each button's label under it on hover) and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
+- **Settings** (Cmd+,, `MacSettings`): General: what Cmd+1–9 go to (`PaneCommands.NumberKeys`:
+  the nth workspace, the default, or the nth pane; holding Cmd alone for 0.3s shows each
+  workspace's number on its sidebar row, `WindowState.commandHeld`). Appearance: font size (`TerminalViews.setFontSize`,
+  as Cmd +/−) and the theme (`MacGhosttyApp.setTheme`: `ghostty_app_update_config`, remembered as
+  `themeId`; the window goes light or dark with it, `ThemeColors.background(theme)`). Sounds: chimes
+  on/off, each chime, their volume (`agentChimeVolume`), a play button for each. Notifications:
+  banners on/off (`agentBanners`), whether macOS allows them, and a link to its settings.
 - **Notifications:** an agent that needs you or finished posts a notification, as on the phone
   (`MacNotifications`, from `SessionManager.onPaneAttention`, rtach's pane states), unless the
   pane is on screen with the app in front (a banner when it's in another workspace). One per pane:
@@ -469,7 +476,7 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   rerun it). A pane on screen with the app in front gets the chime alone, no notification. The
   app plays it (`NSSound`), not the notification, so it's heard with notifications off or a
   Focus on (the user keeps one on all day); those only hold back the banner. Pane > Chime When
-  Agents Finish turns it off (`agentChime`).
+  Agents Finish turns it off (`agentChime`), as does Settings > Sounds.
 - **Terminal:** `MacTerminalView` hosts a Ghostty surface with `manual_io` (the fork's flag
   for the manual termio backend on macOS); keys and mouse follow Ghostty's own AppKit view.
   One surface has focus at a time (`focusedView`): it blinks, the others draw a hollow box, and
