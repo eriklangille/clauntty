@@ -1438,8 +1438,17 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         switch gesture.state {
         case .began:
-            // With mouse reporting on (Herdr, TUIs), a plain press goes to the program as a
-            // click. Holding Shift makes Ghostty select instead, like a desktop terminal.
+            // A program that takes drags (Claude Code, Codex, Herdr) selects and copies
+            // itself, across its own scrolling, as a desktop terminal leaves a drag to it.
+            // The press waits for the finger to move: held still, it's the menu, not a click.
+            if ghostty_surface_mouse_captures_drag(surface) {
+                ghostty_surface_clear_selection(surface)
+                programDrag = .waiting(location)
+                return
+            }
+
+            // With mouse reporting for clicks, a plain press goes to the program as a click.
+            // Holding Shift makes Ghostty select instead, like a desktop terminal.
             longPressMods = isMouseCaptured ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
 
             // Start selection with mouse press at location. A new one: with Shift, a press
@@ -1450,8 +1459,17 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, longPressMods)
 
         case .changed:
+            if programDrag != nil { return dragInProgram(to: location) }
             // Update selection as finger moves
             ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), longPressMods)
+
+        case .ended where programDrag != nil:
+            if endProgramDrag(at: location) == false {
+                showEditMenu(at: location, offeringSelect: true)
+            }
+
+        case .cancelled where programDrag != nil:
+            endProgramDrag(at: location)
 
         case .ended:
             // End selection
@@ -1473,6 +1491,122 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         default:
             break
         }
+    }
+
+    // MARK: - Drags for the Program
+
+    /// A long press in a program that takes drags: waiting for the finger to move, then
+    /// the drag, the left button held
+    private enum ProgramDrag {
+        case waiting(CGPoint)
+        case dragging
+    }
+    private var programDrag: ProgramDrag?
+
+    /// Where the finger is in a program's drag, past the view's edges too
+    private var programDragPoint: CGPoint = .zero
+
+    private var dragEdgeScrollTimer: Timer?
+    private var dragEdgeScrollAccumulator: CGFloat = 0
+
+    /// How close to the top or bottom a drag has to be to scroll the program
+    private let dragEdgeZone: CGFloat = 44
+
+    private func dragInProgram(to location: CGPoint) {
+        guard let surface else { return }
+        if case .waiting(let start) = programDrag {
+            // The press goes where the hold began, once the finger has moved off it
+            guard hypot(location.x - start.x, location.y - start.y) > 8 else { return }
+            ghostty_surface_mouse_pos(surface, Double(start.x), Double(start.y), GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            programDrag = .dragging
+        }
+        programDragPoint = location
+        moveProgramDrag()
+        updateDragEdgeScroll()
+    }
+
+    /// The button held at the finger, kept in the view (a cell off the grid isn't reported)
+    private func moveProgramDrag() {
+        guard let surface else { return }
+        let x = min(max(programDragPoint.x, 0), bounds.width - 1)
+        let y = min(max(programDragPoint.y, 0), bounds.height - 1)
+        ghostty_surface_mouse_pos(surface, Double(x), Double(y), GHOSTTY_MODS_NONE)
+    }
+
+    /// Ends a program's drag; false when the finger never moved (no press was sent)
+    @discardableResult
+    private func endProgramDrag(at location: CGPoint) -> Bool {
+        defer { programDrag = nil }
+        stopDragEdgeScroll()
+        guard case .dragging = programDrag, let surface else { return false }
+        programDragPoint = location
+        moveProgramDrag()
+        // The program copies its selection on release (OSC 52, to the clipboard)
+        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+        return true
+    }
+
+    /// How far into the top (positive: back through the history) or bottom zone the
+    /// finger is, -1...1; 0 outside them
+    private var dragEdgeDepth: CGFloat {
+        let y = programDragPoint.y
+        let depth: CGFloat
+        if y < dragEdgeZone {
+            depth = (dragEdgeZone - y) / dragEdgeZone
+        } else if y > bounds.height - dragEdgeZone {
+            depth = -(y - (bounds.height - dragEdgeZone)) / dragEdgeZone
+        } else {
+            depth = 0
+        }
+        return min(max(depth, -1), 1)
+    }
+
+    /// A drag held near the top or bottom scrolls the program, so its selection grows
+    /// past the screen
+    private func updateDragEdgeScroll() {
+        guard dragEdgeDepth != 0 else { return stopDragEdgeScroll() }
+        guard dragEdgeScrollTimer == nil else { return }
+        dragEdgeScrollTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.dragEdgeScrollTick()
+            }
+        }
+    }
+
+    private func stopDragEdgeScroll() {
+        dragEdgeScrollTimer?.invalidate()
+        dragEdgeScrollTimer = nil
+        dragEdgeScrollAccumulator = 0
+    }
+
+    /// Up to 12 wheel notches a second at the edge (Claude Code moves a few lines a
+    /// notch), slow enough to aim with further in
+    private func dragEdgeScrollTick() {
+        guard let surface else { return stopDragEdgeScroll() }
+        let depth = dragEdgeDepth
+        dragEdgeScrollAccumulator += depth * abs(depth) * 0.4
+        guard abs(dragEdgeScrollAccumulator) >= 1 else { return }
+        let notches = dragEdgeScrollAccumulator.rounded(.towardZero)
+        dragEdgeScrollAccumulator -= notches
+        Logger.clauntty.verbose("[MOUSE] drag edge scroll: \(Int(notches)) at depth \(String(format: "%.2f", depth)), y=\(Int(self.programDragPoint.y)) of \(Int(self.bounds.height))")
+        ghostty_surface_mouse_scroll(surface, 0, Double(notches), 0)
+    }
+
+    /// The menu's Select, in a program that takes drags: the terminal's own selection, as
+    /// Shift-drag is on a desktop. A word to start from, its handles to grow it.
+    private func selectWord(at point: CGPoint) {
+        guard let surface else { return }
+        let mods = isMouseCaptured ? GHOSTTY_MODS_SHIFT : GHOSTTY_MODS_NONE
+        ghostty_surface_clear_selection(surface)
+        ghostty_surface_mouse_pos(surface, Double(point.x), Double(point.y), mods)
+        for _ in 0..<2 {
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, mods)
+        }
+        guard ghostty_surface_has_selection(surface) else { return }
+        showSelectionHandles()
+        showEditMenu(at: selectionEndPoint)
     }
 
     /// A tap on agent mode's window, whose terminal doesn't take touches: a click when a
@@ -1526,8 +1660,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         showEditMenu(at: CGPoint(x: x, y: row.top))
     }
 
-    private func showEditMenu(at location: CGPoint) {
+    /// Where the menu's Select starts the terminal's own selection; nil when it has none
+    private var menuSelectPoint: CGPoint?
+
+    private func showEditMenu(at location: CGPoint, offeringSelect: Bool = false) {
         menuHasSelection = surface.map { ghostty_surface_has_selection($0) } ?? false
+        menuSelectPoint = offeringSelect ? location : nil
         // Use UIEditMenuInteraction (iOS 16+)
         let menuConfig = UIEditMenuConfiguration(identifier: nil, sourcePoint: location)
         if let interaction = interactions.first(where: { $0 is UIEditMenuInteraction }) as? UIEditMenuInteraction {
@@ -2710,7 +2848,12 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 extension TerminalSurfaceView: UIEditMenuInteractionDelegate {
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
         // Return default menu with Copy/Paste
-        return UIMenu(children: suggestedActions)
+        guard let point = menuSelectPoint else { return UIMenu(children: suggestedActions) }
+        let select = UIAction(title: "Select") { [weak self] _ in
+            // Once this menu has gone, for the one with Copy
+            DispatchQueue.main.async { self?.selectWord(at: point) }
+        }
+        return UIMenu(children: [select] + suggestedActions)
     }
 
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, willDismissMenuFor configuration: UIEditMenuConfiguration, animator: any UIEditMenuInteractionAnimating) {
