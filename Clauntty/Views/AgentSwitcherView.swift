@@ -96,6 +96,8 @@ struct AgentSwitcherView: View {
     /// The window whose images were last opened: they go once the viewer has closed
     @State private var viewedImages: UUID?
     @Namespace private var imagesZoom
+    /// A finger on the status rail: the window it's over is lit
+    @State private var scrubbing = false
 
     struct OpenImages: Identifiable {
         /// The window's tab id
@@ -288,8 +290,10 @@ struct AgentSwitcherView: View {
                     // agent is looking at has its eyes.
                     StatusRail(statuses: items.map { attentionStatus($0.session) }, webSlots: loose.count,
                                current: atControls ? ids.count : current, looking: voiceWindow(items)) { target in
+                        scrubbing = true
                         jump(to: target, count: ids.count)
                     } onScrubEnd: { target in
+                        scrubbing = false
                         commitFocus(target, items: items, loose: loose)
                     }
                     .frame(width: Self.railColumn)
@@ -344,6 +348,8 @@ struct AgentSwitcherView: View {
                 }
             }
             .onChange(of: focused) { old, new in
+                // The rail goes with the typing (a scrub it ended mid-way never finishes)
+                if new == nil { scrubbing = false }
                 if landscape, new != nil, !fullscreen {
                     landscapeFull = true
                     setFullscreen(true)
@@ -947,7 +953,8 @@ struct AgentSwitcherView: View {
             imagesZoom: imagesZoom,
             onImages: { openImages = OpenImages(id: tabId) },
             onClearImages: { clearImages(tabId) },
-            voice: voiceLooks(at: paneSessions) ? voice.phase : nil
+            voice: voiceLooks(at: paneSessions) ? voice.phase : nil,
+            isScrubbed: scrubbing && index == i
         )
     }
 
@@ -1272,6 +1279,8 @@ struct SwitcherWindow: View {
     let onClearImages: () -> Void
     /// The voice agent is looking here, and what it's doing: its eyes and border
     var voice: VoiceAgent.Phase? = nil
+    /// The finger scrubbing the status rail is on this window: its border lit
+    var isScrubbed = false
 
     enum Mode: Equatable {
         /// A card: the workspace's glyph, title and time, what it's doing and its panes.
@@ -1558,7 +1567,7 @@ struct SwitcherWindow: View {
         .clipShape(RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous)
-                .strokeBorder(borderColor, lineWidth: status == .blocked || isFocused ? 1.5 : 1)
+                .strokeBorder(borderColor, lineWidth: status == .blocked || isFocused || isScrubbed ? 1.5 : 1)
                 .animation(.easeInOut(duration: 0.5), value: voice != nil)
         )
         .overlay(alignment: .top) { header }
@@ -1680,6 +1689,8 @@ struct SwitcherWindow: View {
 
     private var borderColor: Color {
         if isFullscreen { return .clear }
+        // Where the scrub would land, whiter than the window typed into
+        if isScrubbed { return Color.white.opacity(0.6) }
         if status == .blocked { return Color(uiColor: PaneStatus.blocked.tint).opacity(0.55) }
         // The voice agent's eyes are here: a little whiter
         if voice != nil { return Color.white.opacity(isFocused ? 0.5 : 0.22) }
