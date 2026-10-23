@@ -58,6 +58,7 @@
 		C0000016 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000016 /* Session.swift */; };
 		AC0000000000000000000003 /* PaneModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000003 /* PaneModels.swift */; };
 		AC0000000000000000000001 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000001 /* Platform.swift */; };
+		AC0000000000000000000004 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000004 /* Haptics.swift */; };
 		AC0000000000000000000002 /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000002 /* Log.swift */; };
 		C0000017 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000017 /* SessionManager.swift */; };
 		58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */; };
@@ -166,6 +167,7 @@
 		C1000016 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		AC1000000000000000000003 /* PaneModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneModels.swift; sourceTree = "<group>"; };
 		AC1000000000000000000001 /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
+		AC1000000000000000000004 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		AC1000000000000000000002 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		C1000017 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		C64B1BF3C75529CDC4A628C8 /* SessionManager+Groups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Groups.swift"; sourceTree = "<group>"; };
@@ -318,6 +320,7 @@
 				B2C48404F3C2AD63C8301557 /* Theme */,
 				7A200001 /* Tailscale */,
 				AC1000000000000000000001 /* Platform.swift */,
+				AC1000000000000000000004 /* Haptics.swift */,
 				AC1000000000000000000002 /* Log.swift */,
 			);
 			path = Core;
@@ -643,6 +646,7 @@
 				C0000016 /* Session.swift in Sources */,
 				AC0000000000000000000003 /* PaneModels.swift in Sources */,
 				AC0000000000000000000001 /* Platform.swift in Sources */,
+				AC0000000000000000000004 /* Haptics.swift in Sources */,
 				AC0000000000000000000002 /* Log.swift in Sources */,
 				C0000017 /* SessionManager.swift in Sources */,
 				58EC7CDEAC04D43407F0D433 /* SessionManager+Groups.swift in Sources */,

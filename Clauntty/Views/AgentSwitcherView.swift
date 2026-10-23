@@ -323,10 +323,10 @@ struct AgentSwitcherView: View {
             // Fullscreen, another window finished or needs you: out of the edge
             .onChange(of: Dictionary(uniqueKeysWithValues: items.map { ($0.id, attentionStatus($0.session)) })) { old, new in
                 guard fullscreen else { return }
-                let news = new.contains { id, status in
+                let news = new.filter { id, status in
                     id != focused && (status == .done || status == .blocked) && old[id] != nil && old[id] != status
                 }
-                if news { showEdge() }
+                if !news.isEmpty { showEdge(news.values.contains(.blocked) ? .agentNeedsYou : .agentFinished) }
             }
             .onChange(of: fullscreen) { _, on in
                 if !on {
@@ -707,7 +707,7 @@ struct AgentSwitcherView: View {
     private func commitFocus(_ target: Int, items: [(id: UUID, session: Session)], loose: [WebTab]) {
         // Past the last window: the controls (the keyboard stays with the window)
         if target == items.count + loose.count {
-            if index != target { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            if index != target { Haptic.navigate.play() }
             withAnimation(snap) {
                 index = target
                 drag = 0
@@ -715,7 +715,7 @@ struct AgentSwitcherView: View {
             return
         }
         if target >= items.count, loose.indices.contains(target - items.count) {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Haptic.navigate.play()
             withAnimation(snap) {
                 focused = loose[target - items.count].id
                 index = target
@@ -726,7 +726,7 @@ struct AgentSwitcherView: View {
         }
         guard items.indices.contains(target) else { return }
         let id = items[target].id
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptic.navigate.play()
         withAnimation(snap) {
             focused = id
             index = target
@@ -766,7 +766,7 @@ struct AgentSwitcherView: View {
     /// The rail tapped or scrubbed: show that window (focus follows when the finger lifts)
     private func jump(to target: Int, count: Int) {
         guard target >= 0, target <= count, target != index else { return }
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptic.scrub.play()
         withAnimation(snap) { index = target }
     }
 
@@ -787,7 +787,7 @@ struct AgentSwitcherView: View {
         switch phase {
         case .lift:
             guard canMove(id), moving == nil, let i = ids.firstIndex(of: id) else { return }
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Haptic.lift.play()
             // It stays where it is until the finger moves
             moveGrab = 0
             moveY = originY + tops[i] - scrollOffset
@@ -808,7 +808,7 @@ struct AgentSwitcherView: View {
             makeRoom(ids: ids, tops: tops, heights: heights)
         case .drop:
             guard moving == id, let i = ids.firstIndex(of: id) else { return }
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Haptic.navigate.play()
             dropTop = tops[i] - scrollOffset
             // After the other gestures the finger ends: lifting it isn't a swipe or a scroll
             DispatchQueue.main.async { withAnimation(snap) { moving = nil } }
@@ -826,7 +826,7 @@ struct AgentSwitcherView: View {
             return nil
         }()
         guard let other else { return }
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptic.scrub.play()
         withAnimation(snap) { sessionManager.moveTab(id: moving, to: other) }
     }
 
@@ -1006,7 +1006,7 @@ struct AgentSwitcherView: View {
             if let focused, terminalTabs.contains(where: { $0.id == focused }), webShown(in: focused) == nil {
                 webReturn = focused
             }
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Haptic.navigate.play()
             withAnimation(.spring(duration: 0.42, bounce: 0.1)) {
                 if let owner { shownWeb[owner] = web.id }
                 focused = window
@@ -1091,9 +1091,9 @@ struct AgentSwitcherView: View {
         (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.interfaceOrientation == .landscapeLeft
     }
 
-    /// The edge's dots out, with a tap, then back in after `edgeTime` (once let go)
-    private func showEdge() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    /// The edge's dots out, with `haptic`, then back in after `edgeTime` (once let go)
+    private func showEdge(_ haptic: Haptic) {
+        haptic.play()
         edgeShows &+= 1
         let shows = edgeShows
         withAnimation(.spring(duration: 0.45, bounce: 0.3)) { edgeOut = true }
@@ -1133,7 +1133,7 @@ struct AgentSwitcherView: View {
         let terminals = max(1, info?.panes.count ?? 0)
         let webs = webPanes(of: windowId)
         guard target >= 0, target < terminals + webs.count else { return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptic.navigate.play()
         if target >= terminals {
             withAnimation(snap) { shownWeb[windowId] = webs[target - terminals].id }
             if focused == windowId { hideKeyboard() }
@@ -2275,7 +2275,7 @@ private struct EdgeDots: View {
                     if highlighted == nil { onHold(true) }
                     let dot = slot(at: value.location.y)
                     if dot != highlighted {
-                        if highlighted != nil { UISelectionFeedbackGenerator().selectionChanged() }
+                        if highlighted != nil { Haptic.scrub.play() }
                         highlighted = dot
                     }
                 }

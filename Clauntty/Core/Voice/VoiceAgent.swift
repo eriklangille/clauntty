@@ -125,7 +125,7 @@ final class VoiceAgent: ObservableObject {
         agentEntryId = nil
         lastActivity = Date()
         lastUserSpeech = Date()
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Haptic.voiceSession.play()
 
         Task {
             guard await AVAudioApplication.requestRecordPermission() else {
@@ -176,7 +176,7 @@ final class VoiceAgent: ObservableObject {
         lastSession = Summary(cost: cost, reason: reason)
         phase = .idle
         lookingAt = nil
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Haptic.voiceSession.play()
     }
 
     #if DEBUG

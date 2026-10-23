@@ -1061,9 +1061,7 @@ class KeyboardAccessoryView: UIView {
         onStartRecording?()
         isRecording = true
 
-        // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
+        Haptic.dictationStart.play()
     }
 
     // MARK: - Key Actions

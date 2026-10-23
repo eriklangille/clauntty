@@ -110,9 +110,7 @@ class SelectionHandleView: UIView {
 
         switch gesture.state {
         case .began:
-            // Haptic feedback
-            let generator = UIImpactFeedbackGenerator(style: .light)
-            generator.impactOccurred()
+            Haptic.handleGrab.play()
             onDragBegan?()
 
         case .changed:

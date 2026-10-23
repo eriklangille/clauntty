@@ -1438,6 +1438,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         switch gesture.state {
         case .began:
+            // Selecting now, as a long press on iOS text
+            Haptic.selectStart.play()
+
             // A program that takes drags (Claude Code, Codex, Herdr) selects and copies
             // itself, across its own scrolling, as a desktop terminal leaves a drag to it.
             // The press waits for the finger to move: held still, it's the menu, not a click.
@@ -1565,8 +1568,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// A drag held near the top or bottom scrolls the program, so its selection grows
     /// past the screen
     private func updateDragEdgeScroll() {
-        guard dragEdgeDepth != 0 else { return stopDragEdgeScroll() }
+        guard dragEdgeDepth != 0 else {
+            // Out of the edge: a soft tap as the scrolling stops
+            if dragEdgeScrollTimer != nil { Haptic.edgeScrollStop.play() }
+            return stopDragEdgeScroll()
+        }
         guard dragEdgeScrollTimer == nil else { return }
+        // Into the edge: a firm one as it starts
+        Haptic.edgeScrollStart.play()
         dragEdgeScrollTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.dragEdgeScrollTick()

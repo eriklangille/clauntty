@@ -175,7 +175,7 @@ struct ImageViewerView: View {
                 }
                 saved.insert(item.id)
                 saveFailed.remove(item.id)
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                Haptic.saved.play()
             } catch {
                 saveFailed.insert(item.id)
                 Logger.clauntty.warning("ImageViewer: couldn't save \(item.name) to Photos: \(error.localizedDescription)")

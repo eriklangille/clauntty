@@ -73,6 +73,7 @@ The script pins Go to libtailscale's `go.mod` version (newer Go breaks a pinned 
 | `Clauntty/Core/Terminal/` | GhosttyApp, TerminalSurface, GhosttyBridge |
 | `Clauntty/Core/SSH/` | SSHConnection, SSHAuthenticator |
 | `Clauntty/Core/Terminal/GhosttyApp.swift` | GhosttyApp + Logger extension with `debugOnly()`, `verbose()` |
+| `Clauntty/Core/Haptics.swift` | Every haptic (`Haptic.x.play()`), named for its event; what each feels like is decided there, so they stay distinct |
 
 ## Build Commands
 

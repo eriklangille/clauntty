@@ -1425,7 +1425,7 @@ class SessionManager: ObservableObject {
                 }
                 #endif
             }
-            if !away { PlatformApp.tapFeedback() }
+            if !away { Haptic.imagesArrived.play() }
         } else {
             if var current = imageViewer {
                 // Already viewing: add the new images and jump to the first of them

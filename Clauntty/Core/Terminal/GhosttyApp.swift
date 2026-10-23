@@ -250,7 +250,7 @@ class GhosttyApp: ObservableObject {
                 let text = String(decoding: bytes, as: UTF8.self)
                 UIPasteboard.general.string = text
                 // A program's copy (Claude Code's on release of a drag) is otherwise silent
-                DispatchQueue.main.async { PlatformApp.tapFeedback() }
+                DispatchQueue.main.async { Haptic.copied.play() }
                 Logger.clauntty.debug("Clipboard write: \(text.prefix(20))...")
                 break
             }

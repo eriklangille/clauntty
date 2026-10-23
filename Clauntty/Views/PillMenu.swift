@@ -256,14 +256,14 @@ struct PillMenu<Label: View>: View {
             .onChanged { value in
                 guard case .second(true, let drag) = value else { return }
                 if !isOpen {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    Haptic.lift.play()
                     heldOpenAt = Date()
                     onOpen()
                 }
                 guard let drag else { return }
                 let id = rowFrames.first { $0.value.contains(drag.location) }?.key
                 if id != highlighted {
-                    if id != nil { UISelectionFeedbackGenerator().selectionChanged() }
+                    if id != nil { Haptic.scrub.play() }
                     highlighted = id
                 }
             }

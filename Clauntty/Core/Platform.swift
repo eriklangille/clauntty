@@ -45,13 +45,6 @@ enum PlatformApp {
         NSWorkspace.shared.open(url)
         #endif
     }
-
-    /// A light tap of haptic feedback where the device has it.
-    static func tapFeedback() {
-        #if canImport(UIKit)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        #endif
-    }
 }
 
 #if !os(iOS)
