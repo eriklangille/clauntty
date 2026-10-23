@@ -1143,6 +1143,10 @@ struct AgentSwitcherView: View {
         if let groupId = session.groupId, let info, info.panes.indices.contains(target), target != info.activeIndex {
             // The new pane is the active tab: focus follows with the keyboard
             sessionManager.selectPane(groupId: groupId, paneId: info.panes[target].id)
+        } else if case .web = sessionManager.activeTab {
+            // Back from a page made fullscreen, which made it the active tab: the terminal
+            // is again, and the keyboard follows (`onChange(of: activeTab)`)
+            sessionManager.switchTo(session)
         } else if focused == windowId {
             // Back from a page to the terminal it was over
             DispatchQueue.main.async { session.showKeyboard?() }
