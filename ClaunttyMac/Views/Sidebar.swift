@@ -216,6 +216,14 @@ private struct WorkspaceRow: View {
                     Text(title)
                         .font(.system(size: 13.5, weight: .semibold))
                         .lineLimit(1)
+                        .layoutPriority(1)
+                    // Its agent's title took the workspace's name: the name after it
+                    if let name = group.nameAfterTitle {
+                        Text(name)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 0)
                     // Context for the state, not a headline: small and quiet, as Mail's times
                     // (a minute's tick, so "4m" becomes "5m" without anything else changing)

@@ -447,7 +447,9 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   click takes the pane back. Output waits for the resize, as on the phone.
 - **Sidebar:** a two-line card per workspace (`WorkspaceRow`): the status glyph of its most
   pressing pane on the left; its name (or what runs in its shown pane, for one named after
-  a folder) and a small time; beneath, the task (else the program and folder,
+  a folder; for a named one whose shown pane's agent has a title, that title with the name
+  small after it, `SessionGroup.nameAfterTitle`, as on the phone's cards) and a small time;
+  beneath, the task (else the program and folder,
   `RemotePaneState.place`) and a dot per pane, then a ring per page it opened. The time is
   when its agent finished (`done_at`) or when you last typed in it here
   (`SessionManager.lastInteraction`, this Mac's typing only until rtach records it).

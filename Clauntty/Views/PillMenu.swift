@@ -47,6 +47,9 @@ struct PillMenu<Label: View>: View {
 
     /// The row under the finger while holding
     @State private var highlighted: String?
+    /// When a hold opened it: letting go within a second or so ends as a tap too, which
+    /// closed it mid-animation
+    @State private var heldOpenAt = Date.distantPast
     @State private var rowFrames: [String: CGRect] = [:]
 
     static var space: String { "pillMenu" }
@@ -60,7 +63,15 @@ struct PillMenu<Label: View>: View {
         label()
             .contentShape(Capsule())
             .onTapGesture {
-                if isOpen { onClose() } else if tapOpens { onOpen() } else { onTap() }
+                if isOpen {
+                    // The tap that ends the hold that opened it
+                    guard Date().timeIntervalSince(heldOpenAt) > 1 else { return }
+                    onClose()
+                } else if tapOpens {
+                    onOpen()
+                } else {
+                    onTap()
+                }
             }
             .gesture(hold)
             .background(alignment: .topLeading) {
@@ -246,6 +257,7 @@ struct PillMenu<Label: View>: View {
                 guard case .second(true, let drag) = value else { return }
                 if !isOpen {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    heldOpenAt = Date()
                     onOpen()
                 }
                 guard let drag else { return }

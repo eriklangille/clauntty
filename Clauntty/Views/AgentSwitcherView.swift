@@ -522,8 +522,9 @@ struct AgentSwitcherView: View {
         // shows (a TUI too). Fullscreen fits the room above the keyboard. The overview
         // keeps every terminal at full height, cropped.
         let width = isFull ? size.width : size.width - 10 - (focused != nil ? Self.railColumn : 10)
-        // Fullscreen with the keyboard up keeps the focused window's size, so going
-        // fullscreen and back is a zoom: a resize mid-animation reflowed the lines.
+        // Fullscreen with the keyboard up fills the room above it, resizing as it zooms (its
+        // lines reflow mid-animation). Keeping the focused window's size made it a clean
+        // zoom but left empty rows above the key bar.
         let focusedWidth = size.width - 10 - Self.railColumn
         let focusedContent = barTop(size) - Self.peek - 10 - Self.pillStrip - SwitcherWindow.bottomPad
         let focusedHeight = focusedContent / (focusedWidth / size.width) + SwitcherWindow.keyBarReserve
@@ -535,7 +536,7 @@ struct AgentSwitcherView: View {
                     return CGSize(width: size.width, height: keyboardVisible ? keyboardTop : size.height)
                 }
                 if !keyboardVisible { return CGSize(width: size.width, height: size.height - Self.pillStrip) }
-                return CGSize(width: size.width, height: min(focusedHeight, keyboardTop - Self.pillStrip))
+                return CGSize(width: size.width, height: keyboardTop - Self.pillStrip)
             }
             if isFocused { return CGSize(width: size.width, height: focusedHeight) }
             return CGSize(width: size.width, height: size.height - Self.pillStrip)
@@ -1343,6 +1344,15 @@ struct SwitcherWindow: View {
                     Text(web.map(\.title) ?? titles.title)
                         .font(.system(size: 15, weight: .semibold))
                         .lineLimit(1)
+                        .layoutPriority(1)
+                    // Its agent's title took the workspace's name: the name after it, as in
+                    // the pill
+                    if web == nil, let name = group?.nameAfterTitle {
+                        Text(name)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 0)
                     // Context, not a headline: small and quiet (a minute's tick)
                     if web == nil {

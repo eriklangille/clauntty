@@ -428,15 +428,37 @@ enum WaitingImages {
 
 extension SessionGroup {
     /// The workspace's name and what's running in the pane it shows. Workspaces named
-    /// after a folder (`~`, a path) take the running thing's name instead.
+    /// after a folder (`~`, a path) take the running thing's name instead, and so does a
+    /// named one whose shown pane's agent says what it's on: its name goes after
+    /// (`nameAfterTitle`), as in the pill.
     var sidebarTitles: (title: String, subtitle: String?) {
         let shown = panes.first { $0.id == activePaneId } ?? panes.first
         let paneTitle = shown?.title ?? ""
-        guard !title.isEmpty, title != "~", !title.hasPrefix("/") else {
+        guard isNamed else {
             return (paneTitle.isEmpty || paneTitle == "~" ? "shell" : paneTitle, nil)
         }
+        if let agentTitle { return (agentTitle, nil) }
         // A shell at home says nothing more than the name
         return (title, paneTitle == title || paneTitle == "~" || paneTitle.isEmpty ? nil : paneTitle)
+    }
+
+    /// The workspace's own name, small after the title, when its agent's title took its place
+    var nameAfterTitle: String? {
+        isNamed && agentTitle != nil ? title : nil
+    }
+
+    /// Named, not after a folder
+    private var isNamed: Bool {
+        !title.isEmpty && title != "~" && !title.hasPrefix("/")
+    }
+
+    /// What the shown pane's agent is on: Claude's title for the conversation, else the
+    /// last prompt (`SessionManager.paneTitle`); not when that's only the agent's name
+    private var agentTitle: String? {
+        guard let shown = panes.first(where: { $0.id == activePaneId }) ?? panes.first,
+              shown.status != .none else { return nil }
+        let paneTitle = shown.title
+        return paneTitle.isEmpty || paneTitle == title || ["claude", "agent"].contains(paneTitle) ? nil : paneTitle
     }
 
     /// What needs you most among its panes: one waiting on you beats one that's done,
