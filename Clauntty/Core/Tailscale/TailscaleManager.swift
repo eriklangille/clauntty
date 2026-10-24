@@ -93,10 +93,12 @@ final class TailscaleManager: ObservableObject {
         #endif
     }
 
-    /// Replace the node with a fresh one that keeps the login. Used after the device's
-    /// network changes (Wi-Fi ↔ cellular) and after a dial times out. There's no Network
-    /// Extension to tell tsnet about path changes, and it can keep using sockets bound
-    /// to an interface that's gone. Tailnet connections through the old node close.
+    /// Replace the node with a fresh one that keeps the login. Used when the app comes
+    /// back to a network that changed while it was suspended (Wi-Fi gone), and after a
+    /// dial times out. There's no Network Extension to tell tsnet about path changes; it
+    /// sees them while the app runs, but misses one made while suspended and keeps
+    /// binding to the interface that's gone. Tailnet connections through the old node
+    /// close.
     func restart(reason: String) {
         #if canImport(TailscaleKit)
         guard let oldNode = node, restartTask == nil else { return }
