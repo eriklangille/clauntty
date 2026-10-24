@@ -36,6 +36,9 @@ struct PersistedGroup: Codable {
         let id: String
         let title: String
         let tab: Int
+        /// rtach's last state for it, so its card says what it was doing until the host
+        /// answers again
+        let state: RemotePaneState?
     }
 }
 
@@ -206,6 +209,7 @@ extension SessionManager {
             group.panes[paneIndex].status = paneStatus(paneId)
         }
         sessionGroups[index] = group
+        saveGroups()
         for session in sessions where session.pane?.paneId == paneId {
             session.agentTracked = state.hasAgent
         }
@@ -667,7 +671,7 @@ extension SessionManager {
                 connectionId: group.connectionId,
                 workspaceId: group.workspaceId,
                 title: group.title,
-                panes: group.panes.map { PersistedGroup.Pane(id: $0.id, title: $0.title, tab: $0.group) },
+                panes: group.panes.map { PersistedGroup.Pane(id: $0.id, title: $0.title, tab: $0.group, state: paneStates[$0.id]) },
                 activePaneId: group.activePaneId
             )
         }
@@ -684,12 +688,15 @@ extension SessionManager {
         for persisted in saved {
             guard let config = connectionStore.connections.first(where: { $0.id == persisted.connectionId }),
                   !persisted.panes.isEmpty else { continue }
+            for pane in persisted.panes {
+                if let state = pane.state { paneStates[pane.id] = state }
+            }
             let group = SessionGroup(
                 id: persisted.id,
                 connectionId: persisted.connectionId,
                 workspaceId: persisted.workspaceId,
                 title: persisted.title,
-                panes: persisted.panes.map { TabPane(id: $0.id, title: $0.title, status: .none, group: $0.tab) },
+                panes: persisted.panes.map { TabPane(id: $0.id, title: $0.title, status: paneStatus($0.id), group: $0.tab) },
                 activePaneId: persisted.activePaneId
             )
             sessionGroups.append(group)

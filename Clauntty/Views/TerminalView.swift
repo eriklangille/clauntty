@@ -144,20 +144,8 @@ struct TerminalView: View {
                     }
                 }
 
-                // Show connecting overlay, also while a connection that was suspended with
-                // the app hasn't delivered anything yet (the screen is stale until it does)
-                if session.state == .connecting || session.isResuming {
-                    Color.black.opacity(0.7)
-                        .ignoresSafeArea()
-                    VStack {
-                        ProgressView()
-                            .tint(.white)
-                            .scaleEffect(1.5)
-                        Text(session.state == .connecting ? "Connecting..." : "Resuming...")
-                            .foregroundColor(.white)
-                            .padding(.top)
-                    }
-                }
+                // Connecting and resuming are a note at the bottom of its window
+                // (`SwitcherWindow`), over the terminal
 
                 // Show error overlay
                 if case .error(let errorMessage) = session.state {

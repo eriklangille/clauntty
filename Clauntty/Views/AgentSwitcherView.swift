@@ -1336,7 +1336,9 @@ struct SwitcherWindow: View {
         let titles = group?.sidebarTitles ?? (title: title, subtitle: nil)
         let lead = group?.leadPane
         let state = lead.flatMap { sessionManager.paneStates[$0.id] }
-        let detail = notice?.text
+        // Connecting, the glyph spins and the line says what it always does; only an
+        // error or an ended session takes the line
+        let detail = (isConnecting ? nil : notice?.text)
             ?? (lead?.status ?? status).detail(state: state, title: titles.title, subtitle: titles.subtitle)
             ?? state?.place
         return HStack(spacing: 12) {
@@ -1347,7 +1349,7 @@ struct SwitcherWindow: View {
                     VoiceEyes(status: lead?.status ?? status, size: 12, gaze: CGSize(width: 0, height: 1))
                         .teleportingEyes()
                 } else {
-                    StatusGlyph(status: lead?.status ?? status)
+                    StatusGlyph(status: lead?.status ?? status, isConnecting: isConnecting)
                         .frame(width: 10, height: 10)
                 }
             }
@@ -1496,15 +1498,11 @@ struct SwitcherWindow: View {
                 .transition(.opacity)
                 .task(id: web.id) { await sessionManager.reconnectIfClosed(web) }
             }
-            if web == nil, !isFullscreen, !isCard, let notice {
+            if web == nil, !isFullscreen, !isCard, let notice, let icon = notice.icon {
                 // Covers the empty terminal (its own overlays are centered in the whole
                 // terminal, cropped away here)
                 HStack(spacing: 8) {
-                    if let icon = notice.icon {
-                        Image(systemName: icon).foregroundStyle(notice.tint)
-                    } else {
-                        ProgressView().controlSize(.small).tint(.secondary)
-                    }
+                    Image(systemName: icon).foregroundStyle(notice.tint)
                     Text(notice.text).foregroundStyle(.secondary)
                 }
                 .font(.system(size: 14, weight: .medium))
@@ -1527,6 +1525,23 @@ struct SwitcherWindow: View {
                     .frame(height: Self.bottomPad)
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .allowsHitTesting(false)
+            }
+
+            // Connecting, the terminal stays: a note at the bottom says so
+            if web == nil, !isCard, isConnecting, let notice {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).tint(.secondary)
+                    Text(notice.text).foregroundStyle(.secondary)
+                }
+                .font(.system(size: 13, weight: .medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .glass(in: Capsule())
+                .padding(.bottom, isFullscreen ? AgentSwitcherView.barReserve + 8 : 16)
+                // Fullscreen, the window goes on under the keyboard: above the terminal's end
+                .frame(height: isFullscreen ? placement.y + terminalSize.height : height, alignment: .bottom)
+                .allowsHitTesting(false)
+                .transition(.opacity)
             }
 
             // Always there, so opening fades it out with the window's growth
@@ -1690,6 +1705,9 @@ struct SwitcherWindow: View {
             return session.hasOutput ? nil : (nil, .secondary, "Connecting")
         }
     }
+
+    /// Connecting or resuming: the notices without an icon
+    private var isConnecting: Bool { notice.map { $0.icon == nil } ?? false }
 
     private var borderColor: Color {
         if isFullscreen { return .clear }
@@ -2339,9 +2357,13 @@ private struct BezelBump: Shape {
 /// The tab bar's own animated glyph
 private struct StatusGlyph: UIViewRepresentable {
     let status: PaneStatus
+    var isConnecting = false
 
     func makeUIView(context: Context) -> PaneStatusIndicator { PaneStatusIndicator() }
-    func updateUIView(_ view: PaneStatusIndicator, context: Context) { view.status = status }
+    func updateUIView(_ view: PaneStatusIndicator, context: Context) {
+        view.status = status
+        view.isConnecting = isConnecting
+    }
 }
 
 private struct GlassCircle: View {

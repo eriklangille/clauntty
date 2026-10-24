@@ -15,12 +15,19 @@ extension PaneStatus {
 // MARK: - Status Indicator
 
 /// Small glyph for a pane's agent state: a spinning arc while working, a pulsing
-/// orange dot when blocked, green when done, a hollow ring when idle
+/// orange dot when blocked, green when done, a hollow ring when idle. Connecting, a
+/// grey arc spins in place of all of them
 final class PaneStatusIndicator: UIView {
 
     var status: PaneStatus = .none {
         didSet {
             if oldValue != status { refresh() }
+        }
+    }
+
+    var isConnecting = false {
+        didSet {
+            if oldValue != isConnecting { refresh() }
         }
     }
 
@@ -69,6 +76,16 @@ final class PaneStatusIndicator: UIView {
         ringLayer.strokeStart = 0
         ringLayer.strokeEnd = 1
 
+        if isConnecting {
+            ringLayer.isHidden = false
+            dotLayer.isHidden = true
+            ringLayer.strokeColor = PaneStatus.idle.tint.resolvedColor(with: traitCollection).cgColor
+            ringLayer.strokeEnd = 0.6
+            ringLayer.add(spin(), forKey: "spin")
+            setNeedsLayout()
+            return
+        }
+
         switch status {
         case .none, .done:
             ringLayer.isHidden = true
@@ -83,12 +100,7 @@ final class PaneStatusIndicator: UIView {
             dotLayer.isHidden = true
             ringLayer.strokeColor = tint
             ringLayer.strokeEnd = 0.7
-            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-            spin.fromValue = 0
-            spin.toValue = CGFloat.pi * 2
-            spin.duration = 0.9
-            spin.repeatCount = .infinity
-            ringLayer.add(spin, forKey: "spin")
+            ringLayer.add(spin(), forKey: "spin")
         case .blocked:
             ringLayer.isHidden = true
             dotLayer.isHidden = false
@@ -103,5 +115,14 @@ final class PaneStatusIndicator: UIView {
             dotLayer.add(pulse, forKey: "pulse")
         }
         setNeedsLayout()
+    }
+
+    private func spin() -> CABasicAnimation {
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = CGFloat.pi * 2
+        spin.duration = 0.9
+        spin.repeatCount = .infinity
+        return spin
     }
 }

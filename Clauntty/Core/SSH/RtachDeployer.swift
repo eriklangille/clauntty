@@ -869,7 +869,7 @@ struct RemoteWorkspace: Decodable, Equatable {
 
 /// A session's `<socket>.state` (rtach's pane_state.zig): the program in front, its
 /// directory, and an agent's state. Also sent live as `pane;<id>;<json>`.
-struct RemotePaneState: Decodable, Equatable {
+struct RemotePaneState: Codable, Equatable {
     let fg: String?
     let cwd: String?
     let title: String?
