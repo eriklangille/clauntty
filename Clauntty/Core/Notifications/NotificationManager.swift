@@ -259,7 +259,10 @@ class NotificationManager: NSObject, ObservableObject {
         backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "SSHProcessing") { [weak self] in
             // Called when time is about to expire
             Logger.clauntty.debugOnly("NotificationManager: background task time expired")
-            self?.endBackgroundTask()
+            // iOS suspends the app once this ends: take Tailscale off the relays first.
+            // A voice session keeps the app running, so it stays on them.
+            guard !VoiceAgent.shared.isActive else { self?.endBackgroundTask(); return }
+            TailscaleManager.shared.suspend { self?.endBackgroundTask() }
         }
 
         if backgroundTaskId != .invalid {

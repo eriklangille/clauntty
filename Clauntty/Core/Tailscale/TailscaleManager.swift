@@ -1,5 +1,6 @@
 import Foundation
 import os.log
+import UIKit
 #if canImport(TailscaleKit)
 import TailscaleKit
 #endif
@@ -38,6 +39,8 @@ final class TailscaleManager: ObservableObject {
     private var pollTask: Task<Void, Never>?
     /// Closing the old node during `restart`; nothing may start a node until it's done
     private var restartTask: Task<Void, Never>?
+    /// The node left the DERP relays for the app's suspension (`suspend`), until it's back
+    private var suspended = false
 
     static let hostName = "clauntty"
 
@@ -46,7 +49,15 @@ final class TailscaleManager: ObservableObject {
         return base.appendingPathComponent("tailscale", isDirectory: true)
     }
 
-    private init() {}
+    private init() {
+        // As early as iOS says the app is coming back: `scenePhase` turns `.active` only
+        // after the opening animation, ~300 ms after the node is running again
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { TailscaleManager.shared.resume() }
+        }
+    }
 
     var isRunning: Bool {
         if case .running = state { return true }
@@ -90,6 +101,49 @@ final class TailscaleManager: ObservableObject {
         startPolling()
         #else
         state = .failed("Tailscale is not available in this build")
+        #endif
+    }
+
+    /// The app is about to be suspended (its background time is up). While it's frozen,
+    /// the Mac's WireGuard handshake attempts queue in the relay connection; on resume the
+    /// oldest is answered, which voids the phone's own handshake, and the next try waits
+    /// 5 s, and so does the terminal. Leaving the relays first makes the relay drop them.
+    /// The Mac can't reach the phone until `resume()`; the phone can still dial out.
+    /// `done` runs once the node is off them; the app may be suspended after it.
+    func suspend(then done: @escaping () -> Void) {
+        #if canImport(TailscaleKit)
+        guard let node else { return done() }
+        suspended = true
+        TailscaleDebugLog.note("about to be suspended, leaving the relays")
+        Task {
+            do {
+                try await node.suspend()
+            } catch {
+                TailscaleDebugLog.note("telling the node it's suspended failed: \(error)")
+            }
+            done()
+        }
+        #else
+        done()
+        #endif
+    }
+
+    /// Back in the foreground after `suspend`: the node rejoins its home relay. Before the
+    /// node's next network check finishes, or it reports no home relay to control and the
+    /// Mac can't answer the phone until it hears otherwise (5 s, the next handshake).
+    func resume() {
+        guard suspended else { return }
+        suspended = false
+        #if canImport(TailscaleKit)
+        guard let node else { return }
+        TailscaleDebugLog.note("resumed, rejoining the relays")
+        Task {
+            do {
+                try await node.resume()
+            } catch {
+                TailscaleDebugLog.note("telling the node it resumed failed: \(error)")
+            }
+        }
         #endif
     }
 

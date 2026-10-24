@@ -597,9 +597,12 @@ class SessionManager: ObservableObject {
         Logger.clauntty.debugOnly("SessionManager: checking \(connections.count) connection(s) (\(reason))")
         TailscaleDebugLog.note("checking \(connections.count) connection(s) (\(reason))")
 
+        // A live connection answers within a fraction of a second; a dead one took 6-8 s
+        // to find out, the tab "Resuming" all along. Past 1.5 s a new connection (~0.2 s,
+        // rtach keeps the session) is quicker even when the old one would have answered.
         let dead = await withTaskGroup(of: SSHConnection?.self) { group in
             for connection in connections.values {
-                group.addTask { await connection.isResponsive() ? nil : connection }
+                group.addTask { await connection.isResponsive(timeout: .milliseconds(1500)) ? nil : connection }
             }
             var dead: [SSHConnection] = []
             for await connection in group {

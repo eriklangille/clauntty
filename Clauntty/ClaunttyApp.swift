@@ -412,6 +412,7 @@ struct AppContentView: View {
 
             NotificationManager.shared.appIsBackgrounded = false
             TailscaleDebugLog.note("app foregrounded, active tab \(activeId) \(sessionManager.activeSession?.stateDescription ?? "none")")
+            TailscaleManager.shared.resume()  // usually done already, on willEnterForeground
             if VoiceAgent.shared.isActive {
                 voiceTrace("app is back in the foreground")
             }
