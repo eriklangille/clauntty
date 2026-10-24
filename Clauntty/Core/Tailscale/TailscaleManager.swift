@@ -49,6 +49,20 @@ final class TailscaleManager: ObservableObject {
         return base.appendingPathComponent("tailscale", isDirectory: true)
     }
 
+    /// The node's UDP port, picked once and the same every launch. A Mac that talked to
+    /// the app directly seconds ago answers the next handshake on that path: after a quick
+    /// relaunch (swiped away and reopened, a crash) a new port missed it, and the
+    /// handshake waited 5 s for a retry. Taken by something else, tsnet picks another.
+    private static var udpPort: UInt16 {
+        let key = "tailscalePort"
+        if let port = UserDefaults.standard.object(forKey: key) as? Int, (1...65535).contains(port) {
+            return UInt16(port)
+        }
+        let port = UInt16.random(in: 49152...65535)
+        UserDefaults.standard.set(Int(port), forKey: key)
+        return port
+    }
+
     private init() {
         // Resume on willEnterForeground, the first thing after the thaw; `scenePhase`
         // turns `.active` only after the opening animation, ~300 ms later. Becoming
@@ -89,7 +103,8 @@ final class TailscaleManager: ObservableObject {
                 path: dir.path,
                 authKey: nil,
                 controlURL: kDefaultControlURL,
-                ephemeral: false
+                ephemeral: false,
+                port: Self.udpPort
             )
             node = try TailscaleNode(config: config, logger: TailscaleLogSink())
             Logger.clauntty.debugOnly("Tailscale: node started")

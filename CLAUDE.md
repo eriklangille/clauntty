@@ -267,6 +267,18 @@ In the log: `about to be suspended, leaving the relays` → `resumed, rejoining 
 it went wrong: a burst of `Received handshake initiation` / `handshake flood` before `resumed`, or
 `Failed to send handshake initiation: magicsock: network down`.
 
+### Fast Cold Starts
+
+Tailscale 1.104+ saves the device list and starts from it, so a cold launch dials ~0.4 s after start
+instead of waiting ~1.5 s for the coordination server. Only when the tailnet policy grants the node
+`cache-network-maps` (`nodeAttrs`); without it, 1.104 still saves a list with only this device, so a
+launch can start with no peers. `TailscaleManager.dial` covers that and an out-of-date list: on "no
+such host" it waits for the host to show up and dials again.
+
+The node's UDP port is picked once and kept (`TailscaleManager.udpPort`, `tailscale_set_port`). The
+Mac answers a handshake on the direct path it last used; after a quick relaunch a new port missed
+it and the first connection waited 5 s.
+
 ### Enable Verbose Logging
 
 Verbose logs are disabled by default (too noisy). Enable with `CLAUNTTY_VERBOSE=1`:
