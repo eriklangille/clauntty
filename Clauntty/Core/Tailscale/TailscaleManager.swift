@@ -50,12 +50,13 @@ final class TailscaleManager: ObservableObject {
     }
 
     private init() {
-        // As early as iOS says the app is coming back: `scenePhase` turns `.active` only
-        // after the opening animation, ~300 ms after the node is running again
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
-        ) { _ in
-            MainActor.assumeIsolated { TailscaleManager.shared.resume() }
+        // Resume on willEnterForeground, the first thing after the thaw; `scenePhase`
+        // turns `.active` only after the opening animation, ~300 ms later. Becoming
+        // active is a fallback: a node left suspended can't reach anything.
+        for name in [UIApplication.willEnterForegroundNotification, UIApplication.didBecomeActiveNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { TailscaleManager.shared.resume() }
+            }
         }
     }
 
@@ -108,8 +109,9 @@ final class TailscaleManager: ObservableObject {
     /// the Mac's WireGuard handshake attempts queue in the relay connection; on resume the
     /// oldest is answered, which voids the phone's own handshake, and the next try waits
     /// 5 s, and so does the terminal. Leaving the relays first makes the relay drop them.
-    /// The Mac can't reach the phone until `resume()`; the phone can still dial out.
-    /// `done` runs once the node is off them; the app may be suspended after it.
+    /// Until `resume()` the Mac can't reach the phone and the node's sends fail, so
+    /// nothing may send on resume before it. `done` runs once the node is off the relays;
+    /// the app may be suspended after it.
     func suspend(then done: @escaping () -> Void) {
         #if canImport(TailscaleKit)
         guard let node else { return done() }
@@ -128,9 +130,7 @@ final class TailscaleManager: ObservableObject {
         #endif
     }
 
-    /// Back in the foreground after `suspend`: the node rejoins its home relay. Before the
-    /// node's next network check finishes, or it reports no home relay to control and the
-    /// Mac can't answer the phone until it hears otherwise (5 s, the next handshake).
+    /// Back after `suspend`: the node rejoins its home relay at once (see `init` for when).
     func resume() {
         guard suspended else { return }
         suspended = false

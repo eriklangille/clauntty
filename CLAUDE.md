@@ -248,6 +248,25 @@ Debug builds (what `device.sh` installs) write the embedded Tailscale node's log
 ./scripts/device.sh log "clauntty:|LinkChange|Rebind"  # copy and grep
 ```
 
+### Tailscale While Suspended
+
+When the background task's ~30 s run out (`NotificationManager`'s expiration handler), just before
+iOS suspends the app, `TailscaleManager.suspend` takes the node's network down
+(`tailscale_suspend`: every DERP relay connection closes and stays closed). Otherwise the Mac's
+WireGuard handshake attempts queue in the relay connection while the app is frozen, and answering a
+stale one on resume stalls the next handshake 5 s ("Resuming" for 3–8 s, about 1 in 10 resumes after
+a few minutes away). `resume()` brings it back up on `willEnterForeground`, the first thing after
+the thaw (`.active` is a fallback). Not during a voice session, which keeps the app running.
+
+Keep it that way: nothing may send on the tailnet after a thaw before `resume()` runs. The node's
+sends fail until then, and a handshake that fails to go out waits 5 s too. Moving `resume()` to
+`.active` (~300 ms later) brings the stall back.
+
+In the log: `about to be suspended, leaving the relays` → `resumed, rejoining the relays` →
+`derp-N connected` → `Sending handshake initiation` answered by `Received handshake response`. Signs
+it went wrong: a burst of `Received handshake initiation` / `handshake flood` before `resumed`, or
+`Failed to send handshake initiation: magicsock: network down`.
+
 ### Enable Verbose Logging
 
 Verbose logs are disabled by default (too noisy). Enable with `CLAUNTTY_VERBOSE=1`:
