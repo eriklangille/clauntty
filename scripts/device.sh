@@ -2,6 +2,8 @@
 # Build, install and launch Clauntty on a connected physical iPhone.
 #
 # Usage: ./scripts/device.sh [build|install|launch|run|doctor]   (default: run = all three)
+#        ./scripts/device.sh log [pattern]   copy the Tailscale debug log off the phone
+#                                            (and grep it for pattern)
 #
 # Env: DEVICE_ID  device UDID (default: first connected physical iPhone)
 #
@@ -74,6 +76,35 @@ launch() {
     echo "Launched $BUNDLE_ID${CLAUNTTY_VERBOSE:+ (verbose)}."
 }
 
+# Debug builds keep tsnet's logs and the app's network events in Library/Caches/tailscale.log
+# (tailscale.log.1 before it). Copied to $LOG_DIR, the older file first in tailscale-all.log.
+LOG_DIR=/tmp/clauntty-device-logs
+copy_log() {
+    local name=$1 tries
+    for tries in 1 2; do
+        xcrun devicectl device copy from --device "$DEVICE_ID" --domain-type appDataContainer \
+            --domain-identifier "$BUNDLE_ID" --source "Library/Caches/$name" \
+            --destination "$LOG_DIR/$name" > /dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+log() {
+    mkdir -p "$LOG_DIR"
+    rm -f "$LOG_DIR"/tailscale.log*
+    if ! copy_log tailscale.log; then
+        echo "Couldn't copy tailscale.log off the phone. Over Wi-Fi big files time out; plug in the cable and try again." >&2
+        exit 1
+    fi
+    copy_log tailscale.log.1 || true   # missing until the first file fills up
+    cat "$LOG_DIR"/tailscale.log.1 "$LOG_DIR"/tailscale.log 2>/dev/null > "$LOG_DIR/tailscale-all.log"
+    if [ -n "${1:-}" ]; then
+        grep -aE "$1" "$LOG_DIR/tailscale-all.log" || true
+    else
+        echo "$LOG_DIR/tailscale-all.log ($(wc -l < "$LOG_DIR/tailscale-all.log" | tr -d ' ') lines)"
+    fi
+}
+
 doctor() {
     echo "Device: $DEVICE_ID"
     echo "Keychain search list (user domain):"
@@ -91,5 +122,6 @@ case "${1:-run}" in
     install) install ;;
     launch) launch ;;
     run) build; install; launch ;;
-    *) echo "Usage: $0 [build|install|launch|run|doctor]" >&2; exit 1 ;;
+    log) log "${2:-}" ;;
+    *) echo "Usage: $0 [build|install|launch|run|doctor|log [pattern]]" >&2; exit 1 ;;
 esac

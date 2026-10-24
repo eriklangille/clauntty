@@ -241,12 +241,11 @@ uv run scripts/parse_crash.py /tmp/clauntty_crashes/Clauntty-YYYY-MM-DD-HHMMSS.i
 
 ### Tailscale Log (Phone)
 
-Debug builds (what `device.sh` installs) write the embedded Tailscale node's logs to `Library/Caches/tailscale.log`, timestamped in local time, next to the app's own network-change, dial and connection-check events (`clauntty:` lines). It starts over at launch once past 10 MB. Useful for roaming and connection problems after the fact, when live `idevicesyslog` wasn't running. Copy it off the phone (works over Wi-Fi, no cable):
+Debug builds (what `device.sh` installs) write the embedded Tailscale node's logs to `Library/Caches/tailscale.log`, timestamped in local time, next to the app's own network-change, dial and connection-check events (`clauntty:` lines). At 2 MB it becomes `tailscale.log.1` and a new file starts; a line repeated more than 3 times in a minute is written once more as a count. Useful for roaming and connection problems after the fact, when live `idevicesyslog` wasn't running. Copy both off the phone (works over Wi-Fi; if it times out, plug in the cable):
 
 ```bash
-xcrun devicectl device copy from --device <UDID> --domain-type appDataContainer \
-  --domain-identifier com.octerm.clauntty --source Library/Caches/tailscale.log --destination tailscale.log
-grep -a "clauntty:\|LinkChange\|Rebind" tailscale.log   # -a: the file can contain binary bytes
+./scripts/device.sh log                                # -> /tmp/clauntty-device-logs/tailscale-all.log
+./scripts/device.sh log "clauntty:|LinkChange|Rebind"  # copy and grep
 ```
 
 ### Enable Verbose Logging

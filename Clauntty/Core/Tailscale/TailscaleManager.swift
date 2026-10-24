@@ -430,29 +430,44 @@ private struct TailscaleLogSink: LogSink {
 }
 #endif
 
-/// Debug builds: the Go side's logs, timestamped, in Library/Caches/tailscale.log.
-/// Read it from the Mac with
-/// `xcrun devicectl device copy from --device <id> --domain-type appDataContainer
-///  --domain-identifier com.octerm.clauntty --source Library/Caches/tailscale.log --destination .`
+/// Debug builds: the Go side's logs, timestamped, in Library/Caches/tailscale.log, the
+/// one before it in tailscale.log.1. Read them from the Mac with `scripts/device.sh log`.
 enum TailscaleDebugLog {
     #if DEBUG
     private static let lock = NSLock()
 
-    /// Log file, started over once it passes 10 MB
-    private static let file: FileHandle? = {
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("tailscale.log")
-        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
-           size > 10_000_000 {
-            try? FileManager.default.removeItem(at: url)
-        }
+    private static let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("tailscale.log")
+    /// Past this the file becomes tailscale.log.1 and a new one starts. Kept small enough
+    /// to copy off the phone without a cable: bigger files time out over Wi-Fi.
+    private static let maxSize: UInt64 = 2_000_000
+
+    nonisolated(unsafe) private static var file: FileHandle? = openFile()
+    nonisolated(unsafe) private static var size: UInt64 = 0
+
+    private static func openFile() -> FileHandle? {
         if !FileManager.default.fileExists(atPath: url.path) {
             FileManager.default.createFile(atPath: url.path, contents: nil)
         }
         let handle = try? FileHandle(forWritingTo: url)
-        _ = try? handle?.seekToEnd()
+        size = (try? handle?.seekToEnd()) ?? 0
         return handle
-    }()
+    }
+
+    private static func rotate() {
+        try? file?.close()
+        let previous = url.appendingPathExtension("1")
+        try? FileManager.default.removeItem(at: previous)
+        try? FileManager.default.moveItem(at: url, to: previous)
+        file = openFile()
+    }
+
+    /// Lines written this minute, and how many more of each were held back. Some Go lines
+    /// repeat every second for hours (`error from link monitor`); after a few, the rest
+    /// of the minute's become one count.
+    nonisolated(unsafe) private static var thisMinute: [String: Int] = [:]
+    nonisolated(unsafe) private static var minuteStart = Date()
+    private static let repeatsWritten = 3
 
     /// Write end of a pipe whose lines are stamped and appended to the file. Go
     /// doesn't timestamp them, and it closes the fd when the node goes away, so
@@ -498,9 +513,31 @@ enum TailscaleDebugLog {
     }()
 
     private static func append(_ line: String) {
+        guard !line.isEmpty else { return }  // Go writes blank ones between some entries
         lock.lock()
         defer { lock.unlock() }
-        file?.write(Data("\(timeFormatter.string(from: Date())) \(line)\n".utf8))
+        let now = Date()
+        if now.timeIntervalSince(minuteStart) >= 60 {
+            for (held, count) in thisMinute where count > repeatsWritten {
+                write("(\(count - repeatsWritten) more in the last minute) \(held)", at: now)
+            }
+            thisMinute = [:]
+            minuteStart = now
+        }
+        let count = thisMinute[line, default: 0] + 1
+        thisMinute[line] = count
+        if count <= repeatsWritten {
+            write(line, at: now)
+        }
+    }
+
+    private static func write(_ line: String, at time: Date) {
+        let data = Data("\(timeFormatter.string(from: time)) \(line)\n".utf8)
+        file?.write(data)
+        size += UInt64(data.count)
+        if size > maxSize {
+            rotate()
+        }
     }
     #else
     static func newWriter() -> Int32? { nil }
