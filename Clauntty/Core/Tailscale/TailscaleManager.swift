@@ -224,7 +224,8 @@ final class TailscaleManager: ObservableObject {
             if ContinuousClock.now >= deadline {
                 throw TailscaleConnectError.nodeTimedOut
             }
-            try await Task.sleep(for: .milliseconds(200))
+            // Only reads `state`; launch's first connection waits on it
+            try await Task.sleep(for: .milliseconds(20))
         }
     }
 
@@ -233,7 +234,9 @@ final class TailscaleManager: ObservableObject {
     /// or a tailnet IP. If the node doesn't come up or the dial times out, the node
     /// may be stuck: it's restarted and the dial tried once more. Not when the tailnet
     /// says the host is offline, since then the timeout is expected and a restart
-    /// would only drop the other tailnet connections.
+    /// would only drop the other tailnet connections. If the node doesn't know the host,
+    /// it may be running on a saved device list that lacks it: the dial waits for it to
+    /// show up and is tried once more.
     func dial(host: String, port: Int) async throws -> Int32 {
         do {
             return try await dialOnce(host: host, port: port, timeout: .seconds(15))
@@ -247,7 +250,29 @@ final class TailscaleManager: ObservableObject {
         } catch TailscaleConnectError.nodeTimedOut {
             restart(reason: "node didn't start")
             return try await dialOnce(host: host, port: port, timeout: .seconds(20))
+        } catch TailscaleConnectError.failed(let message) where message.contains("no such host") {
+            // Tailscale 1.104+ starts on the device list it saved last time, before the
+            // coordination server has answered (~1.5 s); that one may lack the host, or be
+            // out of date. Wait for the server's.
+            TailscaleDebugLog.note("\(host) isn't in the device list yet, waiting for it")
+            guard await waitForPeer(host, timeout: .seconds(10)) else {
+                throw TailscaleConnectError.failed(message)
+            }
+            return try await dialOnce(host: host, port: port, timeout: .seconds(20))
         }
+    }
+
+    /// Whether `host` shows up in the node's device list within `timeout`
+    private func waitForPeer(_ host: String, timeout: Duration) async -> Bool {
+        #if canImport(TailscaleKit)
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            await refreshStatus()
+            if peer(for: host) != nil { return true }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        #endif
+        return false
     }
 
     /// The peer `host` names: its MagicDNS name, short name, or tailnet IP
@@ -309,7 +334,12 @@ final class TailscaleManager: ObservableObject {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refreshStatus()
-                let interval: Duration = (self?.isRunning ?? false) ? .seconds(10) : .seconds(1)
+                // Connections wait for running: once a second cost a launch ~0.5 s, up to 1 s
+                let interval: Duration = switch self?.state {
+                case .running: .seconds(10)
+                case .starting: .milliseconds(100)
+                default: .seconds(1)
+                }
                 try? await Task.sleep(for: interval)
             }
         }
