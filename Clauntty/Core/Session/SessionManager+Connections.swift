@@ -145,6 +145,19 @@ extension SessionManager {
         }
     }
 
+    /// Close every connection without waiting for each to time out. After the device left
+    /// the network they ran on while the app was suspended, the active tab's is usually
+    /// dead, and finding that out takes seconds; a new one takes a fraction of one, and
+    /// rtach keeps the sessions. The active tab reconnects with the next connection check.
+    func dropAllConnections(reason: String) {
+        let connections = allConnections
+        guard !connections.isEmpty else { return }
+        TailscaleDebugLog.note("closing \(connections.count) connection(s) (\(reason))")
+        for connection in connections {
+            dropConnection(connection, reconnect: false)
+        }
+    }
+
     /// Close the connections of hosts with no tab left, and a host's extra connections
     /// once no pane is on them. The first stays for commands, forwards and new panes.
     func closeIdleConnections() {

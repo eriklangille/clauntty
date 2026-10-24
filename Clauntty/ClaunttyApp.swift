@@ -344,13 +344,14 @@ struct AppContentView: View {
                     sessionManager.loadTabOrder()  // Load or migrate global tab order
 
                     // After Wi-Fi ↔ cellular open connections can be stuck on the old
-                    // network. The Tailscale node follows a change itself, keeping its
-                    // connections, but not one made while iOS had the app suspended: it
-                    // kept binding to the Wi-Fi that was gone until a dial timed out,
-                    // ~30s. A new node starts on the current network.
+                    // network. Tell the Tailscale node (it can miss changes made while
+                    // the app was suspended), then check the connections. Coming back to
+                    // a network that was left meanwhile, don't wait to find the old ones
+                    // dead: start over.
                     NetworkMonitor.shared.onChange = { [sessionManager] change in
+                        TailscaleManager.shared.networkChanged()
                         if change.whileAway && change.lostInterface {
-                            TailscaleManager.shared.restart(reason: "network changed while suspended")
+                            sessionManager.dropAllConnections(reason: "network changed while suspended")
                         }
                         sessionManager.checkConnections(reason: "network changed")
                     }

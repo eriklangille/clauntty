@@ -93,12 +93,28 @@ final class TailscaleManager: ObservableObject {
         #endif
     }
 
-    /// Replace the node with a fresh one that keeps the login. Used when the app comes
-    /// back to a network that changed while it was suspended (Wi-Fi gone), and after a
-    /// dial times out. There's no Network Extension to tell tsnet about path changes; it
-    /// sees them while the app runs, but misses one made while suspended and keeps
-    /// binding to the interface that's gone. Tailnet connections through the old node
-    /// close.
+    /// Tell the node the device's network changed, so it rebinds to the current
+    /// interface; its connections survive. tsnet watches the routing table itself, but
+    /// on iOS that watch dies while the app is suspended ("error from link monitor:
+    /// socket is not connected") and it then keeps binding to an interface that's gone.
+    /// With no Network Extension to tell it, the app passes on NWPathMonitor's changes.
+    func networkChanged() {
+        #if canImport(TailscaleKit)
+        guard let node else { return }
+        TailscaleDebugLog.note("telling the node the network changed")
+        Task {
+            do {
+                try await node.networkChanged()
+            } catch {
+                TailscaleDebugLog.note("telling the node failed: \(error)")
+            }
+        }
+        #endif
+    }
+
+    /// Replace the node with a fresh one that keeps the login. Used after a dial times
+    /// out: the node is stuck somehow, and a new one starts on the current network.
+    /// Tailnet connections through the old node close.
     func restart(reason: String) {
         #if canImport(TailscaleKit)
         guard let oldNode = node, restartTask == nil else { return }

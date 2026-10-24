@@ -19,6 +19,8 @@ IOS_TARGET=17.0
 export GOTOOLCHAIN="go$(awk '/^go /{print $2}' "$LTS/go.mod")"
 
 cd "$LTS"
+# The Makefile targets have no prerequisites, so an existing .a is never rebuilt
+rm -f libtailscale_ios.a libtailscale_ios_sim_arm64.a
 make libtailscale_ios.a
 make libtailscale_ios_sim_arm64.a
 cp libtailscale_ios_sim_arm64.a libtailscale_ios_sim.a

@@ -49,7 +49,7 @@ rtach replays the screen and recent scrollback, which otherwise showed twice.
 ├── clauntty/          # iOS app (this repo)
 ├── ghostty/           # Forked ghostty (git@github.com:eriklangille/ghostty.git), branch clauntty
 ├── rtach/             # Session persistence daemon (bundled into Clauntty/Resources/rtach/)
-└── libtailscale/      # Upstream libtailscale (github.com/tailscale/libtailscale); builds TailscaleKit.xcframework
+└── libtailscale/      # libtailscale fork (branch clauntty, upstream github.com/tailscale/libtailscale); builds TailscaleKit.xcframework
 ```
 
 `Frameworks/GhosttyKit.xcframework` is a symlink into `../ghostty/macos/`.

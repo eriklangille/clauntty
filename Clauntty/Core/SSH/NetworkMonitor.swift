@@ -19,7 +19,8 @@ final class NetworkMonitor {
         let whileAway: Bool
     }
 
-    /// Called once the new path has settled and is usable
+    /// Called once the new path has settled and is usable: right away when an interface
+    /// went, after a second of no more changes otherwise
     var onChange: ((Change) -> Void)?
 
     private let monitor = NWPathMonitor()
@@ -69,18 +70,28 @@ final class NetworkMonitor {
         settleWhileAway = settleWhileAway || !PlatformApp.isActive
 
         settleTask?.cancel()
+        settleTask = nil
         guard signature != nil else { return }
-        // Joining Wi-Fi often reports several paths in a row; act on the last one
+        // An interface gone is final: act now, the old connections are dead. Joining Wi-Fi
+        // often reports several paths in a row; act on the last one.
+        if !Self.interfaces(settleFrom).subtracting(Self.interfaces(current)).isEmpty {
+            settle(on: current)
+            return
+        }
         settleTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, let self else { return }
-            let lost = Self.interfaces(settleFrom).subtracting(Self.interfaces(current))
-            let change = Change(lostInterface: !lost.isEmpty, whileAway: settleWhileAway)
-            TailscaleDebugLog.note("network settled on \(current): lost \(lost.isEmpty ? "nothing" : lost.sorted().joined(separator: ",")), \(settleWhileAway ? "while away" : "in the foreground")")
             settleTask = nil
-            settleFrom = nil
-            onChange?(change)
+            settle(on: current)
         }
+    }
+
+    private func settle(on current: String) {
+        let lost = Self.interfaces(settleFrom).subtracting(Self.interfaces(current))
+        let change = Change(lostInterface: !lost.isEmpty, whileAway: settleWhileAway)
+        TailscaleDebugLog.note("network settled on \(current): lost \(lost.isEmpty ? "nothing" : lost.sorted().joined(separator: ",")), \(settleWhileAway ? "while away" : "in the foreground")")
+        settleFrom = nil
+        onChange?(change)
     }
 
     nonisolated private static func interfaces(_ signature: String?) -> Set<Substring> {

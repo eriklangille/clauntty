@@ -49,7 +49,7 @@ mkdir clauntty && cd clauntty
 git clone https://github.com/eriklangille/clauntty.git clauntty
 git clone https://github.com/eriklangille/ghostty.git ghostty
 git clone https://github.com/eriklangille/rtach.git rtach
-git clone https://github.com/tailscale/libtailscale.git libtailscale
+git clone -b clauntty https://github.com/eriklangille/libtailscale.git libtailscale
 ```
 
 You should end up with:
@@ -58,7 +58,7 @@ clauntty/
 ├── clauntty/   # iOS app (this repo)
 ├── ghostty/    # Ghostty fork (terminal emulator)
 ├── rtach/      # Session persistence daemon
-└── libtailscale/  # Tailscale's embeddable tsnet library (upstream)
+└── libtailscale/  # Tailscale's embeddable tsnet library (fork, branch clauntty)
 ```
 
 ### 2. Build dependencies
