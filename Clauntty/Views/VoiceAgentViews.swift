@@ -202,8 +202,8 @@ struct VoiceEyes: View {
     private var tint: Color {
         if let color { return color }
         switch status {
-        case .none: return .white
-        case .idle: return .white.opacity(0.7)
+        case .none: return .primary
+        case .idle: return .primary.opacity(0.7)
         default: return Color(uiColor: status.tint)
         }
     }
@@ -314,10 +314,10 @@ struct VoiceSessionButton: View {
     var body: some View {
         Button(action: action) {
             VoiceEyes(status: agent.phase == .thinking || agent.phase == .connecting ? .working : .none,
-                      size: size * 0.4, color: .white, speaking: agent.phase == .speaking)
+                      size: size * 0.4, color: .primary, speaking: agent.phase == .speaking)
                 .frame(width: size, height: size)
                 .glass(in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Voice session")

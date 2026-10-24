@@ -145,6 +145,7 @@ class KeyboardAccessoryView: UIView {
             effect = UIBlurEffect(style: .systemMaterial)
         }
         let view = UIVisualEffectView(effect: effect)
+        view.backgroundColor = .glassBacking
         view.clipsToBounds = true
         return view
     }()
@@ -290,9 +291,8 @@ class KeyboardAccessoryView: UIView {
     // MARK: - Glow Effect Setup
 
     private func setupGlowEffect() {
-        // Inner border for crisp edge (pulses with audio)
-        containerEffectView.layer.borderWidth = 0
-        containerEffectView.layer.borderColor = UIColor.systemBlue.cgColor
+        // Inner border for crisp edge: the rim, until it pulses with audio
+        showRim()
 
         // Glow layer - colored layer that casts the shadow
         glowLayer.backgroundColor = UIColor.clear.cgColor
@@ -791,13 +791,24 @@ class KeyboardAccessoryView: UIView {
         isRecording = recording
     }
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // A cgColor doesn't follow the appearance by itself
+        if containerEffectView.layer.borderWidth == 1, glowLayer.backgroundColor == UIColor.clear.cgColor { showRim() }
+    }
+
+    /// The bar's edge while it isn't glowing
+    private func showRim() {
+        containerEffectView.layer.borderWidth = 1
+        containerEffectView.layer.borderColor = UIColor.glassRim.resolvedColor(with: traitCollection).cgColor
+    }
+
     /// Immediately clear all glow effects (called when recording stops)
     private func clearGlowImmediately() {
         // Disable implicit animations for immediate effect
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        containerEffectView.layer.borderWidth = 0
-        containerEffectView.layer.borderColor = UIColor.clear.cgColor
+        showRim()
         shadowHostView.layer.shadowOpacity = 0
         glowLayer.backgroundColor = UIColor.clear.cgColor
         CATransaction.commit()
@@ -1427,6 +1438,7 @@ class CollapsedKeyboardBar: UIView {
             effect = UIBlurEffect(style: .systemMaterial)
         }
         let view = UIVisualEffectView(effect: effect)
+        view.backgroundColor = .glassBacking
         view.clipsToBounds = true
         return view
     }()
@@ -1457,6 +1469,8 @@ class CollapsedKeyboardBar: UIView {
 
         // Container - pill shape
         containerEffectView.layer.cornerRadius = barHeight / 2
+        containerEffectView.layer.borderWidth = 1
+        containerEffectView.layer.borderColor = UIColor.glassRim.resolvedColor(with: traitCollection).cgColor
         containerEffectView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(containerEffectView)
 
@@ -1592,7 +1606,8 @@ class ArrowNippleView: UIView {
         layer.cornerRadius = 8
 
         // Center nipple - more visible
-        nipple.backgroundColor = .secondaryLabel
+        // Light, the grey key's circle needs the full text color to stand out
+        nipple.backgroundColor = UIColor { $0.userInterfaceStyle == .light ? .label : .secondaryLabel }
         nipple.layer.cornerRadius = 8
         nipple.translatesAutoresizingMaskIntoConstraints = false
         addSubview(nipple)

@@ -173,7 +173,7 @@ struct PillMenu<Label: View>: View {
 
     private var separator: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.12))
+            .fill(Color.primary.opacity(0.12))
             .frame(height: 0.5)
             .padding(.horizontal, 20)
     }
@@ -294,7 +294,7 @@ private struct MenuRowStyle: ButtonStyle {
         configuration.label
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(highlighted || configuration.isPressed ? 0.14 : 0))
+                    .fill(Color.primary.opacity(highlighted || configuration.isPressed ? 0.14 : 0))
             )
     }
 }

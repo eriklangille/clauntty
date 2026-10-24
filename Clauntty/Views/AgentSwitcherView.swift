@@ -157,6 +157,10 @@ struct AgentSwitcherView: View {
             ?? Color(red: 40 / 255, green: 44 / 255, blue: 52 / 255)
     }
 
+    private var isLightTheme: Bool {
+        themeManager.theme(withId: ghosttyApp.currentThemeId)?.isLight == true
+    }
+
     private let snap = Animation.spring(response: 0.3, dampingFraction: 0.86)
 
     var body: some View {
@@ -475,7 +479,9 @@ struct AgentSwitcherView: View {
             }
         }
         .background(background.ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        // Light or dark as the terminal's theme is, so the text, the glass and the keyboard
+        // read on it
+        .preferredColorScheme(isLightTheme ? .light : .dark)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
             guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
             // How far the keyboard reaches up from the bottom of the screen
@@ -1712,11 +1718,11 @@ struct SwitcherWindow: View {
     private var borderColor: Color {
         if isFullscreen { return .clear }
         // Where the scrub would land, whiter than the window typed into
-        if isScrubbed { return Color.white.opacity(0.6) }
+        if isScrubbed { return Color.primary.opacity(0.6) }
         if status == .blocked { return Color(uiColor: PaneStatus.blocked.tint).opacity(0.55) }
         // The voice agent's eyes are here: a little whiter
-        if voice != nil { return Color.white.opacity(isFocused ? 0.5 : 0.22) }
-        return Color.white.opacity(isFocused ? 0.35 : 0.08)
+        if voice != nil { return Color.primary.opacity(isFocused ? 0.5 : 0.22) }
+        return Color.primary.opacity(isFocused ? 0.35 : 0.08)
     }
 }
 
@@ -1769,7 +1775,7 @@ struct WebWindow: View {
         .clipShape(RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous)
-                .strokeBorder(isFullscreen ? Color.clear : Color.white.opacity(0.08), lineWidth: 1)
+                .strokeBorder(isFullscreen ? Color.clear : Color.primary.opacity(0.08), lineWidth: 1)
         )
         .overlay(alignment: .top) { header }
         .offset(y: pullDown)
@@ -2129,7 +2135,7 @@ private struct PaneDots: View {
                 }
                 if panes.isEmpty {
                     Capsule()
-                        .fill(Color.white.opacity(activeWeb == nil ? 0.9 : 0.3))
+                        .fill(Color.primary.opacity(activeWeb == nil ? 0.9 : 0.3))
                         .frame(width: activeWeb == nil ? 8 : 4, height: 4)
                 }
             }
@@ -2138,7 +2144,7 @@ private struct PaneDots: View {
                     ForEach(0..<webPanes, id: \.self) { index in
                         let shown = activeWeb == index
                         Capsule()
-                            .strokeBorder(Color.white.opacity(shown ? 0.9 : 0.45), lineWidth: 1)
+                            .strokeBorder(Color.primary.opacity(shown ? 0.9 : 0.45), lineWidth: 1)
                             .frame(width: shown ? 9 : 5, height: 5)
                     }
                 }
@@ -2148,10 +2154,10 @@ private struct PaneDots: View {
 
     /// Like the tab bar: other panes that need you or finished show their color
     private func color(_ pane: TabPane, active: Bool) -> Color {
-        if active { return Color.white.opacity(0.9) }
+        if active { return Color.primary.opacity(0.9) }
         switch pane.status {
         case .blocked, .done: return Color(uiColor: pane.status.tint)
-        default: return Color.white.opacity(0.3)
+        default: return Color.primary.opacity(0.3)
         }
     }
 }
@@ -2190,7 +2196,7 @@ private struct StatusRail: View {
             ForEach(Array(statuses.enumerated()), id: \.offset) { i, status in
                 ZStack {
                     if i == current {
-                        Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
+                        Circle().strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
                             .frame(width: 14, height: 14)
                     }
                     if i == looking {
@@ -2199,7 +2205,7 @@ private struct StatusRail: View {
                     }
                     Group {
                         if status == .none || status == .idle {
-                            Circle().fill(Color.white.opacity(0.35)).frame(width: 6, height: 6)
+                            Circle().fill(Color.primary.opacity(0.35)).frame(width: 6, height: 6)
                         } else {
                             StatusGlyph(status: status).frame(width: 8, height: 8)
                         }
@@ -2211,23 +2217,23 @@ private struct StatusRail: View {
             ForEach(0..<webSlots, id: \.self) { i in
                 ZStack {
                     if current == statuses.count + i {
-                        Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
+                        Circle().strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
                             .frame(width: 14, height: 14)
                     }
                     Image(systemName: "globe")
                         .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Color.white.opacity(0.6))
+                        .foregroundStyle(Color.primary.opacity(0.6))
                 }
                 .frame(width: 24, height: Self.pitch)
             }
             ZStack {
                 if current == statuses.count + webSlots {
-                    Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
+                    Circle().strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
                         .frame(width: 14, height: 14)
                 }
                 Image(systemName: "plus")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.6))
+                    .foregroundStyle(Color.primary.opacity(0.6))
             }
             .frame(width: 24, height: Self.pitch)
         }
@@ -2308,10 +2314,10 @@ private struct EdgeDots: View {
     }
 
     private func color(_ status: PaneStatus, isCurrent: Bool) -> Color {
-        if isCurrent { return .white }
+        if isCurrent { return .primary }
         switch status {
         case .blocked, .done, .working: return Color(uiColor: status.tint)
-        default: return Color.white.opacity(0.35)
+        default: return Color.primary.opacity(0.35)
         }
     }
 
@@ -2402,12 +2408,34 @@ private struct PillGlass: ViewModifier {
     }
 }
 
+extension UIColor {
+    /// Behind the glass, which shows what's under it: the keyboard's grey, so the key bar
+    /// sits on the keyboard as part of it, and the pills and buttons match it over any theme
+    /// (clear, they took the theme's color). The agent view, and its keyboard, are light on
+    /// a light theme and dark otherwise; the light keyboard is a little blue.
+    static let glassBacking = UIColor { traits in
+        traits.userInterfaceStyle == .light ? UIColor(red: 0.845, green: 0.85, blue: 0.875, alpha: 0.8) : UIColor(white: 0.11, alpha: 0.8)
+    }
+
+    /// The key bar's edge, crisp as the keyboard's (its backing covers the glass's own)
+    static let glassRim = UIColor { traits in
+        traits.userInterfaceStyle == .light ? UIColor(white: 0, alpha: 0.08) : UIColor(white: 1, alpha: 0.1)
+    }
+
+    /// Inside SwiftUI's glass, under what it holds: its color then doesn't depend on what's
+    /// behind (the glass adapts to that, darker over white), only its edge is the glass's
+    static let glassFill = UIColor { traits in
+        traits.userInterfaceStyle == .light ? UIColor(red: 0.886, green: 0.89, blue: 0.91, alpha: 0.92) : UIColor(red: 0.133, green: 0.137, blue: 0.149, alpha: 0.92)
+    }
+}
+
 extension View {
-    /// Liquid glass where the system has it, a material otherwise
+    /// Liquid glass where the system has it, a material otherwise, in the keyboard's grey
     @ViewBuilder
     func glass<S: Shape>(in shape: S) -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: shape)
+            self.background(shape.fill(Color(uiColor: .glassFill)))
+                .glassEffect(.regular, in: shape)
         } else {
             self.background(shape.fill(.ultraThinMaterial))
         }
