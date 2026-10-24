@@ -570,6 +570,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         self.surface = surface
 
+        // The size is the user's (a pinch, remembered), not the config's: set it as a pinch
+        // does, so Ghostty keeps it when the app's config changes (a new theme). Created at
+        // it, Ghostty took it for the config's and reset it to the default.
+        let fontAction = "set_font_size:\(fontSize)"
+        terminalIOQueue.async {
+            _ = ghostty_surface_binding_action(surface, fontAction, UInt(fontAction.utf8.count))
+        }
+
         // Ghostty's Metal renderer adds its IOSurfaceLayer to our layer during
         // ghostty_surface_new. Track it so we can size it (see sizeDidChange).
         adoptGhosttySublayer()
