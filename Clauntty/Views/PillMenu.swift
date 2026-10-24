@@ -39,6 +39,8 @@ struct PillMenu<Label: View>: View {
     var trailing = false
     /// Closed, it draws nothing (its label hides itself too): a card's, to hold
     var hidesClosed = false
+    /// A hold opens it (an overview card's opens under the card instead)
+    var holds = true
     let onOpen: () -> Void
     let onClose: () -> Void
     let onTap: () -> Void
@@ -52,9 +54,7 @@ struct PillMenu<Label: View>: View {
     @State private var heldOpenAt = Date.distantPast
     @State private var rowFrames: [String: CGRect] = [:]
 
-    static var space: String { "pillMenu" }
-    private static var rowHeight: CGFloat { 44 }
-    private static var actionsHeight: CGFloat { 50 }
+    static var space: String { menuSpace }
     /// How far the open panel reaches past the pill, up and to the left: to the corner of
     /// the window around it
     private static var margin: CGFloat { 8 }
@@ -73,7 +73,7 @@ struct PillMenu<Label: View>: View {
                     onTap()
                 }
             }
-            .gesture(hold)
+            .gesture(hold, including: holds ? .all : .subviews)
             .background(alignment: .topLeading) {
                 // The pill's glass, which is the panel's: one shape that grows
                 GeometryReader { g in
@@ -120,11 +120,136 @@ struct PillMenu<Label: View>: View {
     }
 
     private func content(_ menu: WindowMenu, pill: CGSize, lead: CGFloat) -> some View {
-        let rows = CGFloat(menu.sections.reduce(0) { $0 + $1.count }) * Self.rowHeight
-            + CGFloat(max(0, menu.sections.count - 1)) * 9
-        let fixed = pill.height + (menu.caption == nil ? 0 : 22) + Self.actionsHeight + 22
-        let fits = rows <= room - fixed
-        return VStack(alignment: .leading, spacing: 0) {
+        MenuItems(menu: menu, lead: lead, room: room - pill.height, highlighted: highlighted, onChoose: choose)
+    }
+
+    private func choose(_ item: WindowMenu.Item) {
+        guard !item.isDisabled else { return }
+        highlighted = nil
+        onClose()
+        item.perform()
+    }
+
+    /// Hold the pill: the menu opens, the finger slides to a row, letting go there picks
+    /// it (anywhere else leaves the menu open)
+    private var hold: some Gesture {
+        LongPressGesture(minimumDuration: 0.3)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space)))
+            .onChanged { value in
+                guard case .second(true, let drag) = value else { return }
+                if !isOpen {
+                    Haptic.lift.play()
+                    heldOpenAt = Date()
+                    onOpen()
+                }
+                guard let drag else { return }
+                let id = rowFrames.first { $0.value.contains(drag.location) }?.key
+                if id != highlighted {
+                    if id != nil { Haptic.scrub.play() }
+                    highlighted = id
+                }
+            }
+            .onEnded { value in
+                defer { highlighted = nil }
+                guard case .second(true, let drag?) = value,
+                      let id = rowFrames.first(where: { $0.value.contains(drag.location) })?.key,
+                      let item = menu.flatMap({ menu in (menu.actions + menu.sections.flatMap { $0 }).first { $0.id == id } })
+                else { return }
+                choose(item)
+            }
+    }
+}
+
+/// An overview card held: it lifts, everything else dims, and its menu opens under it (over
+/// it, near the bottom), as an app icon's on the home screen
+struct CardMenuHost: ViewModifier {
+    let isOn: Bool
+    let menu: WindowMenu?
+    let width: CGFloat
+    let height: CGFloat
+    /// How far the menu can reach down from the card's bottom, and up from its top
+    let room: CGFloat
+    let above: CGFloat
+    let onClose: () -> Void
+
+    private static let gap: CGFloat = 8
+
+    func body(content: Content) -> some View {
+        let menuHeight = menu.map(MenuItems.height) ?? 0
+        let below = menuHeight + Self.gap <= room || room >= above
+        let maxHeight = (below ? room : above) - Self.gap
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        content
+            .scaleEffect(isOn ? 1.02 : 1)
+            .shadow(color: .black.opacity(isOn ? 0.35 : 0), radius: 14, y: 6)
+            .background {
+                if isOn {
+                    // Everything else, dimmed; a tap there closes
+                    Color.black.opacity(0.3)
+                        .frame(width: 4000, height: 4000)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: onClose)
+                        .transition(.opacity)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if isOn, let menu {
+                    // The pill's menu without the pill: the card shows what it would
+                    MenuItems(menu: menu, lead: 8, room: maxHeight) { item in
+                        onClose()
+                        item.perform()
+                    }
+                    .padding(.top, 4)
+                    .frame(width: min(width, 330))
+                    .clipShape(shape)
+                    .glass(in: shape)
+                    // Under the card, or over it: its rows are a fixed height
+                        .offset(y: below ? height + Self.gap : -(min(menuHeight + 4, maxHeight) + Self.gap))
+                        .transition(.scale(scale: 0.6, anchor: below ? .topLeading : .bottomLeading)
+                            .combined(with: .opacity))
+                }
+            }
+    }
+}
+
+/// Where a menu's rows are, for a holding finger to find
+private let menuSpace = "pillMenu"
+
+/// A window's menu, below the pill or a card: an icon row of its actions, then its panes'
+/// rows, scrolling past `room`
+struct MenuItems: View {
+    let menu: WindowMenu
+    /// How far in the rows' icons are from the panel's edge: under the pill's glyph
+    let lead: CGFloat
+    /// How tall it can be
+    let room: CGFloat
+    /// The row under a holding finger
+    var highlighted: String? = nil
+    let onChoose: (WindowMenu.Item) -> Void
+
+    static let rowHeight: CGFloat = 44
+    private static let actionsHeight: CGFloat = 50
+    private static let captionHeight: CGFloat = 22
+    private static let sectionGap: CGFloat = 9
+    private static let bottomPad: CGFloat = 10
+
+    /// Its height, all its rows showing
+    static func height(_ menu: WindowMenu) -> CGFloat {
+        fixedHeight(menu) + rowsHeight(menu)
+    }
+
+    private static func fixedHeight(_ menu: WindowMenu) -> CGFloat {
+        (menu.caption == nil ? 0 : captionHeight) + actionsHeight + 4 + (menu.sections.isEmpty ? 0 : 8) + bottomPad
+    }
+
+    private static func rowsHeight(_ menu: WindowMenu) -> CGFloat {
+        CGFloat(menu.sections.reduce(0) { $0 + $1.count }) * rowHeight
+            + CGFloat(max(0, menu.sections.count - 1)) * sectionGap
+    }
+
+    var body: some View {
+        let rowsRoom = room - Self.fixedHeight(menu)
+        VStack(alignment: .leading, spacing: 0) {
             if let caption = menu.caption {
                 Text(caption)
                     .font(.system(size: 12))
@@ -133,7 +258,7 @@ struct PillMenu<Label: View>: View {
                     .truncationMode(.middle)
                     .padding(.leading, lead + 12)
                     .padding(.trailing, 20)
-                    .frame(height: 22)
+                    .frame(height: Self.captionHeight)
             }
             HStack(spacing: 0) {
                 ForEach(menu.actions) { item in
@@ -145,27 +270,27 @@ struct PillMenu<Label: View>: View {
             .frame(height: Self.actionsHeight + 4)
             if !menu.sections.isEmpty {
                 separator.padding(.top, 4)
-                if fits {
-                    sections(menu.sections, lead: lead).padding(.top, 4)
+                if Self.rowsHeight(menu) <= rowsRoom {
+                    sections.padding(.top, 4)
                 } else {
-                    ScrollView { sections(menu.sections, lead: lead).padding(.top, 4) }
+                    ScrollView { sections.padding(.top, 4) }
                         // At least a row (landscape above the keyboard has room for
                         // about that)
-                        .frame(height: max(Self.rowHeight, room - fixed))
+                        .frame(height: max(Self.rowHeight, rowsRoom))
                 }
             }
         }
-        .padding(.bottom, 10)
+        .padding(.bottom, Self.bottomPad)
     }
 
-    private func sections(_ sections: [[WindowMenu.Item]], lead: CGFloat) -> some View {
+    private var sections: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
+            ForEach(Array(menu.sections.enumerated()), id: \.offset) { index, section in
                 if index > 0 {
                     separator.padding(.vertical, 4)
                 }
                 ForEach(section) { item in
-                    row(item, lead: lead)
+                    row(item)
                 }
             }
         }
@@ -179,7 +304,7 @@ struct PillMenu<Label: View>: View {
     }
 
     private func actionButton(_ item: WindowMenu.Item) -> some View {
-        Button { choose(item) } label: {
+        Button { onChoose(item) } label: {
             Image(systemName: item.icon)
                 .font(.system(size: 19, weight: .regular))
                 .foregroundStyle(item.isDestructive ? Color.red : Color.primary)
@@ -195,8 +320,8 @@ struct PillMenu<Label: View>: View {
 
     /// A row's icon in the pill's glyph column: `lead` in from the panel's edge, as the
     /// pill is
-    private func row(_ item: WindowMenu.Item, lead: CGFloat) -> some View {
-        Button { choose(item) } label: {
+    private func row(_ item: WindowMenu.Item) -> some View {
+        Button { onChoose(item) } label: {
             // The icons in the pill's glyph column, the current one checked at the end
             HStack(spacing: 10) {
                 Image(systemName: item.icon)
@@ -237,44 +362,8 @@ struct PillMenu<Label: View>: View {
     private func frameReader(_ item: WindowMenu.Item) -> some View {
         GeometryReader { g in
             Color.clear.preference(key: RowFrames.self,
-                                   value: item.isDisabled ? [:] : [item.id: g.frame(in: .named(Self.space))])
+                                   value: item.isDisabled ? [:] : [item.id: g.frame(in: .named(menuSpace))])
         }
-    }
-
-    private func choose(_ item: WindowMenu.Item) {
-        guard !item.isDisabled else { return }
-        highlighted = nil
-        onClose()
-        item.perform()
-    }
-
-    /// Hold the pill: the menu opens, the finger slides to a row, letting go there picks
-    /// it (anywhere else leaves the menu open)
-    private var hold: some Gesture {
-        LongPressGesture(minimumDuration: 0.3)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space)))
-            .onChanged { value in
-                guard case .second(true, let drag) = value else { return }
-                if !isOpen {
-                    Haptic.lift.play()
-                    heldOpenAt = Date()
-                    onOpen()
-                }
-                guard let drag else { return }
-                let id = rowFrames.first { $0.value.contains(drag.location) }?.key
-                if id != highlighted {
-                    if id != nil { Haptic.scrub.play() }
-                    highlighted = id
-                }
-            }
-            .onEnded { value in
-                defer { highlighted = nil }
-                guard case .second(true, let drag?) = value,
-                      let id = rowFrames.first(where: { $0.value.contains(drag.location) })?.key,
-                      let item = menu.flatMap({ menu in (menu.actions + menu.sections.flatMap { $0 }).first { $0.id == id } })
-                else { return }
-                choose(item)
-            }
     }
 }
 

@@ -211,7 +211,8 @@ struct AgentSwitcherView: View {
                 ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                     let hidden = fullscreen && focused != item.id
                     window(for: item.session, tabId: item.id, index: i, spec: specs[i], size: size,
-                           menuRoom: menuRoom(top: tops[i] + offset, size: size)) { phase in
+                           menuRoom: menuRoom(top: tops[i] + offset, size: size),
+                           menuAbove: menuAbove(top: tops[i] + offset)) { phase in
                         move(item.id, phase, among: items.map(\.id), ids: ids, tops: tops, heights: laidOut, maxScroll: maxScroll)
                     }
                         .frame(height: hidden ? 0 : specs[i].height, alignment: .top)
@@ -236,6 +237,7 @@ struct AgentSwitcherView: View {
                         menu: menuWindow == web.id ? WindowMenu(caption: web.urlDisplayString, actions: webActions(web)) : nil,
                         isMenuOpen: menuWindow == web.id,
                         menuRoom: menuRoom(top: tops[items.count + i] + offset, size: size),
+                        menuAbove: menuAbove(top: tops[items.count + i] + offset),
                         onMenu: { open in setMenu(open ? web.id : nil) },
                         onOpen: { openWeb(web) },
                         onExit: { exitWeb() },
@@ -776,7 +778,7 @@ struct AgentSwitcherView: View {
 
     /// Windows move in the overview, one at a time
     private func canMove(_ id: UUID) -> Bool {
-        focused == nil && !fullscreen && menuWindow == nil && (moving == nil || moving == id)
+        focused == nil && !fullscreen && (menuWindow == nil || menuWindow == id) && (moving == nil || moving == id)
     }
 
     /// The moving window's top in the layout: under the finger
@@ -789,6 +791,8 @@ struct AgentSwitcherView: View {
         switch phase {
         case .lift:
             guard canMove(id), moving == nil, let i = ids.firstIndex(of: id) else { return }
+            // Its menu, open from the hold, goes as it moves
+            if menuWindow == id { setMenu(nil) }
             Haptic.lift.play()
             // It stays where it is until the finger moves
             moveGrab = 0
@@ -903,7 +907,7 @@ struct AgentSwitcherView: View {
     }
 
     private func window(for session: Session, tabId: UUID, index i: Int, spec: WindowSpec, size: CGSize,
-                        menuRoom: CGFloat, onMove: @escaping (WindowMove) -> Void) -> some View {
+                        menuRoom: CGFloat, menuAbove: CGFloat, onMove: @escaping (WindowMove) -> Void) -> some View {
         let info = sessionManager.panes(for: session)
         let panes = info?.panes ?? []
         let activeIndex = info?.activeIndex ?? 0
@@ -932,6 +936,7 @@ struct AgentSwitcherView: View {
             menu: menuWindow == tabId ? windowMenu(for: session, tabId: tabId, panes: panes, activeIndex: activeIndex) : nil,
             isMenuOpen: menuWindow == tabId,
             menuRoom: menuRoom,
+            menuAbove: menuAbove,
             onMenu: { open in
                 setMenu(open ? tabId : nil)
                 if open { Task { await sessionManager.refreshWorkspaces(for: session.connectionConfig) } }
@@ -1063,6 +1068,11 @@ struct AgentSwitcherView: View {
 
     /// How far a window's open menu can reach down from its top: to the key bar while
     /// typing (fullscreen, while the keyboard's up), else the screen's bottom
+    /// The overview: how far a card's menu can reach up from its top, below the header
+    private func menuAbove(top: CGFloat) -> CGFloat {
+        top - Self.topPad - Self.headerHeight
+    }
+
     private func menuRoom(top: CGFloat, size: CGSize) -> CGFloat {
         let bottom: CGFloat = {
             guard focused != nil else { return size.height - 12 }
@@ -1273,11 +1283,13 @@ struct SwitcherWindow: View {
     let isMenuOpen: Bool
     /// How far the menu can reach down from the window's top
     let menuRoom: CGFloat
+    /// And up from it: a card's, in the overview
+    var menuAbove: CGFloat = 0
     let onMenu: (Bool) -> Void
     let onTap: () -> Void
     let onSwipe: (Int) -> Void
     let onFullscreen: () -> Void
-    /// In the overview: held, it moves
+    /// In the overview: held, its menu opens below it; dragged on, it moves
     let canMove: Bool
     let onMove: (WindowMove) -> Void
     /// Images `clauntty show` sent from this window's panes, in its corner
@@ -1307,6 +1319,7 @@ struct SwitcherWindow: View {
     /// The finger down is a hold: on the phone a hold under a second or so ends as a tap
     /// too, which closed the menu it had just opened
     @State private var held = false
+    @State private var menuOpenedAt = Date.distantPast
 
     static let bottomPad: CGFloat = 8
     /// A collapsed window: two lines, so many fit
@@ -1566,6 +1579,11 @@ struct SwitcherWindow: View {
                     // TUI, else paste (a page goes fullscreen)
                     .onTapGesture { location in
                         guard !held else { return }
+                        // The card's menu open: the tap that ends the hold, or one to close it
+                        if hasCardMenu, isMenuOpen {
+                            if Date().timeIntervalSince(menuOpenedAt) > 1 { onMenu(false) }
+                            return
+                        }
                         guard isFocused, web == nil else { return onTap() }
                         session.tapTerminal?(terminalPoint(location, placement))
                     }
@@ -1585,7 +1603,7 @@ struct SwitcherWindow: View {
                         including: isFocused && web == nil ? .all : .subviews
                     )
                     .simultaneousGesture(swipeGesture)
-                    .modifier(MoveHold(isOn: canMove, onMove: onMove))
+                    .modifier(MoveHold(isOn: canMove, onHold: { onMenu(true) }, onMove: onMove))
             }
         }
         .frame(width: windowWidth, height: windowHeight)
@@ -1598,8 +1616,14 @@ struct SwitcherWindow: View {
         )
         .overlay { CardEdge().opacity(hasCardEdge ? 1 : 0) }
         .overlay(alignment: .top) { header }
+        .modifier(CardMenuHost(isOn: hasCardMenu && isMenuOpen, menu: menu, width: windowWidth, height: windowHeight,
+                               room: menuRoom - windowHeight, above: menuAbove, onClose: { onMenu(false) }))
+        .onChange(of: isMenuOpen) { _, open in if open { menuOpenedAt = Date() } }
         .offset(y: pullDown)
     }
+
+    /// The overview's cards: held, their menu opens under them, as an app icon's
+    private var hasCardMenu: Bool { isCard && isOverview }
 
     private var header: some View {
         // Top-aligned: the images' thumbnail is taller than the pill
@@ -1626,16 +1650,19 @@ struct SwitcherWindow: View {
         // Typing into it, the pill is the tab: a tap opens its menu. Any window's opens
         // when held.
         // On a card it's there to hold (its menu) but unseen until the menu opens
-        PillMenu(isOpen: isMenuOpen, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
-                 room: menuRoom - 8, trailing: floatsPill, hidesClosed: isCard,
+        PillMenu(isOpen: isMenuOpen && !hasCardMenu, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
+                 room: menuRoom - 8, trailing: floatsPill, hidesClosed: isCard, holds: !hasCardMenu,
                  onOpen: { onMenu(true) }, onClose: { onMenu(false) },
                  onTap: { if !isFullscreen { onTap() } }) {
             PanePill(title: title, workspace: workspace, status: status, panes: panes, activeIndex: activeIndex,
                      web: web, webPanes: webPanes, activeWeb: activeWeb, glass: false, eyes: voice != nil && !isCard)
-                .opacity(isCard && !isMenuOpen ? 0 : 1)
+                .opacity(isCard && !(isMenuOpen && !hasCardMenu) ? 0 : 1)
         }
         .gesture(isFullscreen ? pullGesture : nil)
         .simultaneousGesture(isFullscreen ? nil : swipeGesture)
+        // An overview card's is unseen: a hold on it is the card's (long titles reach
+        // across most of it)
+        .allowsHitTesting(!hasCardMenu)
     }
 
     @ViewBuilder private var thumbnail: some View {
@@ -1753,6 +1780,7 @@ struct WebWindow: View {
     let menu: WindowMenu?
     let isMenuOpen: Bool
     let menuRoom: CGFloat
+    var menuAbove: CGFloat = 0
     let onMenu: (Bool) -> Void
     let onOpen: () -> Void
     let onExit: () -> Void
@@ -1762,6 +1790,10 @@ struct WebWindow: View {
     var isOverview = false
 
     @State private var pullDown: CGFloat = 0
+    @State private var menuOpenedAt = Date.distantPast
+
+    /// In the overview, held, its menu opens under it, as a terminal card's
+    private var hasCardMenu: Bool { isOverview && !isFullscreen }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -1776,8 +1808,14 @@ struct WebWindow: View {
             if !isFullscreen {
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture(perform: onOpen)
-                    .modifier(MoveHold(isOn: canMove, onMove: onMove))
+                    .onTapGesture {
+                        if hasCardMenu, isMenuOpen {
+                            if Date().timeIntervalSince(menuOpenedAt) > 1 { onMenu(false) }
+                            return
+                        }
+                        onOpen()
+                    }
+                    .modifier(MoveHold(isOn: canMove, onHold: { onMenu(true) }, onMove: onMove))
             }
         }
         .frame(width: windowWidth, height: windowHeight)
@@ -1789,6 +1827,9 @@ struct WebWindow: View {
         )
         .overlay { CardEdge().opacity(isOverview ? 1 : 0) }
         .overlay(alignment: .top) { header }
+        .modifier(CardMenuHost(isOn: hasCardMenu && isMenuOpen, menu: menu, width: windowWidth, height: windowHeight,
+                               room: menuRoom - windowHeight, above: menuAbove, onClose: { onMenu(false) }))
+        .onChange(of: isMenuOpen) { _, open in if open { menuOpenedAt = Date() } }
         .offset(y: pullDown)
         // A restored tab reconnects when it's shown (in tabs, when switched to): here
         // it's on screen
@@ -1797,8 +1838,9 @@ struct WebWindow: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            PillMenu(isOpen: isMenuOpen, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
-                     room: menuRoom - 8, onOpen: { onMenu(true) }, onClose: { onMenu(false) }, onTap: onOpen) {
+            PillMenu(isOpen: isMenuOpen && !hasCardMenu, menu: menu, tapOpens: isFocused, maxWidth: windowWidth - 16,
+                     room: menuRoom - 8, holds: !hasCardMenu,
+                     onOpen: { onMenu(true) }, onClose: { onMenu(false) }, onTap: onOpen) {
                 HStack(spacing: 7) {
                     WebPillLabel(webTab: webTab)
                 }
@@ -1806,6 +1848,8 @@ struct WebWindow: View {
                 .padding(.vertical, 8)
             }
             .gesture(isFullscreen ? pullGesture : nil)
+            // In the overview a hold on it is the card's
+            .allowsHitTesting(!hasCardMenu)
             Spacer(minLength: 0)
             if isFullscreen && !isMenuOpen {
                 Button(action: onExit) {
@@ -1940,15 +1984,21 @@ enum WindowMove {
     case drop
 }
 
-/// Hold a window to move it. Reports where the finger is on screen. (A drag tracking the
-/// finger from its touch, beside the hold, kept the hold from ever starting.)
+/// Hold a window for its menu (`onHold`); drag on from there to move it. Reports where the
+/// finger is on screen. (A drag tracking the finger from its touch, beside the hold, kept
+/// the hold from ever starting.)
 private struct MoveHold: ViewModifier {
     let isOn: Bool
+    let onHold: () -> Void
     let onMove: (WindowMove) -> Void
 
+    @State private var opened = false
     @State private var lifted = false
     /// Back to false when the finger lifts or the touch is cancelled
     @GestureState private var held = false
+
+    /// How far the finger goes, held, before the window moves instead
+    private static let slop: CGFloat = 8
 
     func body(content: Content) -> some View {
         content
@@ -1960,16 +2010,25 @@ private struct MoveHold: ViewModifier {
                     }
                     .onChanged { value in
                         guard case .second(true, let drag) = value else { return }
+                        if !opened {
+                            opened = true
+                            Haptic.lift.play()
+                            onHold()
+                        }
+                        guard let drag else { return }
                         if !lifted {
+                            guard hypot(drag.translation.width, drag.translation.height) > Self.slop else { return }
                             lifted = true
                             onMove(.lift)
                         }
-                        if let drag { onMove(.drag(y: drag.location.y)) }
+                        onMove(.drag(y: drag.location.y))
                     },
                 including: isOn ? .all : .subviews
             )
             .onChange(of: held) { _, held in
-                guard !held, lifted else { return }
+                guard !held else { return }
+                opened = false
+                guard lifted else { return }
                 lifted = false
                 onMove(.drop)
             }
