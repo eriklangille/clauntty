@@ -876,8 +876,11 @@ class KeyboardAccessoryView: UIView {
 
     // MARK: - Dismiss Gestures
 
+    private let barPan = UIPanGestureRecognizer()
+
     private func setupDismissGestures() {
-        // All keyboard show/hide gestures are on the drag handle only
+        // Swipes and taps on the drag handle; a drag anywhere on the bar but the nipple
+        // and the mic
 
         // Swipe down on drag handle = instant dismiss
         let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeToDismiss))
@@ -889,10 +892,11 @@ class KeyboardAccessoryView: UIView {
         swipeUp.direction = .up
         dragHandle.addGestureRecognizer(swipeUp)
 
-        // Drag/pan on drag handle = interactive dismiss/show (like Find My)
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture))
-        pan.delegate = self
-        dragHandle.addGestureRecognizer(pan)
+        // Drag up or down on the bar = interactive dismiss/show (like Find My). Once it
+        // moves, the key under the finger is cancelled.
+        barPan.addTarget(self, action: #selector(handlePanGesture))
+        barPan.delegate = self
+        containerEffectView.addGestureRecognizer(barPan)
 
         // Tap on drag handle to toggle keyboard
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleDragHandleTap))
@@ -1401,6 +1405,14 @@ extension KeyboardAccessoryView: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         // Allow pan gesture to work with other gestures
         return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer === barPan, let view = touch.view else { return true }
+        // The transcript scrolls: only its handle closes it
+        if isTranscriptOpen { return view.isDescendant(of: dragHandle) }
+        // The nipple drags for arrows, and the mic holds to talk
+        return !view.isDescendant(of: nippleContainerView) && !view.isDescendant(of: micButton)
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {

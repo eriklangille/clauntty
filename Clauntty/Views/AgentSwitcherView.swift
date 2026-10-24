@@ -73,9 +73,6 @@ struct AgentSwitcherView: View {
     @State private var landscape = false
     /// Fullscreen because typing in landscape: back to the window in portrait
     @State private var landscapeFull = false
-    /// When the screen last rotated: the keyboard hides and shows again as it does, which
-    /// isn't putting it away
-    @State private var rotatedAt = Date.distantPast
     /// The window held in the overview to move it: it follows the finger, the windows
     /// shrink so most fit, and the others make room
     @State private var moving: UUID?
@@ -128,11 +125,9 @@ struct AgentSwitcherView: View {
 
     /// Above the first window, below the status bar
     static let topPad: CGFloat = 8
-    /// Settings and voice, above the first window: in the overview its top, and typing into
-    /// the first window, the band where a window above would peek
+    /// Settings, voice and a new tab, above the first window: in the overview pinned to its
+    /// top, and typing into the first window, the band where a window above would peek
     static let headerHeight: CGFloat = 52
-    /// A new tab, after the windows: the pager's last stop while typing
-    static let controlsHeight: CGFloat = 56
 
     /// How much of the window above stays in view, below the status bar, to tap: its
     /// whole card
@@ -195,11 +190,8 @@ struct AgentSwitcherView: View {
             let tops = Self.tops(laidOut, spacing: spacing).map { $0 + lead }
             let focusedIndex = ids.firstIndex { $0 == focused }
             let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, ids.count - 1))
-            // Typing, paged past the last window: on the controls
-            let atControls = focused != nil && !fullscreen && index >= ids.count
-            let controlsTop = lead + laidOut.reduce(0, +) + spacing * CGFloat(ids.count)
-            let contentHeight = controlsTop + (fullscreen ? 0 : Self.controlsHeight)
-            // The controls stop above the key bar
+            let contentHeight = lead + laidOut.reduce(0, +) + spacing * CGFloat(ids.count)
+            // The last window stops above the key bar
             let maxScroll = max(0, contentHeight - barTop(size) + Self.spacing)
             let offset: CGFloat = {
                 if focused == nil && !fullscreen {
@@ -208,9 +200,6 @@ struct AgentSwitcherView: View {
                     let banded = raw < 0 ? raw * 0.3 : (raw > maxScroll ? maxScroll + (raw - maxScroll) * 0.3 : raw)
                     return -banded
                 }
-                // The controls sit above the key bar (clear of its fade), the last window's
-                // end above them
-                if atControls { return barTop(size) - 28 - Self.controlsHeight - controlsTop + drag }
                 let anchor: CGFloat = fullscreen ? 0 : Self.anchor(for: current)
                 return (tops.indices.contains(current) ? anchor - tops[current] : 0) + (focused == nil ? 0 : drag)
             }()
@@ -263,16 +252,27 @@ struct AgentSwitcherView: View {
                     .opacity(hidden ? 0 : 1)
                     .allowsHitTesting(!hidden)
                 }
-                if !fullscreen {
-                    controls
-                        .frame(height: Self.controlsHeight)
-                }
             }
             .padding(.top, lead)
             .overlay(alignment: .top) {
                 if !fullscreen {
                     header
                         .padding(.top, Self.topPad)
+                        // The windows fade out under it and the status bar
+                        .background(alignment: .top) {
+                            LinearGradient(stops: [.init(color: background, location: 0),
+                                                   .init(color: background, location: 0.6),
+                                                   .init(color: background.opacity(0), location: 1)],
+                                           startPoint: .top, endPoint: .bottom)
+                                .padding(.horizontal, -10)
+                                .padding(.top, -80)
+                                .padding(.bottom, -16)
+                                .opacity(focused == nil ? 1 : 0)
+                                .allowsHitTesting(false)
+                        }
+                        // The overview: pinned to the top as the windows scroll under it
+                        // (pulled down past the top, it comes with them)
+                        .offset(y: focused == nil ? max(0, -offset) : 0)
                 }
             }
             .padding(.leading, fullscreen ? 0 : 10)
@@ -301,14 +301,16 @@ struct AgentSwitcherView: View {
             .simultaneousGesture(fullscreen ? nil : pager(count: ids.count, heights: laidOut, items: items, loose: loose, maxScroll: maxScroll))
             .overlay(alignment: .trailing) {
                 if focused != nil && !fullscreen {
-                    // A last slot, a plus, for the controls. A voice session: the window the
-                    // agent is looking at has its eyes.
+                    // A voice session: the window the agent is looking at has its eyes
                     StatusRail(statuses: items.map { attentionStatus($0.session) }, webSlots: loose.count,
-                               current: atControls ? ids.count : current, looking: voiceWindow(items)) { target in
-                        scrubbing = true
+                               current: current, looking: voiceWindow(items)) { target in
+                        // On the buttons, no window is lit
+                        scrubbing = target >= 0
                         jump(to: target, count: ids.count)
                     } onScrubEnd: { target in
                         scrubbing = false
+                        // Its top: the overview, with the buttons pinned
+                        if target < 0 { return toOverview() }
                         commitFocus(target, items: items, loose: loose)
                     }
                     .frame(width: Self.railColumn)
@@ -354,7 +356,6 @@ struct AgentSwitcherView: View {
             // Typing in landscape is fullscreen; back in portrait, the window
             .onChange(of: size.width > size.height) { _, wide in
                 landscape = wide
-                rotatedAt = Date()
                 if wide, focused != nil, !fullscreen {
                     landscapeFull = true
                     setFullscreen(true)
@@ -371,9 +372,7 @@ struct AgentSwitcherView: View {
                 }
                 menuWindow = nil
                 // Back to the overview: keep the window where it was on screen
-                if new == nil, old != nil, atControls {
-                    scrollOffset = maxScroll
-                } else if new == nil, old != nil, tops.indices.contains(current) {
+                if new == nil, old != nil, tops.indices.contains(current) {
                     // The first: at the top, its header in view
                     scrollOffset = current == 0 ? 0 : min(max(0, tops[current] - Self.peek), maxScroll)
                 }
@@ -506,18 +505,14 @@ struct AgentSwitcherView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            // The keyboard collapsed: back to the overview of every agent (fullscreen just
-            // gets the room). A moment later, and only if it stayed down: bringing a
-            // hidden keyboard back hides and shows it in quick succession.
+            // The keyboard collapsed: the window stays, down to the key bar (the
+            // rail's buttons go to the overview). A moment later, and only if it stayed
+            // down: bringing a hidden keyboard back hides and shows it in quick succession.
             let shows = keyboardShows
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 guard keyboardShows == shows else { return }
                 withAnimation(.easeOut(duration: 0.25)) {
                     keyboardVisible = false
-                    // (A web page in front puts the keyboard away itself)
-                    if focused != nil && !fullscreen && !focusShowsWeb && Date().timeIntervalSince(rotatedAt) > 1 {
-                        focused = nil
-                    }
                 }
             }
         }
@@ -638,9 +633,9 @@ struct AgentSwitcherView: View {
                 }
                 if dragMode == nil {
                     guard abs(dy) > abs(dx) else { return }
-                    // By how fast it starts. The controls have nothing to scroll.
+                    // By how fast it starts
                     let quick = abs(value.velocity.height) > Self.flickSpeed
-                    dragMode = quick || index >= count ? .page : .scroll
+                    dragMode = quick ? .page : .scroll
                     scrolledY = 0
                     dragStart = value.time
                     peakSpeed = 0
@@ -658,8 +653,7 @@ struct AgentSwitcherView: View {
                     scrollFocused(dy - scrolledY, items: items, loose: loose)
                     scrolledY = dy
                 default:
-                    // The controls are one stop past the last window
-                    let atEdge = (index == 0 && dy > 0) || (index >= count && dy < 0)
+                    let atEdge = (index == 0 && dy > 0) || (index >= count - 1 && dy < 0)
                     drag = atEdge ? dy * 0.3 : dy
                 }
             }
@@ -686,8 +680,8 @@ struct AgentSwitcherView: View {
                     }
                     // A flick after all: put back what it scrolled, then page its way
                     scrollFocused(-scrolledY, items: items, loose: loose)
-                    let current = min(index, count)
-                    let target = min(max(0, current + (dy < 0 ? 1 : -1)), count)
+                    let current = min(index, count - 1)
+                    let target = min(max(0, current + (dy < 0 ? 1 : -1)), count - 1)
                     if target != current { commitFocus(target, items: items, loose: loose) }
                     return
                 }
@@ -705,12 +699,12 @@ struct AgentSwitcherView: View {
                     }
                     return
                 }
-                let current = min(index, count)
-                let threshold = min(120, (heights.indices.contains(current) ? heights[current] : Self.controlsHeight) * 0.3)
+                let current = min(index, count - 1)
+                let threshold = min(120, (heights.indices.contains(current) ? heights[current] : 0) * 0.3)
                 var target = current
                 if dy < -threshold || projected < -200 { target = current + 1 }
                 if dy > threshold || projected > 200 { target = current - 1 }
-                target = min(max(0, target), count)
+                target = min(max(0, target), count - 1)
                 if target == current {
                     withAnimation(snap) { drag = 0 }
                     return
@@ -722,15 +716,6 @@ struct AgentSwitcherView: View {
     /// Type into the window at `target`. A window showing a page, or a web tab's own
     /// window, puts the keyboard away instead.
     private func commitFocus(_ target: Int, items: [(id: UUID, session: Session)], loose: [WebTab]) {
-        // Past the last window: the controls (the keyboard stays with the window)
-        if target == items.count + loose.count {
-            if index != target { Haptic.navigate.play() }
-            withAnimation(snap) {
-                index = target
-                drag = 0
-            }
-            return
-        }
         if target >= items.count, loose.indices.contains(target - items.count) {
             Haptic.navigate.play()
             withAnimation(snap) {
@@ -782,7 +767,7 @@ struct AgentSwitcherView: View {
 
     /// The rail tapped or scrubbed: show that window (focus follows when the finger lifts)
     private func jump(to target: Int, count: Int) {
-        guard target >= 0, target <= count, target != index else { return }
+        guard target >= 0, target < count, target != index else { return }
         Haptic.scrub.play()
         withAnimation(snap) { index = target }
     }
@@ -904,12 +889,6 @@ struct AgentSwitcherView: View {
     private func webShown(in windowId: UUID) -> WebTab? {
         guard let id = shownWeb[windowId] else { return nil }
         return webPanes(of: windowId).first { $0.id == id }
-    }
-
-    /// The focused window is a page, not a terminal: no keyboard
-    private var focusShowsWeb: Bool {
-        guard let focused else { return false }
-        return webShown(in: focused) != nil || webTabs.contains { $0.id == focused }
     }
 
     private func hideKeyboard() {
@@ -1171,21 +1150,23 @@ struct AgentSwitcherView: View {
         }
     }
 
-    // MARK: Controls
+    // MARK: Header
 
-    /// A new tab, after the windows
-    private var controls: some View {
-        GlassCircle(systemName: "plus", size: 44, action: onNewTab)
-            .padding(.top, 6)
-    }
-
-    /// Settings and voice at the left, above the first window
+    /// Settings and voice at the left, a new tab at the right, above the first window
     private var header: some View {
         HStack(spacing: 0) {
             HeaderPill(onSettings: onSettings, onVoice: onVoice)
             Spacer(minLength: 0)
+            GlassCircle(systemName: "plus", size: 40, action: onNewTab)
+                .accessibilityLabel("New Tab")
         }
         .frame(height: 40)
+    }
+
+    /// From typing to the overview, where the header is
+    private func toOverview() {
+        withAnimation(snap) { focused = nil }
+        hideKeyboard()
     }
 
     /// A terminal window's pill menu: the session's actions (a page's, showing one), then
@@ -1311,9 +1292,6 @@ struct SwitcherWindow: View {
     /// Nothing typed into: every card's border is clear to see. Typing, the others' fade
     /// behind the one typed into.
     var isOverview = false
-
-    /// A card's border in the overview (the server cards' too)
-    static let overviewBorder: Double = 0.2
 
     enum Mode: Equatable {
         /// A card: the workspace's glyph, title and time, what it's doing and its panes.
@@ -1618,6 +1596,7 @@ struct SwitcherWindow: View {
                 .strokeBorder(borderColor, lineWidth: status == .blocked || isFocused || isScrubbed ? 1.5 : 1)
                 .animation(.easeInOut(duration: 0.5), value: voice != nil)
         )
+        .overlay { CardEdge().opacity(hasCardEdge ? 1 : 0) }
         .overlay(alignment: .top) { header }
         .offset(y: pullDown)
     }
@@ -1745,7 +1724,13 @@ struct SwitcherWindow: View {
         if status == .blocked { return Color(uiColor: PaneStatus.blocked.tint).opacity(0.55) }
         // The voice agent's eyes are here: a little whiter
         if voice != nil { return Color.primary.opacity(isFocused ? 0.5 : 0.22) }
-        return Color.primary.opacity(isFocused ? 0.35 : isOverview ? Self.overviewBorder : 0.08)
+        // The overview's cards: their edge instead
+        return Color.primary.opacity(isFocused ? 0.35 : isOverview ? 0 : 0.08)
+    }
+
+    /// The overview's lit edge: a card without a border of its own
+    private var hasCardEdge: Bool {
+        isOverview && !isFullscreen && !isScrubbed && status != .blocked && voice == nil
     }
 }
 
@@ -1800,8 +1785,9 @@ struct WebWindow: View {
         .clipShape(RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous)
-                .strokeBorder(isFullscreen ? Color.clear : Color.primary.opacity(isOverview ? SwitcherWindow.overviewBorder : 0.08), lineWidth: 1)
+                .strokeBorder(isFullscreen ? Color.clear : Color.primary.opacity(isOverview ? 0 : 0.08), lineWidth: 1)
         )
+        .overlay { CardEdge().opacity(isOverview ? 1 : 0) }
         .overlay(alignment: .top) { header }
         .offset(y: pullDown)
         // A restored tab reconnects when it's shown (in tabs, when switched to): here
@@ -2202,8 +2188,9 @@ private struct WebGlyph: View {
     }
 }
 
-/// While typing: one dot per window, in order, colored like the tab glyphs, then a
-/// plus for the controls after them. Tap a dot to go there; drag along the rail to scrub.
+/// While typing: the header's buttons (the overview), then one dot per window, in order,
+/// colored like the tab glyphs. Tap a dot to go there; drag along the rail to scrub. The
+/// buttons' slot is -1, ringed while the finger's on it.
 private struct StatusRail: View {
     let statuses: [PaneStatus]
     /// Web tabs with windows of their own, after the terminals
@@ -2214,13 +2201,26 @@ private struct StatusRail: View {
     let onSelect: (Int) -> Void
     let onScrubEnd: (Int) -> Void
 
+    /// The finger's on the buttons
+    @State private var onTop = false
+
     private static let pitch: CGFloat = 18
 
     var body: some View {
         VStack(spacing: 0) {
+            ZStack {
+                if onTop {
+                    Circle().strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
+                        .frame(width: 14, height: 14)
+                }
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Color.primary.opacity(0.6))
+            }
+            .frame(width: 24, height: Self.pitch)
             ForEach(Array(statuses.enumerated()), id: \.offset) { i, status in
                 ZStack {
-                    if i == current {
+                    if i == current && !onTop {
                         Circle().strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
                             .frame(width: 14, height: 14)
                     }
@@ -2241,7 +2241,7 @@ private struct StatusRail: View {
             }
             ForEach(0..<webSlots, id: \.self) { i in
                 ZStack {
-                    if current == statuses.count + i {
+                    if current == statuses.count + i && !onTop {
                         Circle().strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
                             .frame(width: 14, height: 14)
                     }
@@ -2251,16 +2251,6 @@ private struct StatusRail: View {
                 }
                 .frame(width: 24, height: Self.pitch)
             }
-            ZStack {
-                if current == statuses.count + webSlots {
-                    Circle().strokeBorder(Color.primary.opacity(0.85), lineWidth: 1.5)
-                        .frame(width: 14, height: 14)
-                }
-                Image(systemName: "plus")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Color.primary.opacity(0.6))
-            }
-            .frame(width: 24, height: Self.pitch)
         }
         // The voice agent's eyes teleport from window to window
         .animation(.easeIn(duration: 0.12), value: looking)
@@ -2269,13 +2259,25 @@ private struct StatusRail: View {
         .contentShape(Capsule())
         .gesture(
             DragGesture(minimumDistance: 0)
-                .onChanged { value in onSelect(slot(at: value.location.y)) }
-                .onEnded { value in onScrubEnd(slot(at: value.location.y)) }
+                .onChanged { value in
+                    let slot = slot(at: value.location.y)
+                    if (slot < 0) != onTop {
+                        if slot < 0 { Haptic.scrub.play() }
+                        onTop = slot < 0
+                    }
+                    onSelect(slot)
+                }
+                .onEnded { value in
+                    let slot = slot(at: value.location.y)
+                    // On the buttons, the ring stays as the rail goes
+                    if slot >= 0 { onTop = false }
+                    onScrubEnd(slot)
+                }
         )
     }
 
     private func slot(at y: CGFloat) -> Int {
-        min(max(0, Int((y - 8) / Self.pitch)), statuses.count + webSlots)
+        min(max(-1, Int(floor((y - 8) / Self.pitch)) - 1), statuses.count + webSlots - 1)
     }
 }
 
@@ -2452,6 +2454,28 @@ struct GlassCircle: View {
 }
 
 // MARK: - Style
+
+/// An overview card's edge, as the header's glass buttons have: a rim lit at the top and
+/// bottom, and a soft glow inside it
+struct CardEdge: View {
+    var cornerRadius: CGFloat = 22
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        ZStack {
+            shape.strokeBorder(Color.primary.opacity(0.05), lineWidth: 3)
+                .blur(radius: 2.5)
+                .clipShape(shape)
+            shape.strokeBorder(
+                LinearGradient(stops: [.init(color: .primary.opacity(0.24), location: 0),
+                                       .init(color: .primary.opacity(0.1), location: 0.5),
+                                       .init(color: .primary.opacity(0.18), location: 1)],
+                               startPoint: .top, endPoint: .bottom),
+                lineWidth: 1)
+        }
+        .allowsHitTesting(false)
+    }
+}
 
 /// A window's bounds, or no clip while its menu reaches out of it. It doesn't animate: a
 /// spring between the two overshot into the window, cutting off its edges.

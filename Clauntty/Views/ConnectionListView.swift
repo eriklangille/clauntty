@@ -364,10 +364,7 @@ struct ConnectionRow: View {
         .padding(.horizontal, 16)
         .frame(height: 62)
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(background))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.primary.opacity(SwitcherWindow.overviewBorder), lineWidth: 1)
-        )
+        .overlay(CardEdge())
     }
 
     private var row: some View {
