@@ -14,6 +14,7 @@ struct ContentView: View {
   @State private var showingSpeechModelDownload = false
   @State private var showingVoiceSession = false
   @State private var showingVoiceSettings = false
+  @State private var showingSettings = false
 
   var body: some View {
     NavigationStack {
@@ -22,12 +23,13 @@ struct ContentView: View {
         AgentSwitcherView(
           onNewTab: { showingNewTabSheet = true },
           onVoice: handleVoiceTapped,
+          onSettings: { showingSettings = true },
           onPorts: { session in portsSheetSession = session }
         )
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingNewTabSheet) {
           NavigationStack {
-            ConnectionListView()
+            ConnectionListView(isHome: false)
               .navigationTitle("New Tab")
               .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -38,12 +40,8 @@ struct ContentView: View {
               }
           }
         }
-        .sheet(isPresented: $showingVoiceSettings) {
-          VoiceSettingsSheet()
-        }
-        // The voice session from the voice button (while typing, the key bar has it)
-        .sheet(isPresented: $showingVoiceSession) {
-          VoiceSessionSheet()
+        .sheet(isPresented: $showingSettings) {
+          SettingsView()
         }
         .sheet(item: $portsSheetSession) { session in
           PortsSheetView(config: session.connectionConfig, onDismiss: { portsSheetSession = nil })
@@ -63,8 +61,15 @@ struct ContentView: View {
         }
       } else {
         // Show connection list when no sessions
-        ConnectionListView()
+        ConnectionListView(onVoice: handleVoiceTapped)
       }
+    }
+    .sheet(isPresented: $showingVoiceSettings) {
+      VoiceSettingsSheet()
+    }
+    // The voice session from the voice button (while typing, the key bar has it)
+    .sheet(isPresented: $showingVoiceSession) {
+      VoiceSessionSheet()
     }
     .fullScreenCover(item: $sessionManager.imageViewer) { _ in
       // Images from `clauntty show` on a remote host

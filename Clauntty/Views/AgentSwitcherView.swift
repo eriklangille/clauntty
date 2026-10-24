@@ -20,6 +20,7 @@ struct AgentSwitcherView: View {
     @EnvironmentObject var sessionManager: SessionManager
     let onNewTab: () -> Void
     let onVoice: () -> Void
+    let onSettings: () -> Void
     let onPorts: (Session) -> Void
 
     /// The window typed into (its tab id)
@@ -127,7 +128,10 @@ struct AgentSwitcherView: View {
 
     /// Above the first window, below the status bar
     static let topPad: CGFloat = 8
-    /// Voice and a new tab, after the windows: the pager's last stop while typing
+    /// Settings and voice, above the first window: in the overview its top, and typing into
+    /// the first window, the band where a window above would peek
+    static let headerHeight: CGFloat = 52
+    /// A new tab, after the windows: the pager's last stop while typing
     static let controlsHeight: CGFloat = 56
 
     /// How much of the window above stays in view, below the status bar, to tap: its
@@ -187,7 +191,7 @@ struct AgentSwitcherView: View {
                     return Self.webHeight(width: webWidth, size: size)
                 }
             let spacing = fullscreen ? 0 : Self.spacing
-            let lead = fullscreen ? 0 : Self.topPad
+            let lead = fullscreen ? 0 : Self.topPad + Self.headerHeight
             let tops = Self.tops(laidOut, spacing: spacing).map { $0 + lead }
             let focusedIndex = ids.firstIndex { $0 == focused }
             let current = fullscreen ? (focusedIndex ?? 0) : min(index, max(0, ids.count - 1))
@@ -249,7 +253,8 @@ struct AgentSwitcherView: View {
                         canMove: canMove(web.id),
                         onMove: { phase in
                             move(web.id, phase, among: loose.map(\.id), ids: ids, tops: tops, heights: laidOut, maxScroll: maxScroll)
-                        }
+                        },
+                        isOverview: focused == nil
                     )
                     .frame(height: hidden ? 0 : laidOut[items.count + i], alignment: .top)
                     .clipShape(WindowClip(isOff: menuLifted == web.id))
@@ -264,6 +269,12 @@ struct AgentSwitcherView: View {
                 }
             }
             .padding(.top, lead)
+            .overlay(alignment: .top) {
+                if !fullscreen {
+                    header
+                        .padding(.top, Self.topPad)
+                }
+            }
             .padding(.leading, fullscreen ? 0 : 10)
             .padding(.trailing, fullscreen ? 0 : (focused != nil ? Self.railColumn : 10))
             .frame(width: size.width, alignment: .top)
@@ -363,8 +374,8 @@ struct AgentSwitcherView: View {
                 if new == nil, old != nil, atControls {
                     scrollOffset = maxScroll
                 } else if new == nil, old != nil, tops.indices.contains(current) {
-                    let anchor: CGFloat = current == 0 ? 4 : Self.peek
-                    scrollOffset = min(max(0, tops[current] - anchor), maxScroll)
+                    // The first: at the top, its header in view
+                    scrollOffset = current == 0 ? 0 : min(max(0, tops[current] - Self.peek), maxScroll)
                 }
             }
             // A window closed: the overview stays within its ends
@@ -960,7 +971,8 @@ struct AgentSwitcherView: View {
             onImages: { openImages = OpenImages(id: tabId) },
             onClearImages: { clearImages(tabId) },
             voice: voiceLooks(at: paneSessions) ? voice.phase : nil,
-            isScrubbed: scrubbing && index == i
+            isScrubbed: scrubbing && index == i,
+            isOverview: focused == nil
         )
     }
 
@@ -1161,14 +1173,19 @@ struct AgentSwitcherView: View {
 
     // MARK: Controls
 
-    /// Voice and a new tab, after the windows
+    /// A new tab, after the windows
     private var controls: some View {
-        HStack(spacing: 14) {
-            // During a session: the conversation and End
-            GlassCircle(systemName: "waveform", size: 44, action: onVoice)
-            GlassCircle(systemName: "plus", size: 44, action: onNewTab)
+        GlassCircle(systemName: "plus", size: 44, action: onNewTab)
+            .padding(.top, 6)
+    }
+
+    /// Settings and voice at the left, above the first window
+    private var header: some View {
+        HStack(spacing: 0) {
+            HeaderPill(onSettings: onSettings, onVoice: onVoice)
+            Spacer(minLength: 0)
         }
-        .padding(.top, 6)
+        .frame(height: 40)
     }
 
     /// A terminal window's pill menu: the session's actions (a page's, showing one), then
@@ -1291,6 +1308,12 @@ struct SwitcherWindow: View {
     var voice: VoiceAgent.Phase? = nil
     /// The finger scrubbing the status rail is on this window: its border lit
     var isScrubbed = false
+    /// Nothing typed into: every card's border is clear to see. Typing, the others' fade
+    /// behind the one typed into.
+    var isOverview = false
+
+    /// A card's border in the overview (the server cards' too)
+    static let overviewBorder: Double = 0.2
 
     enum Mode: Equatable {
         /// A card: the workspace's glyph, title and time, what it's doing and its panes.
@@ -1722,7 +1745,7 @@ struct SwitcherWindow: View {
         if status == .blocked { return Color(uiColor: PaneStatus.blocked.tint).opacity(0.55) }
         // The voice agent's eyes are here: a little whiter
         if voice != nil { return Color.primary.opacity(isFocused ? 0.5 : 0.22) }
-        return Color.primary.opacity(isFocused ? 0.35 : 0.08)
+        return Color.primary.opacity(isFocused ? 0.35 : isOverview ? Self.overviewBorder : 0.08)
     }
 }
 
@@ -1750,6 +1773,8 @@ struct WebWindow: View {
     let onExit: () -> Void
     let canMove: Bool
     let onMove: (WindowMove) -> Void
+    /// Nothing typed into: its border clear to see, as the cards'
+    var isOverview = false
 
     @State private var pullDown: CGFloat = 0
 
@@ -1775,7 +1800,7 @@ struct WebWindow: View {
         .clipShape(RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: isFullscreen ? 0 : 22, style: .continuous)
-                .strokeBorder(isFullscreen ? Color.clear : Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(isFullscreen ? Color.clear : Color.primary.opacity(isOverview ? SwitcherWindow.overviewBorder : 0.08), lineWidth: 1)
         )
         .overlay(alignment: .top) { header }
         .offset(y: pullDown)
@@ -2372,7 +2397,45 @@ private struct StatusGlyph: UIViewRepresentable {
     }
 }
 
-private struct GlassCircle: View {
+/// Settings and voice (during a session, its eyes: the conversation and End) in one pill:
+/// the agent view's top, and the first screen's
+struct HeaderPill: View {
+    @ObservedObject private var voice = VoiceAgent.shared
+    let onSettings: () -> Void
+    let onVoice: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            button(action: onSettings) {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("Settings")
+            button(action: onVoice) {
+                if voice.isActive {
+                    VoiceEyes(status: voice.phase == .thinking || voice.phase == .connecting ? .working : .none,
+                              size: 16, color: .primary, speaking: voice.phase == .speaking)
+                } else {
+                    Image(systemName: "waveform")
+                }
+            }
+            .accessibilityLabel(voice.isActive ? "Voice session" : "Voice")
+        }
+        .padding(.horizontal, 4)
+        .glass(in: Capsule())
+    }
+
+    private func button<Label: View>(action: @escaping () -> Void, @ViewBuilder label: () -> Label) -> some View {
+        Button(action: action) {
+            label()
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 44, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct GlassCircle: View {
     let systemName: String
     var size: CGFloat = 40
     let action: () -> Void

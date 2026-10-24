@@ -2,9 +2,17 @@ import SwiftUI
 import os.log
 
 struct ConnectionListView: View {
+    /// The first screen, with no sessions: in the theme's colors with the agent view's
+    /// settings and voice pill, its servers as cards. Off, the New Tab sheet (the agent
+    /// view's header has Settings).
+    var isHome = true
+    var onVoice: () -> Void = {}
+
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject private var ghosttyApp: GhosttyApp
+    @ObservedObject private var themeManager = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showingNewConnection = false
     @State private var connectionToEdit: SavedConnection?
@@ -28,7 +36,7 @@ struct ConnectionListView: View {
                 emptyStateView
             } else {
                 ForEach(connectionStore.connections) { connection in
-                    ConnectionRow(connection: connection)
+                    ConnectionRow(connection: connection, isCard: isHome, background: background)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             connect(to: connection)
@@ -55,26 +63,32 @@ struct ConnectionListView: View {
                             }
                             .tint(.blue)
                         }
+                        .modifier(CardRow(isOn: isHome))
                 }
             }
         }
         .navigationTitle("Servers")
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showingSettings = true
-                } label: {
-                    Image(systemName: "gear")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showingNewConnection = true
-                } label: {
-                    Image(systemName: "plus")
+            if !isHome {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showingNewConnection = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
                 }
             }
         }
+        .modifier(HomeStyle(isOn: isHome, background: background, isLight: isLightTheme) {
+            HStack(spacing: 0) {
+                HeaderPill(onSettings: { showingSettings = true }, onVoice: onVoice)
+                Spacer(minLength: 0)
+                GlassCircle(systemName: "plus", size: 40) { showingNewConnection = true }
+                    .accessibilityLabel("Add Server")
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+        })
         .sheet(isPresented: $showingNewConnection) {
             NewConnectionView()
         }
@@ -139,6 +153,16 @@ struct ConnectionListView: View {
         .onDisappear {
             appState.endInputSuppression()
         }
+    }
+
+    /// The terminal's background, as the agent view's
+    private var background: Color {
+        themeManager.theme(withId: ghosttyApp.currentThemeId)?.backgroundColor
+            ?? Color(red: 40 / 255, green: 44 / 255, blue: 52 / 255)
+    }
+
+    private var isLightTheme: Bool {
+        themeManager.theme(withId: ghosttyApp.currentThemeId)?.isLight == true
     }
 
     private var emptyStateView: some View {
@@ -253,10 +277,100 @@ struct ConnectionListView: View {
     }
 }
 
+/// The first screen: the theme's background and its light or dark, the header in place of
+/// the navigation bar, and a small "Servers" over the cards
+private struct HomeStyle<Header: View>: ViewModifier {
+    let isOn: Bool
+    let background: Color
+    let isLight: Bool
+    @ViewBuilder let header: () -> Header
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(background.ignoresSafeArea())
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        header()
+                        Text("Servers")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 26)
+                    }
+                    .padding(.bottom, 6)
+                    .background(background.ignoresSafeArea())
+                }
+                .preferredColorScheme(isLight ? .light : .dark)
+        } else {
+            content
+        }
+    }
+}
+
+/// A card's row: no separators or row background, spaced as the agent view's windows
+private struct CardRow: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10))
+        } else {
+            content
+        }
+    }
+}
+
 struct ConnectionRow: View {
     let connection: SavedConnection
+    /// The first screen's: a card like the agent view's
+    var isCard = false
+    var background: Color = .clear
 
     var body: some View {
+        if isCard { card } else { row }
+    }
+
+    private var keyIcon: some View {
+        Image(systemName: connection.authMethod == .password ? "key.fill" : "key.horizontal.fill")
+            .foregroundColor(.secondary)
+            .font(.caption)
+    }
+
+    /// As a collapsed window: the glyph at the left, the name, and beneath it the address
+    private var card: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 12)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(connection.displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                Text(connection.endpointDisplay)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            keyIcon
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 62)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(background))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.primary.opacity(SwitcherWindow.overviewBorder), lineWidth: 1)
+        )
+    }
+
+    private var row: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(connection.displayName)
@@ -268,9 +382,7 @@ struct ConnectionRow: View {
 
             Spacer()
 
-            Image(systemName: connection.authMethod == .password ? "key.fill" : "key.horizontal.fill")
-                .foregroundColor(.secondary)
-                .font(.caption)
+            keyIcon
         }
         .padding(.vertical, 4)
     }
