@@ -683,6 +683,8 @@ struct AgentSwitcherView: View {
                     // A flick after all: put back what it scrolled, then page its way
                     scrollFocused(-scrolledY, items: items, loose: loose)
                     let current = min(index, count - 1)
+                    // Down from the first: the overview, the header's above it
+                    if current == 0 && dy > 0 { return toOverview() }
                     let target = min(max(0, current + (dy < 0 ? 1 : -1)), count - 1)
                     if target != current { commitFocus(target, items: items, loose: loose) }
                     return
@@ -706,6 +708,10 @@ struct AgentSwitcherView: View {
                 var target = current
                 if dy < -threshold || projected < -200 { target = current + 1 }
                 if dy > threshold || projected > 200 { target = current - 1 }
+                if target < 0 {
+                    drag = 0
+                    return toOverview()
+                }
                 target = min(max(0, target), count - 1)
                 if target == current {
                     withAnimation(snap) { drag = 0 }
