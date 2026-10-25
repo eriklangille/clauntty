@@ -16,6 +16,7 @@ struct NewConnectionView: View {
     @State private var savePassword: Bool = true
     @State private var selectedKeyId: String?
     @State private var showingKeyImportSheet = false
+    @State private var copiedSetup = false
     @State private var useTailscale = false
     /// Once the user flips the toggle, stop auto-suggesting it from the host
     @State private var tailscaleTouched = false
@@ -96,7 +97,7 @@ struct NewConnectionView: View {
                     }
                 }
 
-                Section("Authentication") {
+                Section {
                     Picker("Method", selection: $authType) {
                         ForEach(AuthType.allCases, id: \.self) { type in
                             Text(type.rawValue).tag(type)
@@ -109,6 +110,12 @@ struct NewConnectionView: View {
                         Toggle("Save password", isOn: $savePassword)
                     case .sshKey:
                         sshKeySection
+                    }
+                } header: {
+                    Text("Authentication")
+                } footer: {
+                    if setupCommand != nil {
+                        Text("Run the setup command on the server once to let this key in.")
                     }
                 }
             }
@@ -137,6 +144,14 @@ struct NewConnectionView: View {
             } message: {
                 Text(validationError)
             }
+        }
+        .onChange(of: authType) { _, type in
+            if type == .sshKey, selectedKeyId == nil {
+                selectedKeyId = sshKeyStore.keys.first?.id
+            }
+        }
+        .onChange(of: selectedKeyId) { _, _ in
+            copiedSetup = false
         }
         .onChange(of: host) { _, newHost in
             if !tailscaleTouched {
@@ -228,44 +243,69 @@ struct NewConnectionView: View {
 
     // MARK: - SSH Key Section
 
+    /// The key, from one menu that also makes or imports one, and its setup command
     @ViewBuilder
     private var sshKeySection: some View {
-        if sshKeyStore.keys.isEmpty {
-            // No existing keys - prompt to add one
-            VStack(alignment: .leading, spacing: 8) {
-                Text("No SSH keys saved")
-                    .foregroundColor(.secondary)
-
+        LabeledContent("Key") {
+            Menu {
+                if !sshKeyStore.keys.isEmpty {
+                    Picker("Key", selection: $selectedKeyId) {
+                        ForEach(sshKeyStore.keys) { key in
+                            Text(key.label).tag(key.id as String?)
+                        }
+                    }
+                    Divider()
+                }
+                Button {
+                    generateKey()
+                } label: {
+                    Label("New Key", systemImage: "plus")
+                }
                 Button {
                     showingKeyImportSheet = true
                 } label: {
-                    Label("Add SSH Key", systemImage: "plus.circle")
+                    Label("Import Key…", systemImage: "square.and.arrow.down")
                 }
-            }
-        } else {
-            // Show picker with existing keys
-            Picker("SSH Key", selection: $selectedKeyId) {
-                Text("Select a key...").tag(nil as String?)
-                ForEach(sshKeyStore.keys) { key in
-                    Text(key.label).tag(key.id as String?)
-                }
-            }
-
-            // Show selected key info or add button
-            if let keyId = selectedKeyId, let key = sshKeyStore.key(withId: keyId) {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text(key.label)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Button {
-                showingKeyImportSheet = true
             } label: {
-                Label("Add New Key", systemImage: "plus")
+                HStack(spacing: 4) {
+                    Text(selectedKeyId.flatMap { sshKeyStore.key(withId: $0) }?.label ?? "Choose")
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption)
+                }
             }
+            .tint(.secondary)
+        }
+
+        if let setup = setupCommand {
+            Button(copiedSetup ? "Copied" : "Copy Setup Command") {
+                UIPasteboard.general.string = setup
+                copiedSetup = true
+            }
+        }
+    }
+
+    /// The line that adds the chosen key to the server's `authorized_keys`
+    private var setupCommand: String? {
+        guard authType == .sshKey, let keyId = selectedKeyId, let key = sshKeyStore.key(withId: keyId),
+              let publicKey = sshKeyStore.publicKey(for: key) else { return nil }
+        return OpenSSHKeyFile.setupCommand(publicKey: publicKey)
+    }
+
+    /// A new key made here, chosen for this server; its setup command lets it in
+    private func generateKey() {
+        var label = name.trimmingCharacters(in: .whitespaces).isEmpty ? "Clauntty" : "Clauntty (\(name.trimmingCharacters(in: .whitespaces)))"
+        let base = label
+        var n = 2
+        while sshKeyStore.keyExists(withLabel: label) {
+            label = "\(base) \(n)"
+            n += 1
+        }
+        do {
+            // The first key is the app's own, the one tailnet machines are added with
+            selectedKeyId = try (sshKeyStore.keys.isEmpty ? sshKeyStore.appKey() : sshKeyStore.generateKey(label: label)).id
+        } catch {
+            validationError = "Couldn't make a key: \(error.localizedDescription)"
+            showingValidationError = true
         }
     }
 

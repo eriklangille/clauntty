@@ -107,15 +107,19 @@ class SSHConnection: ObservableObject {
         authSucceeded = false
         Logger.clauntty.debugOnly("SSH connecting to \(self.host):\(self.port)\(self.useTailscale ? " via Tailscale" : "")")
 
+        let authenticator = SSHAuthenticator(
+            username: username,
+            authMethod: authMethod,
+            connectionId: connectionId
+        ) { [weak self] in
+            // Refused: close it, so the first channel fails instead of waiting
+            Task { @MainActor in self?.channel?.close(promise: nil) }
+        }
+
         do {
             // Use global singleton event loop group - never creates new threads on reconnect
             // This is the recommended pattern for iOS apps per SwiftNIO best practices
             let group = MultiThreadedEventLoopGroup.singleton
-
-            // Capture values for closure
-            let username = self.username
-            let authMethod = self.authMethod
-            let connectionId = self.connectionId
 
             // Banner events arrive on the event loop; handle them on the main actor
             let onBanner: (String) -> Void = { [weak self] message in
@@ -132,11 +136,7 @@ class SSHConnection: ObservableObject {
                         try channel.pipeline.syncOperations.addHandlers(
                             NIOSSHHandler(
                                 role: .client(.init(
-                                    userAuthDelegate: SSHAuthenticator(
-                                        username: username,
-                                        authMethod: authMethod,
-                                        connectionId: connectionId
-                                    ),
+                                    userAuthDelegate: authenticator,
                                     serverAuthDelegate: AcceptAllHostKeysDelegate()
                                 )),
                                 allocator: channel.allocator,
@@ -191,6 +191,7 @@ class SSHConnection: ObservableObject {
             onConnected?()
 
         } catch {
+            let error = authenticator.gaveUp ? SSHError.authenticationFailed : error
             Logger.clauntty.error("SSH connection failed: \(error.localizedDescription)")
             #if os(macOS)
             proxyProcess?.terminate()

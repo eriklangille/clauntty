@@ -37,6 +37,37 @@ class SSHKeyStore: ObservableObject {
         return key
     }
 
+    /// A new Ed25519 key made here; its public half goes in a server's `authorized_keys`
+    func generateKey(label: String) throws -> SSHKey {
+        try addKey(label: label, privateKeyData: OpenSSHKeyFile.generateEd25519(comment: Self.keyComment))
+    }
+
+    /// The app's own key, made the first time a server needs one: a tailnet machine added
+    /// with a tap signs in with it (or Tailscale SSH lets it in without)
+    func appKey() throws -> SSHKey {
+        if let id = UserDefaults.standard.string(forKey: appKeyIdKey), let key = key(withId: id) {
+            return key
+        }
+        var label = "Clauntty"
+        var n = 2
+        while keyExists(withLabel: label) {
+            label = "Clauntty \(n)"
+            n += 1
+        }
+        let key = try generateKey(label: label)
+        UserDefaults.standard.set(key.id, forKey: appKeyIdKey)
+        return key
+    }
+
+    /// The key's line for `authorized_keys`, for keys kept in the Keychain
+    func publicKey(for key: SSHKey) -> String? {
+        guard let stored = try? KeychainHelper.getSSHKey(id: key.id) else { return nil }
+        return OpenSSHKeyFile.publicKeyLine(privateKey: stored.privateKey, comment: Self.keyComment)
+    }
+
+    private static let keyComment = "clauntty"
+    private let appKeyIdKey = "appSSHKeyId"
+
     /// Update an existing key's label
     func update(_ key: SSHKey) {
         if let index = keys.firstIndex(where: { $0.id == key.id }) {

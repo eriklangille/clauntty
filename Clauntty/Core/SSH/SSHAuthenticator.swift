@@ -4,8 +4,9 @@ import NIOSSH
 import Crypto
 import os.log
 
-/// Handles SSH authentication (password and SSH key)
-class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
+/// Handles SSH authentication (password and SSH key). Used on its connection's event
+/// loop; `gaveUp` is read once the connection has closed.
+final class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate, @unchecked Sendable {
     private let username: String
     private let authMethod: AuthMethod
     private let connectionId: UUID
@@ -13,11 +14,16 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
     private var triedPassword = false
     private var triedKey = false
     private var triedNone = false
+    /// Every method was refused. NIOSSH only marks the attempt failed; the connection
+    /// stays open and its channels wait forever, so the connection closes itself.
+    private(set) var gaveUp = false
+    private let onGiveUp: () -> Void
 
-    init(username: String, authMethod: AuthMethod, connectionId: UUID) {
+    init(username: String, authMethod: AuthMethod, connectionId: UUID, onGiveUp: @escaping () -> Void = {}) {
         self.username = username
         self.authMethod = authMethod
         self.connectionId = connectionId
+        self.onGiveUp = onGiveUp
     }
 
     func nextAuthenticationType(
@@ -91,7 +97,9 @@ class SSHAuthenticator: NIOSSHClientUserAuthenticationDelegate {
     /// credential); any other server just refuses it.
     private func offerNoneOrGiveUp(_ promise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>) {
         guard !triedNone else {
+            gaveUp = true
             promise.succeed(nil)
+            onGiveUp()
             return
         }
         triedNone = true
@@ -354,5 +362,81 @@ private struct OpenSSHKeyReader {
     mutating func readLengthPrefixedData() -> Data? {
         guard let length = readUInt32() else { return nil }
         return readBytes(Int(length))
+    }
+}
+
+// MARK: - OpenSSH Key Files
+
+/// Keys made in the app, and the public half of any OpenSSH private key file, as a line
+/// for `authorized_keys`
+enum OpenSSHKeyFile {
+    /// A new Ed25519 key as an unencrypted OpenSSH private key file
+    static func generateEd25519(comment: String) -> Data {
+        let key = Curve25519.Signing.PrivateKey()
+        let pub = key.publicKey.rawRepresentation
+        let publicBlob = string("ssh-ed25519") + string(pub)
+
+        let check = UInt32.random(in: .min ... .max)
+        var secret = uint32(check) + uint32(check)
+        secret += string("ssh-ed25519") + string(pub)
+        secret += string(key.rawRepresentation + pub)
+        secret += string(Data(comment.utf8))
+        var pad: UInt8 = 1
+        while secret.count % 8 != 0 {
+            secret.append(pad)
+            pad += 1
+        }
+
+        var file = Data("openssh-key-v1\0".utf8)
+        file += string("none") + string("none") + string(Data())
+        file += uint32(1) + string(publicBlob) + string(secret)
+
+        let body = file.base64EncodedString()
+        let lines = stride(from: 0, to: body.count, by: 70).map { start -> String in
+            let from = body.index(body.startIndex, offsetBy: start)
+            return String(body[from..<(body.index(from, offsetBy: 70, limitedBy: body.endIndex) ?? body.endIndex)])
+        }
+        let pem = (["-----BEGIN OPENSSH PRIVATE KEY-----"] + lines + ["-----END OPENSSH PRIVATE KEY-----", ""])
+            .joined(separator: "\n")
+        return Data(pem.utf8)
+    }
+
+    /// "ssh-ed25519 AAAA… comment": the public key an OpenSSH private key file carries in
+    /// the clear, encrypted or not
+    static func publicKeyLine(privateKey data: Data, comment: String? = nil) -> String? {
+        let text = String(data: data, encoding: .utf8) ?? ""
+        guard text.contains("BEGIN OPENSSH PRIVATE KEY") else { return nil }
+        let body = text.components(separatedBy: .newlines)
+            .filter { !$0.contains("OPENSSH PRIVATE KEY") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .joined()
+        guard let file = Data(base64Encoded: body) else { return nil }
+
+        var reader = OpenSSHKeyReader(data: file)
+        guard let magic = reader.readBytes(15), magic == Data("openssh-key-v1\0".utf8),
+              reader.readString() != nil, reader.readString() != nil,
+              reader.readLengthPrefixedData() != nil,
+              reader.readUInt32() == 1,
+              let blob = reader.readLengthPrefixedData() else { return nil }
+        var blobReader = OpenSSHKeyReader(data: blob)
+        guard let type = blobReader.readString() else { return nil }
+        return [type, blob.base64EncodedString(), comment].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// A shell line that adds `publicKey` to the server's `authorized_keys`
+    static func setupCommand(publicKey: String) -> String {
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '\(publicKey)' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+    }
+
+    private static func uint32(_ value: UInt32) -> Data {
+        withUnsafeBytes(of: value.bigEndian) { Data($0) }
+    }
+
+    private static func string(_ value: String) -> Data {
+        string(Data(value.utf8))
+    }
+
+    private static func string(_ value: Data) -> Data {
+        uint32(UInt32(value.count)) + value
     }
 }

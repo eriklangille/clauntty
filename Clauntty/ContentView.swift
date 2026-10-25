@@ -29,15 +29,7 @@ struct ContentView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingNewTabSheet) {
           NavigationStack {
-            ConnectionListView(isHome: false)
-              .navigationTitle("New Tab")
-              .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                  Button("Cancel") {
-                    showingNewTabSheet = false
-                  }
-                }
-              }
+            ConnectionListView(isHome: false, onClose: { showingNewTabSheet = false })
           }
         }
         .sheet(isPresented: $showingSettings) {

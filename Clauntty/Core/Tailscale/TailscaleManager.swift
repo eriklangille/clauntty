@@ -82,11 +82,35 @@ final class TailscaleManager: ObservableObject {
     /// Start the node at launch if it was logged in before, so the first
     /// Tailscale connection doesn't wait for the node to come up.
     func startIfLoggedIn() {
-        if hasLoggedIn { start() }
+        if hasLoggedIn || Self.fakesTailnet { start() }
     }
+
+    #if DEBUG
+    /// `defaults write com.octerm.clauntty fakeTailnet -bool YES` (Debug builds): a pretend
+    /// running node with made-up machines, to work on the server list without logging in
+    static var fakesTailnet: Bool { UserDefaults.standard.bool(forKey: "fakeTailnet") }
+
+    private func startFake() {
+        let now = Date()
+        peers = [
+            TailnetPeer(name: "mac-mini", os: "macOS", online: true),
+            TailnetPeer(name: "devbox", os: "linux", online: true),
+            TailnetPeer(name: "nas", os: "linux", online: true),
+            TailnetPeer(name: "gaming-pc", os: "windows", online: false, lastSeen: now.addingTimeInterval(-3 * 3600)),
+            TailnetPeer(name: "old-laptop", os: "macOS", online: false, lastSeen: now.addingTimeInterval(-9 * 86400)),
+        ]
+        tailnetName = "example.ts.net"
+        state = .running(ip: "100.64.0.1")
+    }
+    #else
+    static var fakesTailnet: Bool { false }
+    #endif
 
     /// Start the node (idempotent). Watch `state` for login / running.
     func start() {
+        #if DEBUG
+        if Self.fakesTailnet { return startFake() }
+        #endif
         #if canImport(TailscaleKit)
         guard node == nil, restartTask == nil else { return }
         state = .starting
@@ -203,6 +227,14 @@ final class TailscaleManager: ObservableObject {
 
     /// Stop the node and forget the login (removes the node's state).
     func logOut() async {
+        #if DEBUG
+        if Self.fakesTailnet {
+            peers = []
+            tailnetName = nil
+            state = .stopped
+            return
+        }
+        #endif
         await restartTask?.value
         pollTask?.cancel()
         pollTask = nil
@@ -423,6 +455,19 @@ struct TailnetPeer: Identifiable, Equatable {
     var isLikelyServer: Bool {
         !["ios", "android", "tvos"].contains(os.lowercased())
     }
+
+    #if DEBUG
+    /// A made-up machine on `example.ts.net`, for `fakeTailnet`
+    init(name: String, os: String, online: Bool, lastSeen: Date? = nil) {
+        id = name
+        self.name = name
+        dnsName = "\(name).example.ts.net"
+        ip = nil
+        self.os = os
+        self.online = online
+        self.lastSeen = lastSeen
+    }
+    #endif
 
     fileprivate init(_ peer: StatusJSON.PeerJSON) {
         dnsName = peer.DNSName.hasSuffix(".") ? String(peer.DNSName.dropLast()) : peer.DNSName
