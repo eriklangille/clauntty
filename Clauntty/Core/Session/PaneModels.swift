@@ -88,6 +88,44 @@ indirect enum PaneLayout: Equatable, Decodable {
             }
         }
     }
+
+    /// `pane` out of its place and on `side` of `other`, splitting it in half, as
+    /// `rtach ws move PANE OTHER --side` does
+    func moving(_ pane: String, beside other: String, _ side: PaneSide) -> PaneLayout {
+        guard pane != other, let rest = without([pane]) else { return self }
+        return rest.inserting(pane, beside: other, side)
+    }
+
+    private func inserting(_ pane: String, beside other: String, _ side: PaneSide) -> PaneLayout {
+        switch self {
+        case .pane(let id):
+            guard id == other else { return self }
+            let moved = PaneLayout.pane(pane)
+            let before = side == .left || side == .up
+            return .split(vertical: side == .up || side == .down, ratio: 0.5,
+                          first: before ? moved : self, second: before ? self : moved)
+        case .split(let vertical, let ratio, let first, let second):
+            return .split(vertical: vertical, ratio: ratio, first: first.inserting(pane, beside: other, side),
+                          second: second.inserting(pane, beside: other, side))
+        }
+    }
+
+    /// The same panes in the same places, whatever the splits' sizes
+    func arranged(like other: PaneLayout) -> Bool {
+        switch (self, other) {
+        case let (.pane(a), .pane(b)):
+            return a == b
+        case let (.split(v1, _, a1, b1), .split(v2, _, a2, b2)):
+            return v1 == v2 && a1.arranged(like: a2) && b1.arranged(like: b2)
+        default:
+            return false
+        }
+    }
+}
+
+/// Where a pane is moved beside another: `rtach ws move`'s --left, --right, --up, --down
+enum PaneSide: String {
+    case left, right, up, down
 }
 
 /// Session menu actions on a workspace tab

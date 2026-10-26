@@ -477,21 +477,26 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   terminal is drawn at that grid and `PaneHostView` scales it down from the top left; a
   click takes the pane back. Output waits for the resize, as on the phone.
 - **Sidebar:** a two-line card per workspace (`WorkspaceRow`): the status glyph of its most
-  pressing pane on the left; its name (or what runs in its shown pane, for one named after
-  a folder; for a named one whose shown pane's agent has a title, that title with the name
-  small after it, `SessionGroup.nameAfterTitle`, as on the phone's cards) and a small time;
-  beneath, the task (else the program and folder,
-  `RemotePaneState.place`) and a dot per pane, then a ring per page it opened. The time is
-  when its agent finished (`done_at`) or when you last typed in it here
-  (`SessionManager.lastInteraction`, this Mac's typing only until rtach records it).
-  Panes are in the split, each under a title bar with split, zoom and close (shown on the
-  focused or hovered pane). Zoom (`WindowState.zoomedPane`) is local only. Dragging a
-  divider (`DividerHandle`) resizes the split here and on the host (`ws resize`), holding
-  the terminals' sizes until the drag stops. Workspaces drag to reorder; hosts do too, by
-  the name in their header, dropped on another host's (`HostHeader`; the order is this
-  Mac's, kept in `ConnectionStore`). The "…" after the name is its menu (New Workspace,
-  Refresh, Remove Host); the section's own hover chevron folds it. `StatusGlyph` draws the
-  phone's `PaneStatusIndicator` in SwiftUI; change both together.
+  pressing pane on the left; its name (or what runs in its shown pane, for one named after a
+  folder; for a named one whose shown pane's agent has a title, that title with the name small
+  after it, `SessionGroup.nameAfterTitle`, as on the phone's cards) and a small time; beneath,
+  the task (else the program and folder, `RemotePaneState.place`) and a dot per pane, then a
+  ring per page it opened. The time is when its agent finished (`done_at`) or when you last
+  typed in it here (`SessionManager.lastInteraction`, this Mac's typing only until rtach
+  records it). Panes are in the split, each under a title bar with split, zoom and close
+  (shown on the focused or hovered pane). Zoom (`WindowState.zoomedPane`) is local only.
+  Dragging a divider (`DividerHandle`) resizes the split here and on the host (`ws resize`),
+  holding the terminals' sizes until the drag stops. Dragging a pane by its title (`PaneGrab`)
+  lifts the title out of its header into a chip under the pointer (`DragChip`); over another
+  pane, the half of it nearest the pointer gets the peek's outline (`PaneOutline`); letting go
+  moves the pane there (`SessionManager.movePane`, `ws move PANE OTHER --side`). The titles
+  are in the title bar's strip, where the toolbar moves the window on a press before any view
+  hears of it, so the window is made unmovable while the pointer is over a title, and a press
+  there takes its own events until it's let go. Workspaces drag to reorder; hosts do too, by
+  the name in their header, dropped on another host's (`HostHeader`; the order is this Mac's,
+  kept in `ConnectionStore`). The "…" after the name is its menu (New Workspace, Refresh,
+  Remove Host); the section's own hover chevron folds it. `StatusGlyph` draws the phone's
+  `PaneStatusIndicator` in SwiftUI; change both together.
 - **Peek** (`WorkspacePeek`): hovering a card with more than one pane or a page shows a row
   per pane and its pages beside the sidebar; hovering a row outlines that pane where it
   sits in its split (`PeekPaneOutline`, also for a workspace not on screen). Cmd+number

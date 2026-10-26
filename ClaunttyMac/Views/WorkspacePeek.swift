@@ -178,15 +178,23 @@ struct PeekPaneOutline: View {
                 let origin = geometry.frame(in: .global).origin
                 if let frame = layout.frame(of: pane.id, in: window.detailFrame) {
                     // On the pane's own edges
-                    Rectangle()
-                        .fill(Color.white.opacity(0.06))
-                        .strokeBorder(Color.white.opacity(0.7), lineWidth: 2)
+                    PaneOutline()
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX - origin.x, y: frame.minY - origin.y)
                 }
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// A pane, or where one would go, outlined in white: the peek's hovered pane, the half
+/// a dragged pane would take
+struct PaneOutline: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.06))
+            .strokeBorder(Color.white.opacity(0.7), lineWidth: 2)
     }
 }
 

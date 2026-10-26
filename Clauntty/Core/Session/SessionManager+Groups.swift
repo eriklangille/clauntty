@@ -640,6 +640,30 @@ extension SessionManager {
         }
     }
 
+    /// Put a pane on one side of another in its tab (dragged by its title on the Mac).
+    /// Shown here at once; the host's layout follows.
+    func movePane(groupId: UUID, pane: String, beside other: String, side: PaneSide) {
+        guard let index = sessionGroups.firstIndex(where: { $0.id == groupId }),
+              let config = currentSession(of: sessionGroups[index])?.connectionConfig,
+              let layout = sessionGroups[index].layouts.first(where: { $0.paneIds.contains(pane) && $0.paneIds.contains(other) })
+        else { return }
+        let moved = layout.moving(pane, beside: other, side)
+        // Dropped where it already is: keep the split's size
+        guard !moved.arranged(like: layout) else { return }
+        sessionGroups[index].layouts = sessionGroups[index].layouts.map { $0 == layout ? moved : $0 }
+        Task {
+            do {
+                _ = try await withHost(config) { connection in
+                    try await RtachDeployer(connection: connection)
+                        .workspaceCommand(["move", pane, other, "--\(side.rawValue)", "--quiet"], as: WorkspaceCreated.self)
+                }
+            } catch {
+                workspaceMessage = error.localizedDescription
+                await refreshWorkspaces(for: config)
+            }
+        }
+    }
+
     private func showWorkspace(_ workspaceId: String) -> Session? {
         guard let group = sessionGroups.first(where: { $0.workspaceId == workspaceId }),
               let session = currentSession(of: group) else { return nil }
