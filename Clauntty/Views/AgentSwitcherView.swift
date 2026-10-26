@@ -1365,6 +1365,7 @@ struct SwitcherWindow: View {
         // Connecting, the glyph spins and the line says what it always does; only an
         // error or an ended session takes the line
         let detail = (isConnecting ? nil : notice?.text)
+            ?? session.notRespondingMessage?.title
             ?? (lead?.status ?? status).detail(state: state, title: titles.title, subtitle: titles.subtitle)
             ?? state?.place
         return HStack(spacing: 12) {
@@ -1565,6 +1566,30 @@ struct SwitcherWindow: View {
                 .glass(in: Capsule())
                 .padding(.bottom, isFullscreen ? AgentSwitcherView.barReserve + 8 : 16)
                 // Fullscreen, the window goes on under the keyboard: above the terminal's end
+                .frame(height: isFullscreen ? placement.y + terminalSize.height : height, alignment: .bottom)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+
+            // The program isn't drawing, so the terminal is blank: say why, and that it's on
+            // the host, in the same place
+            if web == nil, !isCard, notice == nil, let stuck = session.notRespondingMessage {
+                VStack(spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text(stuck.title)
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    Text(stuck.detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.bottom, isFullscreen ? AgentSwitcherView.barReserve + 8 : 16)
                 .frame(height: isFullscreen ? placement.y + terminalSize.height : height, alignment: .bottom)
                 .allowsHitTesting(false)
                 .transition(.opacity)

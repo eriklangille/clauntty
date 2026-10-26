@@ -357,7 +357,12 @@ final class PacketReaderTests: XCTestCase {
 
     func testReady() {
         // Empty, after an attach (rtach 2.30.0)
-        XCTAssertEqual(reader.process(makeFrame(type: .ready, payload: Data())), [.ready])
+        XCTAssertEqual(reader.process(makeFrame(type: .ready, payload: Data())), [.ready(notDrawing: nil)])
+        // The program didn't draw for the nudge, and its name (rtach 2.37.0)
+        let stuck = Data([ProtocolConstants.readyFlagNoRedraw]) + Data("claude".utf8)
+        XCTAssertEqual(reader.process(makeFrame(type: .ready, payload: stuck)), [.ready(notDrawing: "claude")])
+        // Flags it doesn't know: it drew
+        XCTAssertEqual(reader.process(makeFrame(type: .ready, payload: Data([0x02]))), [.ready(notDrawing: nil)])
         XCTAssertFalse(reader.lostSync)
     }
 

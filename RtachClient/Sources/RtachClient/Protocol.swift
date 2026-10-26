@@ -55,7 +55,8 @@ public enum ResponseType: UInt8, Sendable {
     /// The PTY's size and whether it's this client's (PtySize)
     case ptySize = 7
     /// After an attach, the screen is ready to show: after the replay, or for a program
-    /// on the alternate screen, from here on comes its redraw at the real size. Empty.
+    /// on the alternate screen, from here on comes its redraw at the real size. Empty, or
+    /// (2.37.0+) flags u8 (readyFlagNoRedraw) then the program's name.
     /// Only to clients that attached asking for it (`rtach --proxy --ready`).
     case ready = 8
 }
@@ -110,6 +111,11 @@ public enum ProtocolConstants {
 
     /// Handshake flag: the master sends `ready` after an attach (rtach 2.30.0)
     public static let handshakeFlagReady: UInt16 = 1 << 2
+
+    /// `ready` payload flag (rtach 2.37.0): the program on the alternate screen didn't
+    /// draw for the master's nudge, so the screen is blank until it does. The program's
+    /// name follows.
+    public static let readyFlagNoRedraw: UInt8 = 1 << 0
 
     /// PTY size payload size (rows: u16, cols: u16, flags: u8)
     public static let ptySizeSize: Int = 5

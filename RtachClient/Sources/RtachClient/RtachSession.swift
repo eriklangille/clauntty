@@ -33,8 +33,9 @@ public protocol RtachSessionDelegate: AnyObject {
 
     /// Called after an attach when the screen is ready to show (masters with
     /// handshakeFlagReady): after the replay, or for a program on the alternate screen,
-    /// before its redraw at the real size
-    func rtachSessionDidReceiveReady(_ session: RtachSession)
+    /// before its redraw at the real size. `notDrawing`: that program didn't draw when
+    /// asked (its name), so the screen stays blank until it does (rtach 2.37.0)
+    func rtachSessionDidReceiveReady(_ session: RtachSession, notDrawing: String?)
 
     /// Called once when the stream from rtach lost its place (PacketReader.lostSync):
     /// nothing more comes through until the session attaches again
@@ -43,7 +44,7 @@ public protocol RtachSessionDelegate: AnyObject {
 
 public extension RtachSessionDelegate {
     func rtachSessionLostSync(_ session: RtachSession) {}
-    func rtachSessionDidReceiveReady(_ session: RtachSession) {}
+    func rtachSessionDidReceiveReady(_ session: RtachSession, notDrawing: String?) {}
     func rtachSession(_ session: RtachSession, didReceiveHistoryPage meta: HistoryPageMeta, data: Data) {}
     func rtachSession(_ session: RtachSession, didReceivePtySize size: PtySize) {}
 }
@@ -292,8 +293,8 @@ public final class RtachSession {
         case .ptySize(let size):
             delegate?.rtachSession(self, didReceivePtySize: size)
 
-        case .ready:
-            delegate?.rtachSessionDidReceiveReady(self)
+        case .ready(let notDrawing):
+            delegate?.rtachSessionDidReceiveReady(self, notDrawing: notDrawing)
         }
     }
 

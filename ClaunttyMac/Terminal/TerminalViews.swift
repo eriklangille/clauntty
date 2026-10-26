@@ -290,7 +290,8 @@ final class PaneHostView: NSView {
     }
 }
 
-/// Over the terminal: how the connection is doing, and whether another device has the pane.
+/// Over the terminal: how the connection is doing, whether the program in it is drawing,
+/// and whether another device has the pane.
 struct TerminalStatusOverlay: View {
     @ObservedObject var session: Session
     let reconnect: () -> Void
@@ -300,6 +301,9 @@ struct TerminalStatusOverlay: View {
             Spacer()
             if let message = connectionMessage {
                 pill(message.text, action: message.action)
+            } else if let stuck = session.notRespondingMessage {
+                // The pane is blank until it draws: why, and that it's not the app
+                pill("\(stuck.title) · \(stuck.detail)", action: nil)
             } else if session.inUseElsewhere {
                 pill("In use on another device · Click to use here") { session.claimActive() }
             }

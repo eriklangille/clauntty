@@ -351,6 +351,20 @@ class Session: ObservableObject, Identifiable {
     /// The terminal has had output since the app started (agent mode's windows say
     /// they're connecting until then)
     @Published private(set) var hasOutput = false
+    /// The program on the alternate screen didn't draw when this attach asked it to (rtach
+    /// 2.37.0's `ready`): its name (possibly empty). The screen stays blank until it
+    /// draws, so the views say it isn't responding instead. Cleared by its next output.
+    @Published private(set) var notDrawing: String?
+    /// What the views say while `notDrawing`: which program, and on which machine, since
+    /// the problem is there and not in the app ("claude on devbox isn't responding"), then
+    /// the likely reason
+    var notRespondingMessage: (title: String, detail: String)? {
+        guard let program = notDrawing else { return nil }
+        let host = connectionConfig.isLocal ? "this Mac"
+            : connectionConfig.name.isEmpty ? connectionConfig.host : connectionConfig.name
+        let name = program.isEmpty ? "The program" : program
+        return ("\(name) on \(host) isn't responding", "It may be waiting on something there, like a dialog")
+    }
     /// Brings the soft keyboard back if it was hidden with the key bar; set by the
     /// terminal view
     var showKeyboard: (() -> Void)?
@@ -779,6 +793,7 @@ class Session: ObservableObject, Identifiable {
     private func beginSettling() {
         settleTimer?.cancel()
         settling = true
+        notDrawing = nil
         nudgedSinceAttach = false
         expectingReady = false
         awaitingRedraw = false
@@ -833,6 +848,11 @@ class Session: ObservableObject, Identifiable {
         let hasCallback = self.onDataReceived != nil
         Logger.clauntty.verbose("DATA_FLOW[\(self.id.uuidString.prefix(8))] '\(sessionTitle)': \(data.count) bytes, callback=\(hasCallback)")
         totalBytesToTerminal += data.count
+        // It drew after all
+        if notDrawing != nil {
+            notDrawing = nil
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): the program drew, it's responding again")
+        }
 
         // Log if this data contains alternate screen switch escape sequence
         // ESC[?1049h = switch to alternate screen (bytes: 1b 5b 3f 31 30 34 39 68)
@@ -1300,11 +1320,16 @@ extension Session: RtachClient.RtachSessionDelegate {
         }
     }
 
-    /// The screen is ready to show: write what's been held, and from now on as it comes
-    nonisolated func rtachSessionDidReceiveReady(_ session: RtachClient.RtachSession) {
+    /// The screen is ready to show: write what's been held, and from now on as it comes.
+    /// A program that didn't draw for rtach's nudge leaves it blank: say so until it draws.
+    nonisolated func rtachSessionDidReceiveReady(_ session: RtachClient.RtachSession, notDrawing: String?) {
         onMain {
             self.expectingReady = false
             self.finishSettling()
+            if let notDrawing {
+                self.notDrawing = notDrawing
+                Logger.clauntty.warning("Session \(self.id.uuidString.prefix(8)): \(notDrawing.isEmpty ? "the program" : notDrawing) didn't draw for the nudge, showing not responding")
+            }
         }
     }
 

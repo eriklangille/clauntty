@@ -22,8 +22,10 @@ public enum RtachResponse: Sendable, Equatable {
     case handshake(Handshake)
     /// The PTY's size and whether it's this client's
     case ptySize(PtySize)
-    /// The screen is ready to show after an attach
-    case ready
+    /// The screen is ready to show after an attach. `notDrawing`: the program on the
+    /// alternate screen didn't draw when asked (its name, possibly empty), so the screen
+    /// stays blank until it does; nil when it drew.
+    case ready(notDrawing: String?)
 }
 
 /// Frame parser state machine for rtach server responses
@@ -244,7 +246,10 @@ public final class PacketReader {
             return .ptySize(size)
 
         case .ready:
-            return .ready
+            guard let flags = payload.first, flags & ProtocolConstants.readyFlagNoRedraw != 0 else {
+                return .ready(notDrawing: nil)
+            }
+            return .ready(notDrawing: String(decoding: payload.dropFirst(), as: UTF8.self))
         }
     }
 }
