@@ -63,6 +63,10 @@ struct ContentView: View {
     .sheet(isPresented: $showingVoiceSession) {
       VoiceSessionSheet()
     }
+    // A review from `clauntty review`, the oldest first
+    .sheet(item: Binding(get: { sessionManager.reviews.first }, set: { _ in })) { review in
+      ReviewView(review: review)
+    }
     .fullScreenCover(item: $sessionManager.imageViewer) { _ in
       // Images from `clauntty show` on a remote host
       ImageViewerView(content: $sessionManager.imageViewer)

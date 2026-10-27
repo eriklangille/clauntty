@@ -150,6 +150,14 @@ it hands touches to the panel instead. To work on the look
 without xAI, `defaults write com.octerm.clauntty fakeVoice -bool YES` (Debug builds): the voice
 button then starts a pretend session that moves between the tabs.
 
+**Code review** (`clauntty review`, rtach 2.38.0; plan: `plans/2026-10-26-clauntty-code-review.md`):
+rtach bundles a change on the host and sends `review;<id>;<pane>`; `SessionManager+Reviews.swift`
+downloads `~/.clauntty/reviews/<id>.json` (also on connect and foreground: `checkReviews`), builds a
+`Review` (`Review.swift`: the diff parsed, files in priority order, the agent's comments placed by
+`match`) and shows the oldest of `reviews` (`ReviewView`, a sheet; a plain stand-in for now). Send
+writes the report to `<id>.reply` (`ReviewReply.sendScript`); if nobody takes it, the command is gone
+and the report is typed into the agent's pane, as the voice agent types a prompt.
+
 **The voice agent's tools** (`VoiceAgent`) see tabs as workspaces, in the app's order, and their
 panes, with the state rtach reports for each (`paneStates`: agent, working/blocked/done, last
 prompt), so `list_tabs` asks nothing of the machines. Tools take `tab` and `pane` (default: the pane

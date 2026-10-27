@@ -415,6 +415,9 @@ class Session: ObservableObject, Identifiable {
     /// Called when `clauntty show` sends an image path on the remote host, with its
     /// inbox ID (nil from rtach before 2.10) and the pane that sent it (rtach 2.21+)
     var onShowImageRequested: ((_ path: String, _ inboxId: String?, _ pane: String?) -> Void)?
+    /// `clauntty review` made a review (rtach 2.38.0+): its id on the host, and the pane
+    /// that ran it
+    var onReviewRequested: ((_ id: String) -> Void)?
 
     /// `rtach ws` changed the host's workspaces: the workspace and pane to show, if any
     var onWorkspaceChanged: ((_ workspaceId: String?, _ paneId: String?) -> Void)?
@@ -933,6 +936,13 @@ class Session: ObservableObject, Identifiable {
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command image \(path) (inbox \(inboxId ?? "none"), pane \(pane ?? "none"))")
                 onShowImageRequested?(path, inboxId, pane)
             }
+        case "review":
+            // "review;<id>;<pane>": the pane is in the bundle too
+            let id = parts.count > 1 ? String(parts[1].prefix { $0 != ";" }) : ""
+            if ReviewReply.isValidId(id) {
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command review \(id)")
+                onReviewRequested?(id)
+            }
         case "ended":
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach session ended")
             hasEnded = true
@@ -1134,6 +1144,38 @@ class Session: ObservableObject, Identifiable {
         guard let connection = sshConnection else { throw SessionError.notConnected }
         let encoded = Data(script.utf8).base64EncodedString()
         return try await connection.executeCommand("echo \(encoded) | base64 -d | sh")
+    }
+
+    /// Reviews waiting on the host (`clauntty review`)
+    func listReviews() async throws -> [String] {
+        guard let connection = sshConnection else { throw SessionError.notConnected }
+        return try await connection.executeCommand(ReviewReply.listCommand)
+            .split(separator: "\n").map(String.init).filter(ReviewReply.isValidId)
+    }
+
+    enum ReviewDelivery: String {
+        /// The waiting command took it
+        case delivered
+        /// Nobody was waiting: the comments should go to the pane
+        case gone
+        /// The review was already closed (sent from another device)
+        case answered
+    }
+
+    /// Hand the user's comments to the `clauntty review` waiting for them
+    func sendReviewReply(id: String, report: String) async throws -> ReviewDelivery {
+        guard ReviewReply.isValidId(id) else { throw SessionError.notConnected }
+        let output = try await runRemoteScript(ReviewReply.sendScript(id, report: report))
+        guard let result = ReviewDelivery(rawValue: output.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw SessionError.reviewReplyFailed(output)
+        }
+        return result
+    }
+
+    /// Close a review without comments: the waiting command exits
+    func dismissReview(id: String) async {
+        guard let connection = sshConnection, ReviewReply.isValidId(id) else { return }
+        _ = try? await connection.executeCommand(ReviewReply.dismissCommand(id))
     }
 
     func removeFromImageInbox(_ ids: [String]) async {
@@ -1596,9 +1638,11 @@ enum ImageInbox {
 
 // MARK: - Errors
 
-enum SessionError: Error, LocalizedError {
+enum SessionError: Error, LocalizedError, Equatable {
     case notConnected
     case fileTooLarge
+    /// The host's answer to a review's reply script, when it wasn't one it gives
+    case reviewReplyFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -1606,6 +1650,8 @@ enum SessionError: Error, LocalizedError {
             return "SSH connection not established"
         case .fileTooLarge:
             return "File is too large"
+        case .reviewReplyFailed(let output):
+            return output.isEmpty ? "The host didn't take the comments" : "The host didn't take the comments: \(output.prefix(200))"
         }
     }
 }

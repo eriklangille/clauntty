@@ -74,6 +74,11 @@ struct MainView: View {
             ImageViewer(content: $sessionManager.imageViewer) { views.frameInWindow(of: $0) }
                 .ignoresSafeArea()
         }
+        // A review from `clauntty review`, the oldest first
+        .sheet(item: Binding(get: { sessionManager.reviews.first }, set: { _ in })) { review in
+            ReviewView(review: review)
+                .environmentObject(sessionManager)
+        }
         // Closed: typing goes back to the pane you're in
         .onChange(of: window.switcherShown) { _, shown in
             if !shown { refocus() }

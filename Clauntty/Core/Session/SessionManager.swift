@@ -77,6 +77,13 @@ class SessionManager: ObservableObject {
     /// on connect can both bring the same entry.
     private var inboxIdsSeen: Set<String> = []
 
+    /// Reviews from `clauntty review`, oldest first; the first is shown while there's one
+    /// (SessionManager+Reviews.swift)
+    @Published var reviews: [Review] = []
+    /// Reviews downloaded or downloading this run (the live command and the check on
+    /// connect can both bring one)
+    var reviewIdsSeen: Set<String> = []
+
     /// Currently active tab type and ID
     enum ActiveTab: Equatable {
         case terminal(UUID)
@@ -457,6 +464,10 @@ class SessionManager: ObservableObject {
             guard let self = self, let session = session else { return }
             self.handleShowImageRequest(from: session, path: path, inboxId: inboxId, pane: pane)
         }
+        session.onReviewRequested = { [weak self, weak session] id in
+            guard let self, let session else { return }
+            self.handleReviewRequest(from: session, id: id)
+        }
         session.onPaneStateChanged = { [weak self] paneId, json in
             self?.paneStateChanged(paneId: paneId, json: json)
         }
@@ -496,6 +507,7 @@ class SessionManager: ObservableObject {
 
         if usingRtach {
             checkImageInbox(for: session)
+            checkReviews(for: session)
             // At launch the phone attaches every pane: let the idle ones go once it settles
             scheduleIdleRelease()
         }

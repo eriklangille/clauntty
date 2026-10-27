@@ -52,7 +52,9 @@ def main():
         s = s.replace(match_text, match_text + text)
 
     after(build.group(0), f"\t\t{new_build} /* {name} in Sources */ = {{isa = PBXBuildFile; fileRef = {new_ref} /* {name} */; }};\n")
-    after(ref.group(0), f'\t\t{new_ref} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = "<group>"; }};\n')
+    # Quoted unless plain: a `+` (SessionManager+X.swift) makes the project unreadable bare
+    path = name if re.fullmatch(r"[A-Za-z0-9_./-]+", name) else f'"{name}"'
+    after(ref.group(0), f'\t\t{new_ref} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {path}; sourceTree = "<group>"; }};\n')
     after(f"\t\t\t\t{ref.group(1)} /* {sibling} */,\n", f"\t\t\t\t{new_ref} /* {name} */,\n")
     after(f"\t\t\t\t{build.group(1)} /* {sibling} in Sources */,\n", f"\t\t\t\t{new_build} /* {name} in Sources */,\n")
 
