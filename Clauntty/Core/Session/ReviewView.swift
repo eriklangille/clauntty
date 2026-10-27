@@ -32,6 +32,8 @@ struct ReviewView: View, Equatable {
     @State private var picking: Picking?
     @State private var drawer = false
     @State private var jump: Jump?
+    /// Where the page's jump anchor is: a jump scrolls to it
+    @State private var jumpY: CGFloat?
     @State private var sending = false
     @State private var sent: String?
     @State private var error: String?
@@ -126,7 +128,7 @@ struct ReviewView: View, Equatable {
                     VStack(alignment: .leading, spacing: 0) {
                         ReviewPage(
                             review: review, colors: colors, comments: comments, toggled: toggled,
-                            editing: editing, picking: picking, drafts: drafts, actions: actions, band: scroll.band
+                            editing: editing, picking: picking, drafts: drafts, actions: actions
                         )
                         .equatable()
                         footer
@@ -137,6 +139,17 @@ struct ReviewView: View, Equatable {
                     }
                     .coordinateSpace(name: PageScroll.space)
                     .onPreferenceChange(TopsKey.self) { [scroll] tops in scroll.setTops(tops) }
+                    // What a jump scrolls to, put where it's going: ids inside the page (an
+                    // equatable view) weren't found by the scroll view's reader
+                    .overlay(alignment: .topLeading) {
+                        if let jumpY {
+                            VStack(spacing: 0) {
+                                Color.clear.frame(width: 1, height: max(0, jumpY))
+                                Color.clear.frame(width: 1, height: 1).id("jump")
+                            }
+                            .allowsHitTesting(false)
+                        }
+                    }
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .trackingScrollY { [scroll] y, height in scroll.update(y: y, viewport: height) }
@@ -145,19 +158,19 @@ struct ReviewView: View, Equatable {
                     StickyHeader(scroll: scroll, files: review.files, colors: colors)
                 }
                 .onAppear {
+                    FrameMonitor.shared?.start()
                     scroll.files = review.files.map(\.path)
-                    if #unavailable(iOS 18, macOS 15) { scroll.band.showAll() }
                 }
                 .onChange(of: jump) { _, jump in
                     guard let jump else { return }
-                    let target = jump.target == "footer" ? "footer" : "file:" + jump.file
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        proxy.scrollTo(target, anchor: jump.target == "footer" ? .bottom : .top)
-                    }
-                    // A line inside a file is only there once the file is laid out
-                    if let line = jump.target, line != "footer" {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(line, anchor: UnitPoint(x: 0, y: 0.3)) }
+                    // After the page has laid out what the jump opened (a collapsed hunk)
+                    DispatchQueue.main.async {
+                        let key = jump.target == "footer" ? "" : jump.target ?? jump.file
+                        guard let y = scroll.tops[key] else { return }
+                        jumpY = y
+                        // Straight there: animated, a long jump drew the whole way
+                        DispatchQueue.main.async {
+                            proxy.scrollTo("jump", anchor: jump.target == nil || jump.target == "footer" ? .top : UnitPoint(x: 0, y: 0.3))
                         }
                     }
                 }
@@ -303,7 +316,7 @@ struct ReviewView: View, Equatable {
                 if !comments.isEmpty {
                     Rectangle().fill(colors.hairline).frame(height: 1).padding(.bottom, 12)
                 }
-                NoteField(drafts: drafts, colors: colors)
+                NoteField(drafts: drafts, colors: colors, send: send)
                 HStack {
                     if let error {
                         Text(error).font(.system(size: 13)).foregroundStyle(colors.minus)
@@ -454,9 +467,7 @@ final class PageScroll: ObservableObject {
     static let space = "review-page"
 
     @Published private(set) var y: CGFloat = 0
-    private(set) var viewport: CGFloat = 0
-    /// Moves in steps as the page scrolls, for the hunks to draw the lines near the screen
-    let band = PageBand()
+    private var viewport: CGFloat = 0
     /// Where each file's header is on the page, and Finish review's (as "")
     private(set) var tops: [String: CGFloat] = [:]
     var files: [String] = []
@@ -465,7 +476,6 @@ final class PageScroll: ObservableObject {
     func update(y: CGFloat, viewport: CGFloat) {
         if y != self.y { self.y = y }
         self.viewport = viewport
-        band.update(y: y, viewport: viewport)
         follow()
     }
 
@@ -485,28 +495,6 @@ final class PageScroll: ObservableObject {
         if place.current != current { place.current = current }
         let shown = (tops[""] ?? .infinity) < y + viewport
         if place.footerShown != shown { withAnimation(.easeOut(duration: 0.15)) { place.footerShown = shown } }
-    }
-}
-
-/// Which part of the page is near the screen, in steps of `step`: the hunks redraw when it
-/// changes, not on every frame of a scroll
-final class PageBand: ObservableObject {
-    static let step: CGFloat = 400
-    /// How far beyond the screen lines are drawn, above and below
-    static let margin: CGFloat = 1600
-
-    @Published private(set) var range: ClosedRange<CGFloat> = 0...(PageBand.margin * 2)
-
-    /// Where the scroll position isn't told (iOS 17, macOS 14): every line
-    func showAll() {
-        range = -CGFloat.greatestFiniteMagnitude...CGFloat.greatestFiniteMagnitude
-    }
-
-    func update(y: CGFloat, viewport: CGFloat) {
-        let top = (max(0, y) / Self.step).rounded(.down) * Self.step
-        let bottom = ((max(0, y) + max(viewport, 1)) / Self.step).rounded(.up) * Self.step
-        let range = (top - Self.margin)...(bottom + Self.margin)
-        if range != self.range { self.range = range }
     }
 }
 
@@ -563,10 +551,12 @@ private struct FinishChip: View {
 private struct NoteField: View {
     @ObservedObject var drafts: ReviewDrafts
     let colors: ReviewColors
+    let send: () -> Void
 
     var body: some View {
         TextField("Note for Claude (optional)", text: $drafts.note, axis: .vertical)
             .textFieldStyle(.plain)
+            .newlineKeys(text: $drafts.note, submit: send)
             .lineLimit(2...8)
             .font(.system(size: ReviewView.inputSize))
             .padding(.horizontal, 9)
@@ -652,19 +642,16 @@ private struct FileList: View, Equatable {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 12)
             }
-            // Always at the bottom of the list
+            // Always at the bottom of the list: the review's one primary action
             Button { go("", "footer") } label: {
-                HStack(spacing: 0) {
+                HStack(spacing: 6) {
                     Text("Finish review")
-                    Spacer(minLength: 10)
-                    if !comments.isEmpty { Text("\(comments.count)").foregroundStyle(colors.dim).fontWeight(.regular) }
+                    if !comments.isEmpty { Text("· \(comments.count)").fontWeight(.regular) }
                 }
-                .font(.system(size: 14, weight: .medium))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PrimaryStyle(colors: colors))
+            .padding(12)
             .overlay(alignment: .top) { Rectangle().fill(colors.hairline).frame(height: 1) }
         }
     }
@@ -707,7 +694,6 @@ private struct ReviewPage: View, Equatable {
     let picking: ReviewView.Picking?
     let drafts: ReviewDrafts
     let actions: PageActions
-    let band: PageBand
 
     static func == (a: Self, b: Self) -> Bool {
         a.review.id == b.review.id && a.colors == b.colors && a.comments == b.comments && a.toggled == b.toggled
@@ -763,7 +749,7 @@ private struct ReviewPage: View, Equatable {
                 comments: comments.filter { $0.path == file.path },
                 editing: editing?.path == file.path ? editing : nil,
                 picking: picking?.hunk == key ? picking : nil,
-                drafts: drafts, actions: actions, band: band
+                drafts: drafts, actions: actions
             )
             .equatable()
         }
@@ -859,9 +845,6 @@ struct HunkView: View, Equatable {
     let picking: ReviewView.Picking?
     let drafts: ReviewDrafts
     let actions: PageActions
-    /// Only the lines near the screen are drawn: a review of thousands of lines took
-    /// seconds to open, every line built at once
-    @ObservedObject var band: PageBand
 
     enum PickEvent { case began(Int), moved(Int), ended }
 
@@ -872,8 +855,6 @@ struct HunkView: View, Equatable {
 
     /// Comment rows' heights, measured
     @State private var heights: [String: CGFloat] = [:]
-    /// Where the hunk's rows start on the page
-    @State private var top: CGFloat = 0
     @State private var hovered: Int?
     @State private var viewport: CGFloat = 0
 
@@ -889,18 +870,16 @@ struct HunkView: View, Equatable {
             summary
             if open {
                 let layout = HunkLayout(items: items, heights: heights)
-                let window = layout.window((band.range.lowerBound - top)...(band.range.upperBound - top))
+                let style = CodeStyle.of(colors)
                 HStack(alignment: .top, spacing: 0) {
-                    GutterColumn(hunk: hunk, layout: layout, window: window, colors: colors, gutter: gutter)
-                        .equatable()
+                    LinesDrawing(lines: DrawnLines(key: key, lines: hunk.lines, tops: layout.lineTops, part: .numbers(width: gutter), style: style))
+                        .frame(width: gutter, height: layout.height)
                         .contentShape(Rectangle())
                         .gesture(gutterGesture(layout))
                     ScrollView(.horizontal, showsIndicators: false) {
-                        CodeColumn(hunk: hunk, layout: layout, window: window, colors: colors)
-                            .equatable()
-                            // As wide as the longest line, drawn or not: the width doesn't
-                            // jump as lines come and go
-                            .frame(minWidth: max(viewport - gutter, codeWidth), alignment: .leading)
+                        // As wide as the longest line, or the room there is
+                        LinesDrawing(lines: DrawnLines(key: key, lines: hunk.lines, tops: layout.lineTops, part: .code, style: style))
+                            .frame(width: max(viewport - gutter, codeWidth), height: layout.height)
                             .contentShape(Rectangle())
                             #if os(iOS)
                             // On the phone a tap anywhere on a line comments on it
@@ -911,11 +890,9 @@ struct HunkView: View, Equatable {
                     }
                 }
                 .background(GeometryReader { g in
-                    let frame = g.frame(in: .named(PageScroll.space))
                     Color.clear
-                        .onAppear { viewport = g.size.width; top = frame.minY }
+                        .onAppear { viewport = g.size.width }
                         .onChange(of: g.size.width) { _, width in viewport = width }
-                        .onChange(of: frame.minY) { _, y in top = y }
                 })
                 .overlay(alignment: .topLeading) { jumpTargets(layout).allowsHitTesting(false) }
                 .overlay(alignment: .topLeading) { lights(layout).allowsHitTesting(false) }
@@ -939,15 +916,17 @@ struct HunkView: View, Equatable {
         return CGFloat(longest) * 7.6 + 24
     }
 
-    /// Where a jump to a commented line scrolls to: there whether or not the line is drawn,
-    /// and outside the sideways scroll (inside it, that scroll was the one moved)
+    /// Where each commented line is on the page, for a jump to it
     private func jumpTargets(_ layout: HunkLayout) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(targets, id: \.self) { index in
                 // A spacer above it, not an offset: scrolling to it goes by its laid-out frame
                 VStack(spacing: 0) {
                     Color.clear.frame(width: 1, height: layout.y(ofLine: index))
-                    Color.clear.frame(width: 1, height: Self.rowHeight).id("line:\(hunk.lines[index].id)")
+                    Color.clear.frame(width: 1, height: Self.rowHeight)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: TopsKey.self, value: ["line:\(hunk.lines[index].id)": g.frame(in: .named(PageScroll.space)).minY])
+                        })
                 }
             }
         }
@@ -1124,7 +1103,7 @@ struct HunkLayout: Equatable {
 
     let placed: [Placed]
     /// Each line's top, by index in the hunk
-    private let lineTops: [CGFloat]
+    let lineTops: [CGFloat]
 
     init(items: [Item], heights: [String: CGFloat]) {
         var placed: [Placed] = []
@@ -1147,33 +1126,6 @@ struct HunkLayout: Equatable {
 
     var height: CGFloat { placed.last.map { $0.y + $0.height } ?? 0 }
 
-    /// The rows that are within a span of the hunk's height, by index in `placed`
-    func window(_ span: ClosedRange<CGFloat>) -> Range<Int> {
-        guard !placed.isEmpty, span.upperBound > 0, span.lowerBound < height else { return 0..<0 }
-        // The first row ending below the span's top, the first starting below its bottom
-        var lo = 0, hi = placed.count
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if placed[mid].y + placed[mid].height <= span.lowerBound { lo = mid + 1 } else { hi = mid }
-        }
-        let first = lo
-        hi = placed.count
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if placed[mid].y < span.upperBound { lo = mid + 1 } else { hi = mid }
-        }
-        return first..<lo
-    }
-
-    /// The height of the rows above a window, and below it
-    func space(before window: Range<Int>) -> CGFloat {
-        window.lowerBound < placed.count ? placed[window.lowerBound].y : height
-    }
-
-    func space(after window: Range<Int>) -> CGFloat {
-        window.isEmpty && window.lowerBound >= placed.count ? 0 : height - space(before: window) - window.reduce(0) { $0 + placed[$1].height }
-    }
-
     func y(ofLine index: Int) -> CGFloat {
         index < lineTops.count ? lineTops[index] : 0
     }
@@ -1192,111 +1144,6 @@ struct HunkLayout: Equatable {
     }
 }
 
-/// The line numbers, not scrolling; a space where each comment row goes. Each is the
-/// target a jump to its line scrolls to (outside the sideways scroll, so that isn't the one
-/// scrolled).
-private struct GutterColumn: View, Equatable {
-    let hunk: Review.Hunk
-    let layout: HunkLayout
-    /// The rows drawn; the rest are space
-    let window: Range<Int>
-    let colors: ReviewColors
-    let gutter: CGFloat
-
-    static func == (a: Self, b: Self) -> Bool {
-        a.hunk.lines.first?.id == b.hunk.lines.first?.id && a.layout == b.layout && a.window == b.window
-            && a.colors == b.colors && a.gutter == b.gutter
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(width: gutter, height: layout.space(before: window))
-            ForEach(layout.placed[window], id: \.item.key) { placed in
-                if case .line(let index) = placed.item {
-                    let line = hunk.lines[index]
-                    Text(line.number.map(String.init) ?? "")
-                        .font(.system(size: 12.5, design: .monospaced))
-                        .foregroundStyle(numberColor(line))
-                        .frame(width: gutter - 6, height: HunkView.rowHeight, alignment: .trailing)
-                        .padding(.trailing, 6)
-                        .background(gutterTint(line))
-                        .id("line:\(line.id)")
-                } else {
-                    Color.clear.frame(width: gutter, height: placed.height)
-                }
-            }
-            Color.clear.frame(width: gutter, height: layout.space(after: window))
-        }
-    }
-
-    private func gutterTint(_ line: Review.Line) -> Color {
-        switch line.kind {
-        case .added: return colors.addGutter
-        case .removed: return colors.delGutter
-        case .context: return .clear
-        }
-    }
-
-    private func numberColor(_ line: Review.Line) -> Color {
-        switch line.kind {
-        case .added: return colors.plus.opacity(0.85)
-        case .removed: return colors.minus.opacity(0.85)
-        case .context: return colors.faint
-        }
-    }
-}
-
-/// The code, a row per line, a space where each comment row goes; it scrolls sideways
-private struct CodeColumn: View, Equatable {
-    let hunk: Review.Hunk
-    let layout: HunkLayout
-    /// The rows drawn; the rest are space
-    let window: Range<Int>
-    let colors: ReviewColors
-
-    static func == (a: Self, b: Self) -> Bool {
-        a.hunk.lines.first?.id == b.hunk.lines.first?.id && a.layout == b.layout && a.window == b.window && a.colors == b.colors
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: layout.space(before: window))
-            ForEach(layout.placed[window], id: \.item.key) { placed in
-                if case .line(let index) = placed.item {
-                    let line = hunk.lines[index]
-                    code(line)
-                        .font(.system(size: 12.5, design: .monospaced))
-                        .fixedSize()
-                        .padding(.leading, 8)
-                        .padding(.trailing, 12)
-                        .frame(maxWidth: .infinity, minHeight: HunkView.rowHeight, maxHeight: HunkView.rowHeight, alignment: .leading)
-                        .background(tint(line))
-                } else {
-                    Color.clear.frame(height: placed.height)
-                }
-            }
-            Color.clear.frame(height: layout.space(after: window))
-        }
-    }
-
-    private func code(_ line: Review.Line) -> Text {
-        guard let runs = line.runs else { return Text(line.text) }
-        return runs.reduce(Text("")) { text, run in
-            guard let kind = run.kind, let colour = colors.tokens[kind] else { return text + Text(run.text) }
-            let piece = Text(run.text).foregroundColor(colour)
-            return text + (kind == .comment ? piece.italic() : piece)
-        }
-    }
-
-    private func tint(_ line: Review.Line) -> Color {
-        switch line.kind {
-        case .added: return colors.add
-        case .removed: return colors.del
-        case .context: return .clear
-        }
-    }
-}
-
 private extension View {
     /// How far the page is scrolled and how tall it shows, as it scrolls (iOS 18 and macOS
     /// 15; older ones get no header kept at the top, and the Finish review chip stays)
@@ -1311,6 +1158,30 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+private extension View {
+    /// The Mac's text fields: Shift+Return (and Option+Return) adds a line, as in Messages
+    /// and Slack; a vertical TextField otherwise ends editing on any Return. ⌘Return submits.
+    /// Plain Return is left as it was.
+    @ViewBuilder
+    func newlineKeys(text: Binding<String>, submit: @escaping () -> Void) -> some View {
+        #if os(macOS)
+        onKeyPress(.return, phases: .down) { press in
+            if press.modifiers.contains(.command) {
+                submit()
+                return .handled
+            }
+            if press.modifiers.contains(.shift) || press.modifiers.contains(.option) {
+                text.wrappedValue += "\n"
+                return .handled
+            }
+            return .ignored
+        }
+        #else
+        self
+        #endif
     }
 }
 
@@ -1408,6 +1279,7 @@ private struct EditorRow: View {
             .font(.system(size: 12))
             .foregroundStyle(colors.dim)
             TextField(placeholder, text: $drafts.draft, axis: .vertical)
+                .newlineKeys(text: $drafts.draft, submit: save)
                 .textFieldStyle(.plain)
                 .font(.system(size: ReviewView.inputSize))
                 .lineLimit(1...12)

@@ -171,13 +171,16 @@ oldest not closed for now, `shownReview`), over its workspace on the Mac with a 
 terminal theme's palette (`ReviewColors.of`, worked out once per theme). It's built for thousands of
 lines: it sits in a hosting view of its own (`ReviewHost`), so the window's updates (every pane change)
 never reach it; typing lives in `ReviewDrafts` and the scroll position in `PageScroll`, watched only by
-the views that show them; the page, each hunk and its two columns are equatable; each hunk draws only the
-lines within about two screens (`PageBand`, which moves in 400-point steps), with space for the rest.
-Line numbers are a column of their own beside the code (which scrolls sideways), comments rows laid over
-both from measured heights (`HunkLayout`), hover and picking one layer. The page is a plain `VStack`: a
-lazy one's guessed heights made jumps land on nothing (Mac) or under the wrong pinned header (phone), so
-the sticky file header is drawn from the scroll position (iOS 18/macOS 15; older systems draw every line
-and get no sticky header). Send writes the report to `<id>.reply` (`ReviewReply.sendScript`); if
+the views that show them; the page and each hunk are equatable. A hunk's code and line numbers aren't views per
+line: each is one view that draws its lines with Core Text (`CodeDrawing.swift`: an NSView on the Mac, which
+AppKit tiles, a CATiledLayer view on the phone), only what's on screen; the code's scrolls sideways. Comment
+rows are SwiftUI, laid over both from measured heights (`HunkLayout`); hover and picking are one layer. The
+page is a plain `VStack` (a lazy one's guessed heights made jumps land on nothing or under the wrong
+header), so the sticky file header is drawn from the scroll position (iOS 18/macOS 15). Jumps go straight
+there, unanimated, to a single anchor placed at the target's measured position: ids inside the equatable page
+weren't found by the scroll view's reader. `CLAUNTTY_REVIEW_PERF=1` logs main-thread stalls every 5 s
+("review frames", `FrameMonitor`). On the Mac, Shift/Option+Return adds a line in the comment and note
+fields and ⌘Return saves or sends. Send writes the report to `<id>.reply` (`ReviewReply.sendScript`); if
 nobody takes it, the command is gone and the report is typed into the agent's pane, as the voice agent
 types a prompt. While the overview is up the phone checks for reviews every 15 s (`checkReviewsOnHosts`):
 with no session claimed, rtach drops the live notice.

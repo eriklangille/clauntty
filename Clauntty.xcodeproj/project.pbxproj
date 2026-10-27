@@ -56,6 +56,8 @@
 		C00000A3 /* SSHAuthPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A3 /* SSHAuthPrompts.swift */; };
 		C0000015 /* KeyboardAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000015 /* KeyboardAccessoryView.swift */; };
 		C0000016 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000016 /* Session.swift */; };
+		AC000000000000000000000A /* CodeDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC100000000000000000000A /* CodeDrawing.swift */; };
+		AC0000000000000000000009 /* FrameMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000009 /* FrameMonitor.swift */; };
 		AC0000000000000000000008 /* Highlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000008 /* Highlighter.swift */; };
 		AC0000000000000000000007 /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000007 /* ReviewView.swift */; };
 		AC0000000000000000000006 /* SessionManager+Reviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000006 /* SessionManager+Reviews.swift */; };
@@ -170,6 +172,8 @@
 		C10000A3 /* SSHAuthPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthPrompts.swift; sourceTree = "<group>"; };
 		C1000015 /* KeyboardAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessoryView.swift; sourceTree = "<group>"; };
 		C1000016 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		AC100000000000000000000A /* CodeDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeDrawing.swift; sourceTree = "<group>"; };
+		AC1000000000000000000009 /* FrameMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMonitor.swift; sourceTree = "<group>"; };
 		AC1000000000000000000008 /* Highlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlighter.swift; sourceTree = "<group>"; };
 		AC1000000000000000000007 /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
 		AC1000000000000000000006 /* SessionManager+Reviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Reviews.swift"; sourceTree = "<group>"; };
@@ -418,6 +422,8 @@
 			isa = PBXGroup;
 			children = (
 				C1000016 /* Session.swift */,
+				AC100000000000000000000A /* CodeDrawing.swift */,
+				AC1000000000000000000009 /* FrameMonitor.swift */,
 				AC1000000000000000000008 /* Highlighter.swift */,
 				AC1000000000000000000007 /* ReviewView.swift */,
 				AC1000000000000000000006 /* SessionManager+Reviews.swift */,
@@ -660,6 +666,8 @@
 				C0000019 /* RtachDeployer.swift in Sources */,
 				C0000015 /* KeyboardAccessoryView.swift in Sources */,
 				C0000016 /* Session.swift in Sources */,
+				AC000000000000000000000A /* CodeDrawing.swift in Sources */,
+				AC0000000000000000000009 /* FrameMonitor.swift in Sources */,
 				AC0000000000000000000008 /* Highlighter.swift in Sources */,
 				AC0000000000000000000007 /* ReviewView.swift in Sources */,
 				AC0000000000000000000006 /* SessionManager+Reviews.swift in Sources */,
