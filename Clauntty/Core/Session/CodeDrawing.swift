@@ -45,35 +45,40 @@ final class CodeStyle: @unchecked Sendable {
     static let rowHeight: CGFloat = 19
     static let fontSize: CGFloat = 12.5
 
-    let font: CTFont
-    let italic: CTFont
+    let font: PlatformFont
+    let italic: PlatformFont
+    /// The text's colours as the platform's colour objects, under the platform's attribute
+    /// names: macOS 15's Core Text sends `-set` to a foreground colour, and a CGColor under
+    /// `kCTForegroundColorAttributeName` crashed it (newer macOS took either)
+    let textColor: PlatformColor
     let text: CGColor
-    let tokens: [TokenKind: CGColor]
+    let tokens: [TokenKind: PlatformColor]
     let addTint: CGColor
     let delTint: CGColor
     let addGutter: CGColor
     let delGutter: CGColor
-    let plus: CGColor
-    let minus: CGColor
-    let faint: CGColor
+    let plus: PlatformColor
+    let minus: PlatformColor
+    let faint: PlatformColor
     /// Where the text sits in a row
     let baseline: CGFloat
 
     init(_ colors: ReviewColors) {
-        let font = PlatformFont.monospacedSystemFont(ofSize: Self.fontSize, weight: .regular) as CTFont
+        let font = PlatformFont.monospacedSystemFont(ofSize: Self.fontSize, weight: .regular)
         self.font = font
-        italic = CTFontCreateCopyWithSymbolicTraits(font, 0, nil, .traitItalic, .traitItalic) ?? font
+        italic = (CTFontCreateCopyWithSymbolicTraits(font as CTFont, 0, nil, .traitItalic, .traitItalic) as PlatformFont?) ?? font
         func cg(_ color: Color) -> CGColor { PlatformColor(color).cgColor }
-        text = cg(colors.fg)
-        tokens = colors.tokens.mapValues(cg)
+        textColor = PlatformColor(colors.fg)
+        text = textColor.cgColor
+        tokens = colors.tokens.mapValues { PlatformColor($0) }
         addTint = cg(colors.add)
         delTint = cg(colors.del)
         addGutter = cg(colors.addGutter)
         delGutter = cg(colors.delGutter)
-        plus = cg(colors.plus.opacity(0.85))
-        minus = cg(colors.minus.opacity(0.85))
-        faint = cg(colors.faint)
-        let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
+        plus = PlatformColor(colors.plus.opacity(0.85))
+        minus = PlatformColor(colors.minus.opacity(0.85))
+        faint = PlatformColor(colors.faint)
+        let ascent = CTFontGetAscent(font as CTFont), descent = CTFontGetDescent(font as CTFont)
         baseline = ((Self.rowHeight - ascent - descent) / 2 + ascent).rounded()
     }
 
@@ -91,8 +96,8 @@ final class CodeStyle: @unchecked Sendable {
         let string = NSMutableAttributedString()
         func add(_ text: String, _ kind: TokenKind?) {
             let attributes: [NSAttributedString.Key: Any] = [
-                NSAttributedString.Key(kCTFontAttributeName as String): kind == .comment ? italic : font,
-                NSAttributedString.Key(kCTForegroundColorAttributeName as String): kind.flatMap { tokens[$0] } ?? text,
+                .font: kind == .comment ? italic : font,
+                .foregroundColor: kind.flatMap { tokens[$0] } ?? textColor,
             ]
             string.append(NSAttributedString(string: text, attributes: attributes))
         }
@@ -107,10 +112,7 @@ final class CodeStyle: @unchecked Sendable {
     func numberLine(_ line: Review.Line) -> CTLine? {
         guard let number = line.number else { return nil }
         let color = line.kind == .added ? plus : line.kind == .removed ? minus : faint
-        let attributes: [NSAttributedString.Key: Any] = [
-            NSAttributedString.Key(kCTFontAttributeName as String): font,
-            NSAttributedString.Key(kCTForegroundColorAttributeName as String): color,
-        ]
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         return CTLineCreateWithAttributedString(NSAttributedString(string: String(number), attributes: attributes))
     }
 
