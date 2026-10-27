@@ -146,7 +146,9 @@ struct MainView: View {
                 // as its images are
                 .overlay {
                     if let review = sessionManager.shownReview(in: group.id) {
-                        ReviewView(review: review, theme: ghostty.theme) { sessionManager.hideReview(review) }
+                        // Over the panes' title bars too: its own view keeps its content below them
+                        ReviewHost(review: review, theme: ghostty.theme, sessionManager: sessionManager) { sessionManager.hideReview(review) }
+                            .ignoresSafeArea(.container, edges: .top)
                             .id(review.id)
                             .transition(.opacity)
                     }

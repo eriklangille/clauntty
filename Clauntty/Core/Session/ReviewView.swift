@@ -12,13 +12,14 @@ import SwiftUI
 /// `PageScroll`, watched only by the views that show them; the page and each hunk are
 /// equatable, so a change elsewhere skips them; scrolling a hunk sideways moves nothing but
 /// its code; hover and picking are one layer drawn over the lines, from where the rows are.
-struct ReviewView: View {
+struct ReviewView: View, Equatable {
     let review: Review
     let theme: Theme?
+    /// Not watched: it publishes whenever a pane does anything, and the review needs it only
+    /// to send
+    let sessionManager: SessionManager
     /// Leave it for now: it stays on the host, waiting
     let onClose: () -> Void
-
-    @EnvironmentObject private var sessionManager: SessionManager
 
     @State private var colors: ReviewColors
     @State private var drafts = ReviewDrafts()
@@ -35,12 +36,18 @@ struct ReviewView: View {
     @State private var sent: String?
     @State private var error: String?
 
-    init(review: Review, theme: Theme?, onClose: @escaping () -> Void) {
+    init(review: Review, theme: Theme?, sessionManager: SessionManager, onClose: @escaping () -> Void) {
         self.review = review
         self.theme = theme
+        self.sessionManager = sessionManager
         self.onClose = onClose
-        // Once: the theme's colours are parsed out of its text
-        _colors = State(initialValue: ReviewColors(theme: theme))
+        _colors = State(initialValue: ReviewColors.of(theme))
+    }
+
+    /// The same review in the same theme: its host view rebuilds whenever any pane changes,
+    /// and this keeps that from reaching the review
+    static func == (a: Self, b: Self) -> Bool {
+        a.review.id == b.review.id && a.theme?.id == b.theme?.id
     }
 
     struct EditTarget: Equatable {
@@ -119,7 +126,7 @@ struct ReviewView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ReviewPage(
                             review: review, colors: colors, comments: comments, toggled: toggled,
-                            editing: editing, picking: picking, drafts: drafts, actions: actions
+                            editing: editing, picking: picking, drafts: drafts, actions: actions, band: scroll.band
                         )
                         .equatable()
                         footer
@@ -137,7 +144,10 @@ struct ReviewView: View {
                 .overlay(alignment: .top) {
                     StickyHeader(scroll: scroll, files: review.files, colors: colors)
                 }
-                .onAppear { scroll.files = review.files.map(\.path) }
+                .onAppear {
+                    scroll.files = review.files.map(\.path)
+                    if #unavailable(iOS 18, macOS 15) { scroll.band.showAll() }
+                }
                 .onChange(of: jump) { _, jump in
                     guard let jump else { return }
                     let target = jump.target == "footer" ? "footer" : "file:" + jump.file
@@ -243,6 +253,7 @@ struct ReviewView: View {
         FileList(files: review.files, comments: comments, colors: colors, place: scroll.place) { file, target in
             go(file: file, target: target)
         }
+        .equatable()
     }
 
     private func go(file: String, target: String?) {
@@ -357,6 +368,76 @@ struct ReviewView: View {
     }
 }
 
+// MARK: - A graph of its own
+
+/// The review in a hosting view of its own, so the rest of the window can't reach it: in
+/// the window's own graph, every change a pane made (an agent's state, a title) had
+/// SwiftUI update the page's thousands of views, though none of them changed. It's given a
+/// new review or theme, and nothing else.
+struct ReviewHost: View {
+    let review: Review
+    let theme: Theme?
+    let sessionManager: SessionManager
+    let onClose: () -> Void
+
+    var body: some View {
+        IsolatedHost(id: "\(review.id)|\(theme?.id ?? "")") {
+            ReviewView(review: review, theme: theme, sessionManager: sessionManager, onClose: onClose)
+        }
+    }
+}
+
+#if os(macOS)
+private struct IsolatedHost<Content: View>: NSViewRepresentable {
+    let id: String
+    let content: () -> Content
+
+    func makeNSView(context: Context) -> NSHostingView<Content> {
+        let view = NSHostingView(rootView: content())
+        // Fills what it's given rather than asking for its content's size
+        view.sizingOptions = []
+        context.coordinator.id = id
+        return view
+    }
+
+    func updateNSView(_ view: NSHostingView<Content>, context: Context) {
+        guard context.coordinator.id != id else { return }
+        context.coordinator.id = id
+        view.rootView = content()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var id = ""
+    }
+}
+#else
+private struct IsolatedHost<Content: View>: UIViewControllerRepresentable {
+    let id: String
+    let content: () -> Content
+
+    func makeUIViewController(context: Context) -> UIHostingController<Content> {
+        let controller = UIHostingController(rootView: content())
+        controller.view.backgroundColor = .clear
+        context.coordinator.id = id
+        return controller
+    }
+
+    func updateUIViewController(_ controller: UIHostingController<Content>, context: Context) {
+        guard context.coordinator.id != id else { return }
+        context.coordinator.id = id
+        controller.rootView = content()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var id = ""
+    }
+}
+#endif
+
 // MARK: - State the page doesn't watch
 
 /// What's being typed: a comment and the note. Only their text fields (and Send's label)
@@ -373,7 +454,9 @@ final class PageScroll: ObservableObject {
     static let space = "review-page"
 
     @Published private(set) var y: CGFloat = 0
-    private var viewport: CGFloat = 0
+    private(set) var viewport: CGFloat = 0
+    /// Moves in steps as the page scrolls, for the hunks to draw the lines near the screen
+    let band = PageBand()
     /// Where each file's header is on the page, and Finish review's (as "")
     private(set) var tops: [String: CGFloat] = [:]
     var files: [String] = []
@@ -382,6 +465,7 @@ final class PageScroll: ObservableObject {
     func update(y: CGFloat, viewport: CGFloat) {
         if y != self.y { self.y = y }
         self.viewport = viewport
+        band.update(y: y, viewport: viewport)
         follow()
     }
 
@@ -401,6 +485,28 @@ final class PageScroll: ObservableObject {
         if place.current != current { place.current = current }
         let shown = (tops[""] ?? .infinity) < y + viewport
         if place.footerShown != shown { withAnimation(.easeOut(duration: 0.15)) { place.footerShown = shown } }
+    }
+}
+
+/// Which part of the page is near the screen, in steps of `step`: the hunks redraw when it
+/// changes, not on every frame of a scroll
+final class PageBand: ObservableObject {
+    static let step: CGFloat = 400
+    /// How far beyond the screen lines are drawn, above and below
+    static let margin: CGFloat = 1600
+
+    @Published private(set) var range: ClosedRange<CGFloat> = 0...(PageBand.margin * 2)
+
+    /// Where the scroll position isn't told (iOS 17, macOS 14): every line
+    func showAll() {
+        range = -CGFloat.greatestFiniteMagnitude...CGFloat.greatestFiniteMagnitude
+    }
+
+    func update(y: CGFloat, viewport: CGFloat) {
+        let top = (max(0, y) / Self.step).rounded(.down) * Self.step
+        let bottom = ((max(0, y) + max(viewport, 1)) / Self.step).rounded(.up) * Self.step
+        let range = (top - Self.margin)...(bottom + Self.margin)
+        if range != self.range { self.range = range }
     }
 }
 
@@ -489,12 +595,16 @@ private struct SendButton: View {
 
 /// The files in reading order, with Claude's comments and the user's under each; the file
 /// under the page's top edge lit
-private struct FileList: View {
+private struct FileList: View, Equatable {
     let files: [Review.File]
     let comments: [ReviewUserComment]
     let colors: ReviewColors
     @ObservedObject var place: PagePlace
     let go: (String, String?) -> Void
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.files.map(\.path) == b.files.map(\.path) && a.comments == b.comments && a.colors == b.colors
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -597,6 +707,7 @@ private struct ReviewPage: View, Equatable {
     let picking: ReviewView.Picking?
     let drafts: ReviewDrafts
     let actions: PageActions
+    let band: PageBand
 
     static func == (a: Self, b: Self) -> Bool {
         a.review.id == b.review.id && a.colors == b.colors && a.comments == b.comments && a.toggled == b.toggled
@@ -652,7 +763,7 @@ private struct ReviewPage: View, Equatable {
                 comments: comments.filter { $0.path == file.path },
                 editing: editing?.path == file.path ? editing : nil,
                 picking: picking?.hunk == key ? picking : nil,
-                drafts: drafts, actions: actions
+                drafts: drafts, actions: actions, band: band
             )
             .equatable()
         }
@@ -748,6 +859,9 @@ struct HunkView: View, Equatable {
     let picking: ReviewView.Picking?
     let drafts: ReviewDrafts
     let actions: PageActions
+    /// Only the lines near the screen are drawn: a review of thousands of lines took
+    /// seconds to open, every line built at once
+    @ObservedObject var band: PageBand
 
     enum PickEvent { case began(Int), moved(Int), ended }
 
@@ -758,6 +872,8 @@ struct HunkView: View, Equatable {
 
     /// Comment rows' heights, measured
     @State private var heights: [String: CGFloat] = [:]
+    /// Where the hunk's rows start on the page
+    @State private var top: CGFloat = 0
     @State private var hovered: Int?
     @State private var viewport: CGFloat = 0
 
@@ -773,15 +889,18 @@ struct HunkView: View, Equatable {
             summary
             if open {
                 let layout = HunkLayout(items: items, heights: heights)
+                let window = layout.window((band.range.lowerBound - top)...(band.range.upperBound - top))
                 HStack(alignment: .top, spacing: 0) {
-                    GutterColumn(hunk: hunk, layout: layout, colors: colors, gutter: gutter)
+                    GutterColumn(hunk: hunk, layout: layout, window: window, colors: colors, gutter: gutter)
                         .equatable()
                         .contentShape(Rectangle())
                         .gesture(gutterGesture(layout))
                     ScrollView(.horizontal, showsIndicators: false) {
-                        CodeColumn(hunk: hunk, layout: layout, colors: colors)
+                        CodeColumn(hunk: hunk, layout: layout, window: window, colors: colors)
                             .equatable()
-                            .frame(minWidth: max(0, viewport - gutter), alignment: .leading)
+                            // As wide as the longest line, drawn or not: the width doesn't
+                            // jump as lines come and go
+                            .frame(minWidth: max(viewport - gutter, codeWidth), alignment: .leading)
                             .contentShape(Rectangle())
                             #if os(iOS)
                             // On the phone a tap anywhere on a line comments on it
@@ -792,10 +911,13 @@ struct HunkView: View, Equatable {
                     }
                 }
                 .background(GeometryReader { g in
+                    let frame = g.frame(in: .named(PageScroll.space))
                     Color.clear
-                        .onAppear { viewport = g.size.width }
+                        .onAppear { viewport = g.size.width; top = frame.minY }
                         .onChange(of: g.size.width) { _, width in viewport = width }
+                        .onChange(of: frame.minY) { _, y in top = y }
                 })
+                .overlay(alignment: .topLeading) { jumpTargets(layout).allowsHitTesting(false) }
                 .overlay(alignment: .topLeading) { lights(layout).allowsHitTesting(false) }
                 .overlay(alignment: .topLeading) { commentRows(layout) }
                 .onPreferenceChange(HeightsKey.self) { if heights != $0 { heights = $0 } }
@@ -809,6 +931,35 @@ struct HunkView: View, Equatable {
             }
         }
         .padding(.top, 6)
+    }
+
+    /// The longest line's width in the code's monospaced font
+    private var codeWidth: CGFloat {
+        let longest = hunk.lines.map { $0.text.count + $0.text.filter { $0 == "\t" }.count * 3 }.max() ?? 0
+        return CGFloat(longest) * 7.6 + 24
+    }
+
+    /// Where a jump to a commented line scrolls to: there whether or not the line is drawn,
+    /// and outside the sideways scroll (inside it, that scroll was the one moved)
+    private func jumpTargets(_ layout: HunkLayout) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(targets, id: \.self) { index in
+                // A spacer above it, not an offset: scrolling to it goes by its laid-out frame
+                VStack(spacing: 0) {
+                    Color.clear.frame(width: 1, height: layout.y(ofLine: index))
+                    Color.clear.frame(width: 1, height: Self.rowHeight).id("line:\(hunk.lines[index].id)")
+                }
+            }
+        }
+    }
+
+    /// Lines with a comment on them, by index
+    private var targets: [Int] {
+        hunk.lines.indices.filter { i in
+            let line = hunk.lines[i]
+            return file.comments.contains { $0.side == line.side && $0.line == line.number }
+                || comments.contains { $0.side == line.side && $0.line == line.number }
+        }
     }
 
     private var summary: some View {
@@ -994,6 +1145,35 @@ struct HunkLayout: Equatable {
         lineTops = tops
     }
 
+    var height: CGFloat { placed.last.map { $0.y + $0.height } ?? 0 }
+
+    /// The rows that are within a span of the hunk's height, by index in `placed`
+    func window(_ span: ClosedRange<CGFloat>) -> Range<Int> {
+        guard !placed.isEmpty, span.upperBound > 0, span.lowerBound < height else { return 0..<0 }
+        // The first row ending below the span's top, the first starting below its bottom
+        var lo = 0, hi = placed.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if placed[mid].y + placed[mid].height <= span.lowerBound { lo = mid + 1 } else { hi = mid }
+        }
+        let first = lo
+        hi = placed.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if placed[mid].y < span.upperBound { lo = mid + 1 } else { hi = mid }
+        }
+        return first..<lo
+    }
+
+    /// The height of the rows above a window, and below it
+    func space(before window: Range<Int>) -> CGFloat {
+        window.lowerBound < placed.count ? placed[window.lowerBound].y : height
+    }
+
+    func space(after window: Range<Int>) -> CGFloat {
+        window.isEmpty && window.lowerBound >= placed.count ? 0 : height - space(before: window) - window.reduce(0) { $0 + placed[$1].height }
+    }
+
     func y(ofLine index: Int) -> CGFloat {
         index < lineTops.count ? lineTops[index] : 0
     }
@@ -1018,16 +1198,20 @@ struct HunkLayout: Equatable {
 private struct GutterColumn: View, Equatable {
     let hunk: Review.Hunk
     let layout: HunkLayout
+    /// The rows drawn; the rest are space
+    let window: Range<Int>
     let colors: ReviewColors
     let gutter: CGFloat
 
     static func == (a: Self, b: Self) -> Bool {
-        a.hunk.lines.first?.id == b.hunk.lines.first?.id && a.layout == b.layout && a.colors == b.colors && a.gutter == b.gutter
+        a.hunk.lines.first?.id == b.hunk.lines.first?.id && a.layout == b.layout && a.window == b.window
+            && a.colors == b.colors && a.gutter == b.gutter
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(layout.placed, id: \.item.key) { placed in
+            Color.clear.frame(width: gutter, height: layout.space(before: window))
+            ForEach(layout.placed[window], id: \.item.key) { placed in
                 if case .line(let index) = placed.item {
                     let line = hunk.lines[index]
                     Text(line.number.map(String.init) ?? "")
@@ -1041,6 +1225,7 @@ private struct GutterColumn: View, Equatable {
                     Color.clear.frame(width: gutter, height: placed.height)
                 }
             }
+            Color.clear.frame(width: gutter, height: layout.space(after: window))
         }
     }
 
@@ -1065,15 +1250,18 @@ private struct GutterColumn: View, Equatable {
 private struct CodeColumn: View, Equatable {
     let hunk: Review.Hunk
     let layout: HunkLayout
+    /// The rows drawn; the rest are space
+    let window: Range<Int>
     let colors: ReviewColors
 
     static func == (a: Self, b: Self) -> Bool {
-        a.hunk.lines.first?.id == b.hunk.lines.first?.id && a.layout == b.layout && a.colors == b.colors
+        a.hunk.lines.first?.id == b.hunk.lines.first?.id && a.layout == b.layout && a.window == b.window && a.colors == b.colors
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(layout.placed, id: \.item.key) { placed in
+            Color.clear.frame(height: layout.space(before: window))
+            ForEach(layout.placed[window], id: \.item.key) { placed in
                 if case .line(let index) = placed.item {
                     let line = hunk.lines[index]
                     code(line)
@@ -1087,6 +1275,7 @@ private struct CodeColumn: View, Equatable {
                     Color.clear.frame(height: placed.height)
                 }
             }
+            Color.clear.frame(height: layout.space(after: window))
         }
     }
 
@@ -1442,6 +1631,17 @@ struct ReviewColors: Equatable {
     var hairline: Color { fg.opacity(0.08) }
 
     static let claude = Color(red: 0.851, green: 0.467, blue: 0.341)
+
+    /// A theme's colours, worked out from its text once
+    @MainActor static func of(_ theme: Theme?) -> ReviewColors {
+        let key = theme?.id ?? ""
+        if let known = cache[key] { return known }
+        let colors = ReviewColors(theme: theme)
+        cache[key] = colors
+        return colors
+    }
+
+    @MainActor private static var cache: [String: ReviewColors] = [:]
 
     init(theme: Theme?) {
         let light = theme?.isLight ?? false

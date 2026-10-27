@@ -65,10 +65,11 @@ struct ContentView: View {
     }
     // A review from `clauntty review`, the oldest first
     .fullScreenCover(item: Binding(get: { sessionManager.shownReview }, set: { _ in })) { review in
-      ReviewView(review: review, theme: ThemeManager.shared.theme(withId: UserDefaults.standard.string(forKey: "selectedThemeId") ?? "")) {
+      ReviewHost(review: review, theme: ThemeManager.shared.theme(withId: UserDefaults.standard.string(forKey: "selectedThemeId") ?? ""),
+                 sessionManager: sessionManager) {
         sessionManager.hideReview(review)
       }
-      .environmentObject(sessionManager)
+      .ignoresSafeArea()
     }
     .fullScreenCover(item: $sessionManager.imageViewer) { _ in
       // Images from `clauntty show` on a remote host
