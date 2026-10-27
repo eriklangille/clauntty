@@ -125,26 +125,44 @@ final class CodeStyle: @unchecked Sendable {
             let mid = (lo + hi + 1) / 2
             if lines.tops[mid] <= rect.minY - Self.rowHeight { lo = mid } else { hi = mid - 1 }
         }
-        ctx.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+        var shown = lo..<lo
         for index in lo..<lines.tops.count {
+            if lines.tops[index] > rect.maxY { break }
+            shown = shown.lowerBound..<(index + 1)
+        }
+        // The tints first, a run of touching lines with the same one as one rectangle: a
+        // new file is a tint from top to bottom
+        var run: (tint: CGColor, top: CGFloat, bottom: CGFloat)?
+        func fill() {
+            guard let run else { return }
+            ctx.setFillColor(run.tint)
+            ctx.fill(CGRect(x: 0, y: run.top, width: width, height: run.bottom - run.top))
+        }
+        for index in shown {
             let top = lines.tops[index]
-            if top > rect.maxY { break }
-            guard top + Self.rowHeight > rect.minY else { continue }
-            let line = lines.lines[index]
             let tint: CGColor?
-            switch (lines.part, line.kind) {
+            switch (lines.part, lines.lines[index].kind) {
             case (.code, .added): tint = addTint
             case (.code, .removed): tint = delTint
             case (.numbers, .added): tint = addGutter
             case (.numbers, .removed): tint = delGutter
             default: tint = nil
             }
-            if let tint {
-                ctx.setFillColor(tint)
-                ctx.fill(CGRect(x: 0, y: top, width: width, height: Self.rowHeight))
+            if let tint, let current = run, current.tint === tint, current.bottom == top {
+                run?.bottom = top + Self.rowHeight
+            } else {
+                fill()
+                run = tint.map { ($0, top, top + Self.rowHeight) }
             }
-            // Back to the text's colour: the line's first run drew in the tint just set
-            ctx.setFillColor(text)
+        }
+        fill()
+        // The text's colour: a run's first glyphs drew in whatever fill was set last
+        ctx.setFillColor(text)
+        ctx.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+        for index in shown {
+            let top = lines.tops[index]
+            guard top + Self.rowHeight > rect.minY else { continue }
+            let line = lines.lines[index]
             switch lines.part {
             case .code:
                 ctx.textPosition = CGPoint(x: 8, y: top + baseline)
@@ -155,6 +173,7 @@ final class CodeStyle: @unchecked Sendable {
                 ctx.textPosition = CGPoint(x: numbersWidth - 6 - lineWidth, y: top + baseline)
                 CTLineDraw(number, ctx)
             }
+            ctx.setFillColor(text)
         }
     }
 }
@@ -230,13 +249,22 @@ private struct LinesView: NSViewRepresentable {
     func updateNSView(_ view: LinesNSView, context: Context) {
         guard view.lines != lines else { return }
         view.lines = lines
-        view.needsDisplay = true
+        view.redraw()
     }
 }
 
-/// Draws only what it's asked to (what's on screen): AppKit tiles a big layer-backed view
+/// Drawn in tiles, as they come on screen, off the main thread, and kept: a plain view this
+/// tall had AppKit redraw everything on screen on every frame of a scroll. The tiles are a
+/// layer of their own, drawn by an object of their own: as the view's own layer, with the
+/// view drawing, AppKit drew them on the main thread
 final class LinesNSView: NSView {
-    var lines: DrawnLines?
+    private let tiles = FastTiledLayer()
+    private let painter = TilePainter()
+
+    var lines: DrawnLines? {
+        get { painter.lines }
+        set { painter.lines = newValue }
+    }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -244,17 +272,133 @@ final class LinesNSView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        tiles.tileSize = CGSize(width: 1024, height: 1024)
+        tiles.levelsOfDetail = 1
+        tiles.delegate = painter
+        tiles.needsDisplayOnBoundsChange = true
+        tiles.anchorPoint = .zero
+        layer?.addSublayer(tiles)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard let lines, let ctx = NSGraphicsContext.current?.cgContext else { return }
-        lines.style.draw(lines, in: dirtyRect, width: bounds.width, context: ctx)
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        tiles.frame = CGRect(origin: .zero, size: newSize)
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        tiles.contentsScale = window?.backingScaleFactor ?? 2
+        tiles.setNeedsDisplay()
+    }
+
+    func redraw() {
+        tiles.setNeedsDisplay()
     }
 
     // Clicks and drags are the SwiftUI gestures' over it
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// Draws a `LinesNSView`'s tiles, on Core Animation's threads
+private final class TilePainter: NSObject, CALayerDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _lines: DrawnLines?
+    var lines: DrawnLines? {
+        get { lock.lock(); defer { lock.unlock() }; return _lines }
+        set { lock.lock(); _lines = newValue; lock.unlock() }
+    }
+
+    /// A tile: its clip is the tile's rect
+    func draw(_ layer: CALayer, in ctx: CGContext) {
+        guard let lines else { return }
+        let rect = ctx.boundingBoxOfClipPath
+        ctx.saveGState()
+        // Not flipped: draw top-down, as the view is
+        if !layer.contentsAreFlipped() {
+            ctx.translateBy(x: 0, y: layer.bounds.height)
+            ctx.scaleBy(x: 1, y: -1)
+        }
+        let flipped = layer.contentsAreFlipped() ? rect : CGRect(x: rect.minX, y: layer.bounds.height - rect.maxY, width: rect.width, height: rect.height)
+        lines.style.draw(lines, in: flipped, width: layer.bounds.width, context: ctx)
+        ctx.restoreGState()
+    }
+
+    /// No animation when it's resized or redrawn
+    func action(for layer: CALayer, forKey event: String) -> CAAction? { NSNull() }
+}
+
+/// Tiles appear at once rather than fading in
+private final class FastTiledLayer: CATiledLayer {
+    override class func fadeDuration() -> CFTimeInterval { 0 }
+}
+
+/// A hunk's code, `width` wide, scrolling sideways. Not in an NSScrollView: SwiftUI's
+/// kept every swipe that started over code, so the page didn't scroll there, and AppKit's
+/// laid itself out on every frame the page moved, which had the whole review laid out again
+struct SidewaysCode: NSViewRepresentable {
+    let lines: DrawnLines
+    let width: CGFloat
+
+    func makeNSView(context: Context) -> SidewaysView {
+        let view = SidewaysView()
+        view.code.lines = lines
+        view.codeWidth = width
+        return view
+    }
+
+    func updateNSView(_ view: SidewaysView, context: Context) {
+        view.codeWidth = width
+        guard view.code.lines != lines else { return }
+        view.code.lines = lines
+        view.code.redraw()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: SidewaysView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions()
+    }
+}
+
+/// The code moved sideways by the swipes that are mostly sideways (decided as a swipe
+/// starts, so it doesn't change hands halfway); the rest go to the page
+final class SidewaysView: NSView {
+    let code = LinesNSView()
+    var codeWidth: CGFloat = 0 { didSet { if codeWidth != oldValue { place() } } }
+    private var offset: CGFloat = 0
+    private var sideways = false
+
+    override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        addSubview(code)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) { place() }
+
+    override func scrollWheel(with event: NSEvent) {
+        // A trackpad swipe's first move, or each notch of a mouse wheel
+        if event.phase == .began || (event.phase == [] && event.momentumPhase == []) {
+            sideways = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        }
+        let room = codeWidth - bounds.width
+        guard sideways, room > 0.5 else {
+            superview?.enclosingScrollView?.scrollWheel(with: event)
+            return
+        }
+        let delta = event.scrollingDeltaX * (event.hasPreciseScrollingDeltas ? 1 : 10)
+        offset = min(max(0, offset - delta), room)
+        place()
+    }
+
+    private func place() {
+        offset = min(offset, max(0, codeWidth - bounds.width))
+        let frame = CGRect(x: -offset, y: 0, width: max(codeWidth, bounds.width), height: bounds.height)
+        if code.frame != frame { code.frame = frame }
+    }
 }
 #endif

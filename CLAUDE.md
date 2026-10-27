@@ -172,14 +172,26 @@ terminal theme's palette (`ReviewColors.of`, worked out once per theme). It's bu
 lines: it sits in a hosting view of its own (`ReviewHost`), so the window's updates (every pane change)
 never reach it; typing lives in `ReviewDrafts` and the scroll position in `PageScroll`, watched only by
 the views that show them; the page and each hunk are equatable. A hunk's code and line numbers aren't views per
-line: each is one view that draws its lines with Core Text (`CodeDrawing.swift`: an NSView on the Mac, which
-AppKit tiles, a CATiledLayer view on the phone), only what's on screen; the code's scrolls sideways. Comment
-rows are SwiftUI, laid over both from measured heights (`HunkLayout`); hover and picking are one layer. The
-page is a plain `VStack` (a lazy one's guessed heights made jumps land on nothing or under the wrong
-header), so the sticky file header is drawn from the scroll position (iOS 18/macOS 15). Jumps go straight
-there, unanimated, to a single anchor placed at the target's measured position: ids inside the equatable page
-weren't found by the scroll view's reader. `CLAUNTTY_REVIEW_PERF=1` logs main-thread stalls every 5 s
-("review frames", `FrameMonitor`). On the Mac, Shift/Option+Return adds a line in the comment and note
+line: each is one view that draws its lines with Core Text in tiles (`CodeDrawing.swift`, a CATiledLayer drawn on
+Core Animation's threads), only what's on screen; the code's scrolls sideways. Comment rows are SwiftUI, laid over
+both from measured heights (`HunkLayout`, kept in `CommentHeights`); hover is a view of its own over them
+(`HoverLight`), so it never rebuilds a hunk. Measure with `onGeometryChange`, not GeometryReaders: SwiftUI runs a
+GeometryReader again whenever its view moves on screen, so on every frame of a scroll.
+On the Mac the page is an NSTableView (`PageTable.swift`): each file's header, note, hunks and Finish review are
+rows of SwiftUI, made as they come on screen. As one SwiftUI view, in SwiftUI's scroll view or AppKit's, the whole
+page was laid out on every frame of a scroll (70% of the main thread at 60 Hz): SwiftUI's tells its content the
+offset, and AppKit has a hosting view lay itself out whenever it moves in the window. Things that move must stay
+cheap: rows ignore AppKit's constraint updates (`RowHost`; they went up to the review's hosting view and laid it
+all out), and the code scrolls sideways in a plain view (`SidewaysView`), not an NSScrollView (SwiftUI's kept the
+page's vertical swipes; AppKit's laid itself out every frame). Row heights are known before rows are made (19 pt a
+line, comment rows measured once), so jumps land exactly; a row that changes height above the top edge moves the
+page by as much. File headers are group rows, which the table keeps at the top. On the phone the page is a plain
+`VStack` (a lazy one's guessed heights made jumps land under the wrong header), its sticky header drawn from the
+scroll position (iOS 18), and jumps go, unanimated, to an anchor placed at the target's measured position.
+`CLAUNTTY_REVIEW_PERF=1` logs frame rate and late frames every 5 s ("review frames", `FrameMonitor`);
+`=scroll` also scrolls the page by itself. Measure scrolling in Release (with `CLAUNTTY_LOCAL_HOME`, never on
+real sessions) and look at the main thread's share in `sample`, not frames per second: 60 Hz hides what 120 Hz
+can't afford. On the Mac, Shift/Option+Return adds a line in the comment and note
 fields and ⌘Return saves or sends. Send writes the report to `<id>.reply` (`ReviewReply.sendScript`); if
 nobody takes it, the command is gone and the report is typed into the agent's pane, as the voice agent
 types a prompt. While the overview is up the phone checks for reviews every 15 s (`checkReviewsOnHosts`):
@@ -613,9 +625,10 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   input while the screen is locked. Test against the SSH container with a scratch config, so
   your real hosts aren't touched: `CLAUNTTY_SSH_CONFIG=/tmp/test/config ./scripts/mac.sh run`
   (a `Host` for the container with an `IdentityFile` authorized for testuser there).
-  This Mac's panes live in a scratch home under `mac.sh run` (`CLAUNTTY_LOCAL_HOME`, Debug
-  builds; default `/tmp/clauntty-local-test`), never the Mac's real ~/.clauntty. Launched
-  some other way, the Debug app's This Mac is the real one, with the user's live sessions.
+  This Mac's panes live in a scratch home under `mac.sh run` (`CLAUNTTY_LOCAL_HOME`, any
+  build; default `/tmp/clauntty-local-test`), never the Mac's real ~/.clauntty. Launched
+  some other way, without it, the app's This Mac is the real one, with the user's live
+  sessions: never send it test input.
 
 ## Key Info
 

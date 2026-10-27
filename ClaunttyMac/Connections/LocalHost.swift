@@ -46,13 +46,11 @@ final class LocalHost: SSHConnection {
         return env
     }
 
-    /// The user's home, where rtach keeps its sessions. Debug builds take another from
-    /// CLAUNTTY_LOCAL_HOME, so testing never touches this Mac's real sessions.
+    /// The user's home, where rtach keeps its sessions. CLAUNTTY_LOCAL_HOME gives another, so
+    /// testing never touches this Mac's real sessions, in Release builds too (to measure the
+    /// build that's shipped); only whoever launches the app can set it.
     nonisolated static var home: String {
-        #if DEBUG
-        if let home = ProcessInfo.processInfo.environment["CLAUNTTY_LOCAL_HOME"] { return home }
-        #endif
-        return NSHomeDirectory()
+        ProcessInfo.processInfo.environment["CLAUNTTY_LOCAL_HOME"] ?? NSHomeDirectory()
     }
 
     /// The user's login shell, as sshd runs commands with
@@ -66,9 +64,7 @@ final class LocalHost: SSHConnection {
     // MARK: - Connection
 
     override func connect() async throws {
-        #if DEBUG
         try? FileManager.default.createDirectory(atPath: Self.home, withIntermediateDirectories: true)
-        #endif
         connected = true
         state = .connected
         onConnected?()

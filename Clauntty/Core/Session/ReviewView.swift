@@ -12,6 +12,8 @@ import SwiftUI
 /// `PageScroll`, watched only by the views that show them; the page and each hunk are
 /// equatable, so a change elsewhere skips them; scrolling a hunk sideways moves nothing but
 /// its code; hover and picking are one layer drawn over the lines, from where the rows are.
+/// On the Mac the page is a table of rows made as they come on screen (`PageTable`), on the
+/// phone one stack (`ReviewPage`).
 struct ReviewView: View, Equatable {
     let review: Review
     let theme: Theme?
@@ -24,6 +26,7 @@ struct ReviewView: View, Equatable {
     @State private var colors: ReviewColors
     @State private var drafts = ReviewDrafts()
     @State private var scroll = PageScroll()
+    @State private var measures = CommentHeights()
     @State private var comments: [ReviewUserComment] = []
     /// Hunks opened against their priority's default (collapsed ones), or closed
     @State private var toggled: Set<String> = []
@@ -120,25 +123,76 @@ struct ReviewView: View, Equatable {
     private func main(wide: Bool) -> some View {
         VStack(spacing: 0) {
             topBar(wide: wide)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // A plain stack, not a lazy one: a lazy stack guesses the height of what
-                    // it hasn't laid out, and a jump past a big file landed on nothing (the
-                    // Mac) or under the wrong pinned header (the phone)
-                    VStack(alignment: .leading, spacing: 0) {
-                        ReviewPage(
-                            review: review, colors: colors, comments: comments, toggled: toggled,
-                            editing: editing, picking: picking, drafts: drafts, actions: actions
-                        )
-                        .equatable()
-                        footer
-                            .id("footer")
-                            .background(GeometryReader { g in
-                                Color.clear.preference(key: TopsKey.self, value: ["": g.frame(in: .named(PageScroll.space)).minY])
-                            })
-                    }
-                    .coordinateSpace(name: PageScroll.space)
-                    .onPreferenceChange(TopsKey.self) { [scroll] tops in scroll.setTops(tops) }
+            pageScroll
+                #if os(iOS)
+                // The plain stack doesn't pin headers: the one under the top edge is drawn
+                .overlay(alignment: .top) {
+                    StickyHeader(scroll: scroll, files: review.files, colors: colors)
+                }
+                #endif
+                .onAppear {
+                    FrameMonitor.shared?.start()
+                    scroll.files = review.files.map(\.path)
+                }
+        }
+    }
+
+    private var pageState: PageState {
+        PageState(
+            review: review, colors: colors, comments: comments, toggled: toggled, editing: editing,
+            picking: picking, drafts: drafts, measures: measures, actions: actions
+        )
+    }
+
+    #if os(iOS)
+    /// The files, then Finish review, where each is measured
+    private var page: some View {
+        // A plain stack, not a lazy one: a lazy stack guesses the height of what it hasn't
+        // laid out, and a jump past a big file landed on nothing (the Mac) or under the
+        // wrong pinned header (the phone)
+        VStack(alignment: .leading, spacing: 0) {
+            ReviewPage(state: pageState)
+                .equatable()
+            footer
+                .id("footer")
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: TopsKey.self, value: ["": g.frame(in: .named(PageScroll.space)).minY])
+                })
+        }
+        .coordinateSpace(name: PageScroll.space)
+        .onPreferenceChange(TopsKey.self) { [scroll] tops in scroll.setTops(tops) }
+    }
+    #endif
+
+    /// Where a jump goes: the place it was measured at, and how far down the view to put it
+    private func destination(_ jump: Jump) -> (key: String, fraction: CGFloat) {
+        let key = jump.target == "footer" ? "" : jump.target ?? jump.file
+        return (key, jump.target == nil || jump.target == "footer" ? 0 : 0.3)
+    }
+
+    #if os(macOS)
+    /// A table, its rows made as they come on screen (`PageTable`): as one view, SwiftUI
+    /// laid the whole page out on every frame of a scroll
+    private var pageScroll: some View {
+        PageTable(
+            state: pageState,
+            footer: AnyView(footer),
+            place: scroll.place,
+            files: review.files.map(\.path),
+            jumper: { [scroll] jumper in scroll.jumper = jumper }
+        )
+        .onChange(of: jump) { _, jump in
+            guard let jump else { return }
+            let (key, fraction) = destination(jump)
+            // After the table has the rows the jump opened (a collapsed hunk)
+            DispatchQueue.main.async { scroll.jumper?(key, fraction) }
+        }
+    }
+    #else
+    private var pageScroll: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                page
                     // What a jump scrolls to, put where it's going: ids inside the page (an
                     // equatable view) weren't found by the scroll view's reader
                     .overlay(alignment: .topLeading) {
@@ -150,33 +204,26 @@ struct ReviewView: View, Equatable {
                             .allowsHitTesting(false)
                         }
                     }
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .trackingScrollY { [scroll] y, height in scroll.update(y: y, viewport: height) }
-                // The plain stack doesn't pin headers: the one under the top edge is drawn
-                .overlay(alignment: .top) {
-                    StickyHeader(scroll: scroll, files: review.files, colors: colors)
-                }
-                .onAppear {
-                    FrameMonitor.shared?.start()
-                    scroll.files = review.files.map(\.path)
-                }
-                .onChange(of: jump) { _, jump in
-                    guard let jump else { return }
-                    // After the page has laid out what the jump opened (a collapsed hunk)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .trackingScrollY { [scroll] y, height in scroll.update(y: y, viewport: height) }
+            .perfAutoScroll()
+            .onChange(of: jump) { _, jump in
+                guard let jump else { return }
+                let (key, fraction) = destination(jump)
+                // After the page has laid out what the jump opened (a collapsed hunk)
+                DispatchQueue.main.async {
+                    guard let y = scroll.tops[key] else { return }
+                    jumpY = y
+                    // Straight there: animated, a long jump drew the whole way
                     DispatchQueue.main.async {
-                        let key = jump.target == "footer" ? "" : jump.target ?? jump.file
-                        guard let y = scroll.tops[key] else { return }
-                        jumpY = y
-                        // Straight there: animated, a long jump drew the whole way
-                        DispatchQueue.main.async {
-                            proxy.scrollTo("jump", anchor: jump.target == nil || jump.target == "footer" ? .top : UnitPoint(x: 0, y: 0.3))
-                        }
+                        proxy.scrollTo("jump", anchor: UnitPoint(x: 0, y: fraction))
                     }
                 }
             }
         }
     }
+    #endif
 
     private func topBar(wide: Bool) -> some View {
         HStack(spacing: 10) {
@@ -466,15 +513,23 @@ final class ReviewDrafts: ObservableObject {
 final class PageScroll: ObservableObject {
     static let space = "review-page"
 
-    @Published private(set) var y: CGFloat = 0
+    /// Not published: it changes every frame of a scroll, and redrawing anything that often
+    /// cost a layout of the window each frame
+    private(set) var y: CGFloat = 0
     private var viewport: CGFloat = 0
+    /// The file whose header is above the top edge (it's the one kept there): published
+    /// only when it changes
+    @Published private(set) var pinned: String?
     /// Where each file's header is on the page, and Finish review's (as "")
     private(set) var tops: [String: CGFloat] = [:]
     var files: [String] = []
     let place = PagePlace()
+    /// Scrolls to a measured place (`tops`' key), that fraction of the way down the view
+    /// (the Mac's `PageScroller`)
+    var jumper: ((String, CGFloat) -> Void)?
 
     func update(y: CGFloat, viewport: CGFloat) {
-        if y != self.y { self.y = y }
+        self.y = y
         self.viewport = viewport
         follow()
     }
@@ -484,23 +539,37 @@ final class PageScroll: ObservableObject {
         follow()
     }
 
-    /// The file whose header is above the top edge (it's the one kept there)
-    var pinned: String? {
-        guard y > 0 else { return nil }
-        return files.last { (tops[$0] ?? .infinity) <= y + 1 }
-    }
-
     private func follow() {
-        let current = pinned ?? files.first
-        if place.current != current { place.current = current }
-        let shown = (tops[""] ?? .infinity) < y + viewport
-        if place.footerShown != shown { withAnimation(.easeOut(duration: 0.15)) { place.footerShown = shown } }
+        let pinned = y > 0 ? lastFile(above: y + 1) : nil
+        if pinned != self.pinned { self.pinned = pinned }
+        place.set(current: pinned ?? files.first, footerShown: (tops[""] ?? .infinity) < y + viewport)
     }
 }
 
+extension PageScroll {
+    /// The last file whose header is at or above `y`: the files are in page order, so a
+    /// binary search over their tops
+    fileprivate func lastFile(above y: CGFloat) -> String? {
+        var lo = 0, hi = files.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if (tops[files[mid]] ?? .infinity) <= y { lo = mid + 1 } else { hi = mid }
+        }
+        return lo > 0 ? files[lo - 1] : nil
+    }
+}
+
+/// The file at the top of the page (lit in the file list), and whether Finish review is
+/// on screen (the phone's chip hides then)
 final class PagePlace: ObservableObject {
-    @Published var current: String?
-    @Published var footerShown = false
+    @Published private(set) var current: String?
+    @Published private(set) var footerShown = false
+
+    /// Published only when they change: it's called on every frame of a scroll
+    func set(current: String?, footerShown: Bool) {
+        if self.current != current { self.current = current }
+        if self.footerShown != footerShown { withAnimation(.easeOut(duration: 0.15)) { self.footerShown = footerShown } }
+    }
 }
 
 /// What the page's hunks can do, as closures into the review's state
@@ -589,7 +658,8 @@ private struct FileList: View, Equatable {
     let files: [Review.File]
     let comments: [ReviewUserComment]
     let colors: ReviewColors
-    @ObservedObject var place: PagePlace
+    /// Not watched here: only each file's light does
+    let place: PagePlace
     let go: (String, String?) -> Void
 
     static func == (a: Self, b: Self) -> Bool {
@@ -614,7 +684,7 @@ private struct FileList: View, Equatable {
                             .font(.system(size: 14))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 6)
-                            .background(place.current == file.path ? colors.fg.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                            .background(CurrentFile(place: place, path: file.path, colors: colors))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -656,6 +726,18 @@ private struct FileList: View, Equatable {
         }
     }
 
+    /// The light behind the file at the top of the page: a view of its own that watches
+    /// it, as the list is equatable and wasn't redrawn when it changed
+    private struct CurrentFile: View {
+        @ObservedObject var place: PagePlace
+        let path: String
+        let colors: ReviewColors
+
+        var body: some View {
+            RoundedRectangle(cornerRadius: 6).fill(place.current == path ? colors.fg.opacity(0.08) : .clear)
+        }
+    }
+
     private func gist(_ text: String) -> String {
         let plain = text.replacingOccurrences(of: "`", with: "")
         if let end = plain.range(of: #"[.!?](\s|$)"#, options: .regularExpression) {
@@ -683,9 +765,9 @@ extension Review.File {
 
 // MARK: - The page
 
-/// The files: each header, note and hunks. Equatable, so the review's other changes
-/// (the drawer, sending, a jump) don't rebuild it.
-private struct ReviewPage: View, Equatable {
+/// What the page shows, and the user's work on it: the files are drawn from this, on the
+/// phone as one stack (`ReviewPage`), on the Mac as rows (`PageTable`)
+struct PageState: Equatable {
     let review: Review
     let colors: ReviewColors
     let comments: [ReviewUserComment]
@@ -693,6 +775,7 @@ private struct ReviewPage: View, Equatable {
     let editing: ReviewView.EditTarget?
     let picking: ReviewView.Picking?
     let drafts: ReviewDrafts
+    let measures: CommentHeights
     let actions: PageActions
 
     static func == (a: Self, b: Self) -> Bool {
@@ -700,25 +783,87 @@ private struct ReviewPage: View, Equatable {
             && a.editing == b.editing && a.picking == b.picking
     }
 
+    static func key(_ file: Review.File, _ hunk: Review.Hunk) -> String { "\(file.path)#\(hunk.id)" }
+
+    func isOpen(_ file: Review.File, _ hunk: Review.Hunk) -> Bool {
+        hunk.priority.collapsed == toggled.contains(Self.key(file, hunk))
+    }
+
+    func hunk(_ file: Review.File, _ hunk: Review.Hunk, open: Bool? = nil) -> HunkView {
+        let key = Self.key(file, hunk)
+        return HunkView(
+            file: file, hunk: hunk, key: key, colors: colors, gutter: file.gutterWidth,
+            open: open ?? isOpen(file, hunk),
+            showPriority: hunk.priority != file.priority,
+            comments: comments.filter { $0.path == file.path },
+            editing: editing?.path == file.path ? editing : nil,
+            picking: picking?.hunk == key ? picking : nil,
+            drafts: drafts, measures: measures, actions: actions
+        )
+    }
+}
+
+/// Comment rows' heights by hunk, as measured: a hunk drawn again (the Mac's rows are
+/// made as they come on screen) starts at its size rather than growing into it
+final class CommentHeights {
+    private var byHunk: [String: [String: CGFloat]] = [:]
+
+    subscript(hunk: String) -> [String: CGFloat] {
+        get { byHunk[hunk] ?? [:] }
+        set { byHunk[hunk] = newValue }
+    }
+}
+
+/// The files, each header, note and hunks, in a stack (the phone). Equatable, so the
+/// review's other changes (the drawer, sending, a jump) don't rebuild it.
+private struct ReviewPage: View, Equatable {
+    let state: PageState
+
     var body: some View {
         // A stack of its own: as the body of an equatable view, a bare list of files was
         // drawn one over another
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(review.files) { file in
+            ForEach(state.review.files) { file in
                 VStack(alignment: .leading, spacing: 0) {
-                    FileHeader(file: file, colors: colors)
+                    FileHeader(file: file, colors: state.colors)
                         .background(GeometryReader { g in
                             Color.clear.preference(key: TopsKey.self, value: [file.path: g.frame(in: .named(PageScroll.space)).minY])
                         })
-                    fileBody(file)
+                    FileIntro(file: file, colors: state.colors)
+                    ForEach(file.hunks) { hunk in
+                        state.hunk(file, hunk).equatable()
+                    }
+                    Spacer().frame(height: PageState.fileGap)
                 }
                 .id("file:" + file.path)
             }
         }
     }
+}
 
-    @ViewBuilder
-    private func fileBody(_ file: Review.File) -> some View {
+extension PageState {
+    /// Under each file's last hunk
+    static let fileGap: CGFloat = 12
+}
+
+extension Review.File {
+    /// Claude's comments on lines that aren't in the diff
+    var orphanComments: [Review.Comment] {
+        comments.filter { comment in
+            !hunks.contains { $0.lines.contains { $0.side == comment.side && $0.number == comment.line } }
+        }
+    }
+
+    /// Whether it has anything above its hunks
+    var hasIntro: Bool { note != nil || skipped != nil || !orphanComments.isEmpty }
+}
+
+/// What's above a file's hunks: its note, why it isn't shown, comments off the diff
+struct FileIntro: View {
+    let file: Review.File
+    let colors: ReviewColors
+
+    var body: some View {
         if let note = file.note {
             Text(markdown(note))
                 .font(.system(size: 14))
@@ -733,27 +878,10 @@ private struct ReviewPage: View, Equatable {
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
         }
-        // Comments whose line isn't in the diff
-        ForEach(file.comments.filter { comment in
-            !file.hunks.contains { $0.lines.contains { $0.side == comment.side && $0.number == comment.line } }
-        }) { comment in
+        ForEach(file.orphanComments) { comment in
             ClaudeRow(text: comment.text, colors: colors, gutter: file.gutterWidth)
                 .padding(.top, 6)
         }
-        ForEach(file.hunks) { hunk in
-            let key = "\(file.path)#\(hunk.id)"
-            HunkView(
-                file: file, hunk: hunk, key: key, colors: colors, gutter: file.gutterWidth,
-                open: hunk.priority.collapsed == toggled.contains(key),
-                showPriority: hunk.priority != file.priority,
-                comments: comments.filter { $0.path == file.path },
-                editing: editing?.path == file.path ? editing : nil,
-                picking: picking?.hunk == key ? picking : nil,
-                drafts: drafts, actions: actions
-            )
-            .equatable()
-        }
-        Spacer().frame(height: 12)
     }
 
     private func skippedReason(_ reason: String) -> String {
@@ -767,7 +895,7 @@ private struct ReviewPage: View, Equatable {
     }
 }
 
-private struct FileHeader: View {
+struct FileHeader: View {
     let file: Review.File
     let colors: ReviewColors
 
@@ -844,9 +972,29 @@ struct HunkView: View, Equatable {
     let editing: ReviewView.EditTarget?
     let picking: ReviewView.Picking?
     let drafts: ReviewDrafts
+    let measures: CommentHeights
     let actions: PageActions
 
     enum PickEvent { case began(Int), moved(Int), ended }
+
+    init(file: Review.File, hunk: Review.Hunk, key: String, colors: ReviewColors, gutter: CGFloat, open: Bool,
+         showPriority: Bool, comments: [ReviewUserComment], editing: ReviewView.EditTarget?,
+         picking: ReviewView.Picking?, drafts: ReviewDrafts, measures: CommentHeights, actions: PageActions) {
+        self.file = file
+        self.hunk = hunk
+        self.key = key
+        self.colors = colors
+        self.gutter = gutter
+        self.open = open
+        self.showPriority = showPriority
+        self.comments = comments
+        self.editing = editing
+        self.picking = picking
+        self.drafts = drafts
+        self.measures = measures
+        self.actions = actions
+        _heights = State(initialValue: measures[key])
+    }
 
     static func == (a: Self, b: Self) -> Bool {
         a.key == b.key && a.open == b.open && a.showPriority == b.showPriority && a.colors == b.colors
@@ -855,7 +1003,9 @@ struct HunkView: View, Equatable {
 
     /// Comment rows' heights, measured
     @State private var heights: [String: CGFloat] = [:]
-    @State private var hovered: Int?
+    /// The line under the pointer: only its light watches it, so hovering (and scrolling
+    /// under a still pointer) doesn't rebuild the hunk
+    @State private var hover = HoveredLine()
     @State private var viewport: CGFloat = 0
 
     static let rowHeight: CGFloat = 19
@@ -876,33 +1026,40 @@ struct HunkView: View, Equatable {
                         .frame(width: gutter, height: layout.height)
                         .contentShape(Rectangle())
                         .gesture(gutterGesture(layout))
+                    #if os(macOS)
+                    // As wide as the longest line, or the room there is, in AppKit's scroll
+                    // view: SwiftUI's kept the page's vertical swipes
+                    SidewaysCode(
+                        lines: DrawnLines(key: key, lines: hunk.lines, tops: layout.lineTops, part: .code, style: style),
+                        width: max(viewport - gutter, codeWidth)
+                    )
+                    .frame(height: layout.height)
+                    #else
                     ScrollView(.horizontal, showsIndicators: false) {
                         // As wide as the longest line, or the room there is
                         LinesDrawing(lines: DrawnLines(key: key, lines: hunk.lines, tops: layout.lineTops, part: .code, style: style))
                             .frame(width: max(viewport - gutter, codeWidth), height: layout.height)
                             .contentShape(Rectangle())
-                            #if os(iOS)
                             // On the phone a tap anywhere on a line comments on it
                             .gesture(SpatialTapGesture().onEnded { tap in
                                 if let index = layout.line(at: tap.location.y) { actions.edit(file.path, [hunk.lines[index]], nil) }
                             })
-                            #endif
                     }
+                    #endif
                 }
-                .background(GeometryReader { g in
-                    Color.clear
-                        .onAppear { viewport = g.size.width }
-                        .onChange(of: g.size.width) { _, width in viewport = width }
-                })
+                // Not GeometryReaders: SwiftUI runs those again whenever the view moves on
+                // screen, so on every frame of a scroll
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewport = $0 }
+                #if os(iOS)
                 .overlay(alignment: .topLeading) { jumpTargets(layout).allowsHitTesting(false) }
+                #endif
                 .overlay(alignment: .topLeading) { lights(layout).allowsHitTesting(false) }
                 .overlay(alignment: .topLeading) { commentRows(layout) }
-                .onPreferenceChange(HeightsKey.self) { if heights != $0 { heights = $0 } }
                 #if os(macOS)
                 .onContinuousHover { phase in
                     var index: Int?
                     if case .active(let at) = phase { index = layout.line(at: at.y, exactly: true) }
-                    if hovered != index { hovered = index }
+                    if hover.index != index { hover.index = index }
                 }
                 #endif
             }
@@ -992,35 +1149,46 @@ struct HunkView: View, Equatable {
                       let last = hunk.lines.firstIndex(where: { $0.id == editing.last.id }) {
                 band(layout, first, last, 0.10)
             }
-            if !Self.touch, let hovered, picking == nil {
-                band(layout, hovered, hovered, 0.04)
-                if editing == nil {
-                    PlusMark(colors: colors)
-                        .offset(x: gutter + 4, y: layout.y(ofLine: hovered) + 0.5)
-                }
+            if !Self.touch, picking == nil {
+                HoverLight(hover: hover, layout: layout, gutter: gutter, colors: colors, plus: editing == nil)
             }
         }
     }
 
     private func band(_ layout: HunkLayout, _ first: Int, _ last: Int, _ opacity: Double) -> some View {
+        HunkView.band(layout, first, last, colors.fg.opacity(opacity))
+    }
+
+    static func band(_ layout: HunkLayout, _ first: Int, _ last: Int, _ color: Color) -> some View {
         let top = layout.y(ofLine: first)
-        let bottom = layout.y(ofLine: last) + Self.rowHeight
-        return colors.fg.opacity(opacity)
+        let bottom = layout.y(ofLine: last) + rowHeight
+        return color
             .frame(height: bottom - top)
             .frame(maxWidth: .infinity)
             .offset(y: top)
     }
 
     /// The comment rows, across the numbers and the code, over the space left for them
+    private func measured(_ row: String, _ height: CGFloat) {
+        guard heights[row] != height else { return }
+        heights[row] = height
+        measures[key] = heights
+    }
+
+    /// How far down the hunk's lines a line is (its id), from the comments as measured
+    func top(ofLine id: Int) -> CGFloat? {
+        hunk.lines.firstIndex { $0.id == id }.map { HunkLayout(items: items, heights: measures[key]).y(ofLine: $0) }
+    }
+
     private func commentRows(_ layout: HunkLayout) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(layout.placed.filter { !$0.item.isLine }, id: \.item.key) { placed in
                 commentRow(placed.item)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: HeightsKey.self, value: [placed.item.key: g.size.height])
-                    })
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { [key = placed.item.key] height in
+                        measured(key, height)
+                    }
                     .offset(y: placed.y)
             }
         }
@@ -1145,6 +1313,20 @@ struct HunkLayout: Equatable {
 }
 
 private extension View {
+    /// `CLAUNTTY_REVIEW_PERF=scroll`: the page scrolls itself (`FrameMonitor`)
+    @ViewBuilder
+    func perfAutoScroll() -> some View {
+        #if os(iOS)
+        if #available(iOS 18, *), let monitor = FrameMonitor.shared, monitor.autoScroll {
+            modifier(PerfScroll(monitor: monitor))
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+
     /// How far the page is scrolled and how tall it shows, as it scrolls (iOS 18 and macOS
     /// 15; older ones get no header kept at the top, and the Finish review chip stays)
     @ViewBuilder
@@ -1185,19 +1367,33 @@ private extension View {
     }
 }
 
-private struct TopsKey: PreferenceKey {
+#if os(iOS)
+@available(iOS 18, *)
+private struct PerfScroll: ViewModifier {
+    let monitor: FrameMonitor
+    @State private var position = ScrollPosition(edge: .top)
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentSize.height - $0.containerSize.height }) { _, height in
+                monitor.pageHeight = height
+            }
+            .onAppear {
+                monitor.scrollTo = { y in position.scrollTo(y: y) }
+            }
+    }
+}
+#endif
+
+struct TopsKey: PreferenceKey {
     static let defaultValue: [String: CGFloat] = [:]
     static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
         value.merge(nextValue()) { $1 }
     }
 }
 
-private struct HeightsKey: PreferenceKey {
-    static let defaultValue: [String: CGFloat] = [:]
-    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
-        value.merge(nextValue()) { $1 }
-    }
-}
+
 
 // MARK: - Rows
 
@@ -1364,6 +1560,31 @@ private struct PriorityDot: View {
 
     var body: some View {
         Circle().fill(colors.priority[priority] ?? colors.dim).frame(width: 7, height: 7)
+    }
+}
+
+final class HoveredLine: ObservableObject {
+    @Published var index: Int?
+}
+
+/// The hovered line's light, and its + by the number
+private struct HoverLight: View {
+    @ObservedObject var hover: HoveredLine
+    let layout: HunkLayout
+    let gutter: CGFloat
+    let colors: ReviewColors
+    let plus: Bool
+
+    var body: some View {
+        if let index = hover.index {
+            ZStack(alignment: .topLeading) {
+                HunkView.band(layout, index, index, colors.fg.opacity(0.04))
+                if plus {
+                    PlusMark(colors: colors)
+                        .offset(x: gutter + 4, y: layout.y(ofLine: index) + 0.5)
+                }
+            }
+        }
     }
 }
 
@@ -1589,3 +1810,4 @@ private struct ChipStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
+

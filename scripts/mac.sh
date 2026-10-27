@@ -61,7 +61,7 @@ json_string() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1
 build() {
     xcodebuild -project "$PROJECT_DIR/ClaunttyMac.xcodeproj" -scheme ClaunttyMac -configuration Debug \
         -derivedDataPath "$DERIVED" -destination 'platform=macOS,arch=arm64' build 2>&1 \
-        | grep -E "error:|warning: .*ClaunttyMac/|BUILD (SUCCEEDED|FAILED)" | grep -v "^--- xcodebuild" || true
+        | { grep -E "error:|warning: .*ClaunttyMac/|BUILD (SUCCEEDED|FAILED)" | grep -v "^--- xcodebuild" || true; }
     [ -x "$APP/Contents/MacOS/Clauntty" ]
 }
 
@@ -83,7 +83,7 @@ release() {
     xcodebuild -project "$PROJECT_DIR/ClaunttyMac.xcodeproj" -scheme ClaunttyMac -configuration Release \
         -derivedDataPath "$DERIVED" -destination 'generic/platform=macOS' \
         CURRENT_PROJECT_VERSION="$build_number" build 2>&1 \
-        | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+        | { grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true; }
     [ -x "$RELEASE_APP/Contents/MacOS/Clauntty" ]
     codesign --verify --deep --strict "$RELEASE_APP"
     rm -f "$RELEASE_ZIP"
