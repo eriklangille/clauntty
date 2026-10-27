@@ -518,6 +518,14 @@ struct AgentSwitcherView: View {
                 }
             }
         }
+        // Nothing claimed for commands yet (only the overview has been up), a review's
+        // live notice is dropped by rtach: look for waiting ones while the overview shows
+        .task(id: focused == nil) {
+            while focused == nil && !Task.isCancelled {
+                if PlatformApp.isActive { sessionManager.checkReviewsOnHosts() }
+                try? await Task.sleep(for: .seconds(15))
+            }
+        }
     }
 
     // MARK: Layout

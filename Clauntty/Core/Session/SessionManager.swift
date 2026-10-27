@@ -80,6 +80,8 @@ class SessionManager: ObservableObject {
     /// Reviews from `clauntty review`, oldest first; the first is shown while there's one
     /// (SessionManager+Reviews.swift)
     @Published var reviews: [Review] = []
+    /// Reviews closed for now: they wait, unanswered (the Mac's sidebar badge opens them)
+    @Published var hiddenReviews: Set<String> = []
     /// Reviews downloaded or downloading this run (the live command and the check on
     /// connect can both bring one)
     var reviewIdsSeen: Set<String> = []

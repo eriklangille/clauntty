@@ -18,6 +18,20 @@ struct Theme: Identifiable, Hashable {
         parseColor(key: "foreground") ?? (isLight ? .black : .white)
     }
 
+    /// One of the theme's 16 terminal colours (`palette = N=#rrggbb`)
+    func paletteColor(_ index: Int) -> Color? {
+        for line in content.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("palette") else { continue }
+            let value = trimmed.drop { $0 != "=" }.dropFirst().trimmingCharacters(in: .whitespaces)
+            let parts = value.split(separator: "=", maxSplits: 1)
+            if parts.count == 2, Int(parts[0].trimmingCharacters(in: .whitespaces)) == index {
+                return Color(hex: parts[1].trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return nil
+    }
+
     private func parseColor(key: String) -> Color? {
         for line in content.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)

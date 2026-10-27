@@ -64,8 +64,11 @@ struct ContentView: View {
       VoiceSessionSheet()
     }
     // A review from `clauntty review`, the oldest first
-    .sheet(item: Binding(get: { sessionManager.reviews.first }, set: { _ in })) { review in
-      ReviewView(review: review)
+    .fullScreenCover(item: Binding(get: { sessionManager.shownReview }, set: { _ in })) { review in
+      ReviewView(review: review, theme: ThemeManager.shared.theme(withId: UserDefaults.standard.string(forKey: "selectedThemeId") ?? "")) {
+        sessionManager.hideReview(review)
+      }
+      .environmentObject(sessionManager)
     }
     .fullScreenCover(item: $sessionManager.imageViewer) { _ in
       // Images from `clauntty show` on a remote host

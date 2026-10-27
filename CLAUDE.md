@@ -165,9 +165,19 @@ button then starts a pretend session that moves between the tabs.
 rtach bundles a change on the host and sends `review;<id>;<pane>`; `SessionManager+Reviews.swift`
 downloads `~/.clauntty/reviews/<id>.json` (also on connect and foreground: `checkReviews`), builds a
 `Review` (`Review.swift`: the diff parsed, files in priority order, the agent's comments placed by
-`match`) and shows the oldest of `reviews` (`ReviewView`, a sheet; a plain stand-in for now). Send
-writes the report to `<id>.reply` (`ReviewReply.sendScript`); if nobody takes it, the command is gone
-and the report is typed into the agent's pane, as the voice agent types a prompt.
+`match`, each file highlighted with HighlightKit). `ReviewView` shows it: full screen on the phone (the
+oldest not closed for now, `shownReview`), over its workspace on the Mac with a badge on the sidebar card
+(`shownReview(in:)`); X closes it for now (`hiddenReviews`), it waits on the host. Colours come from the
+terminal theme's palette (`ReviewColors`). Each hunk scrolls sideways with its line numbers and comment
+rows pinned by an offset (`onScrollGeometryChange`, iOS 18/macOS 15). The page is a plain `VStack`, not
+a lazy one: a lazy stack's guessed heights made jumps past a big file land on nothing (Mac) or under the
+wrong pinned header (phone), so the sticky file header is drawn over it from the scroll position. Jump
+targets for comments are markers outside the sideways scroll views (inside, `scrollTo` scrolled those
+instead). On the Mac the hover light over a line must not take clicks (`allowsHitTesting(false)`): it
+swallowed the line number's. Send writes the report to `<id>.reply` (`ReviewReply.sendScript`); if
+nobody takes it, the command is gone and the report is typed into the agent's pane, as the voice agent
+types a prompt. While the overview is up the phone checks for reviews every 15 s (`checkReviewsOnHosts`):
+with no session claimed, rtach drops the live notice.
 
 **The voice agent's tools** (`VoiceAgent`) see tabs as workspaces, in the app's order, and their
 panes, with the state rtach reports for each (`paneStates`: agent, working/blocked/done, last

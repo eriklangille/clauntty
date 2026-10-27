@@ -26,6 +26,7 @@ struct Sidebar: View {
                         let pages = sessionManager.webTabs.filter { $0.workspaceId == group.id }
                         let next = index + 1 < groups.count ? groups[index + 1].id : nil
                         WorkspaceRow(group: group, images: sessionManager.windowImages[group.id]?.items.count ?? 0,
+                                     reviews: sessionManager.reviews.filter { sessionManager.workspace(of: $0) == group.id }.map(\.id),
                                      shortcut: shortcuts[group.id],
                                      selected: selection.wrappedValue == .workspace(group.id),
                                      pages: pages,
@@ -191,6 +192,8 @@ private struct WorkspaceRow: View {
     let group: SessionGroup
     /// Images its panes sent with `clauntty show`, waiting to be seen
     var images = 0
+    /// Reviews waiting in it: the badge opens the first
+    var reviews: [String] = []
     /// Its Cmd+number, while Cmd is held
     var shortcut: String?
     /// Shown: its card is lit, with no line under it
@@ -252,6 +255,22 @@ private struct WorkspaceRow: View {
                         .foregroundStyle(.secondary)
                         .transition(.opacity)
                         .help(images == 1 ? "An image to see" : "\(images) images to see")
+                    }
+                    if let first = reviews.first {
+                        Button {
+                            sessionManager.showReview(first)
+                            if let session = sessionManager.currentSession(of: group) { sessionManager.switchTo(session) }
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: "text.bubble")
+                                if reviews.count > 1 { Text("\(reviews.count)") }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
+                        .help(reviews.count == 1 ? "A review to read" : "\(reviews.count) reviews to read")
                     }
                     if group.panes.count > 1 || !pages.isEmpty {
                         PaneDots(panes: group.panes, activeId: group.activePaneId, pages: pages, pageShown: pageShown)

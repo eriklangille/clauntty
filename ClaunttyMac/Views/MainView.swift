@@ -74,11 +74,6 @@ struct MainView: View {
             ImageViewer(content: $sessionManager.imageViewer) { views.frameInWindow(of: $0) }
                 .ignoresSafeArea()
         }
-        // A review from `clauntty review`, the oldest first
-        .sheet(item: Binding(get: { sessionManager.reviews.first }, set: { _ in })) { review in
-            ReviewView(review: review)
-                .environmentObject(sessionManager)
-        }
         // Closed: typing goes back to the pane you're in
         .onChange(of: window.switcherShown) { _, shown in
             if !shown { refocus() }
@@ -147,6 +142,15 @@ struct MainView: View {
                 .ignoresSafeArea(.container, edges: .top)
                 // Images its panes sent: over this workspace only, so the sidebar stays
                 // and another workspace's don't interrupt. A new one each workspace.
+                // A review its agent asked for (`clauntty review`): over this workspace,
+                // as its images are
+                .overlay {
+                    if let review = sessionManager.shownReview(in: group.id) {
+                        ReviewView(review: review, theme: ghostty.theme) { sessionManager.hideReview(review) }
+                            .id(review.id)
+                            .transition(.opacity)
+                    }
+                }
                 .overlay {
                     ImageViewer(content: $sessionManager.windowImages[group.id],
                                 paneFrame: { views.frameInWindow(of: $0) },

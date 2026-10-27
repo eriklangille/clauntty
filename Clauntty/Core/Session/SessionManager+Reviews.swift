@@ -50,6 +50,15 @@ extension SessionManager {
         }
     }
 
+    /// Look for waiting reviews on every connected host, once each
+    func checkReviewsOnHosts() {
+        var hosts: Set<UUID> = []
+        for session in sessions where session.sshConnection != nil && session.rtachSessionId != nil {
+            guard hosts.insert(session.connectionConfig.id).inserted else { continue }
+            checkReviews(for: session)
+        }
+    }
+
     /// Send the user's comments (none: it looks good). Returns what to tell the user
     /// when it went somewhere other than the waiting command. The review stays in
     /// `reviews` for the caller to close once the user has seen that.
@@ -72,9 +81,40 @@ extension SessionManager {
         return message
     }
 
-    /// Stop showing a review, leaving it on the host (it shows again next launch)
+    /// Done with a review: it was answered
     func closeReview(_ review: Review) {
         reviews.removeAll { $0.id == review.id }
+        hiddenReviews.remove(review.id)
+    }
+
+    /// Close a review for now: it waits, unanswered, on the host too
+    func hideReview(_ review: Review) {
+        hiddenReviews.insert(review.id)
+    }
+
+    func showReview(_ id: String) {
+        hiddenReviews.remove(id)
+    }
+
+    /// The review to show on the phone: the oldest not closed for now
+    var shownReview: Review? {
+        reviews.first { !hiddenReviews.contains($0.id) }
+    }
+
+    /// The workspace of the pane that asked for a review, if the app has it
+    func workspace(of review: Review) -> UUID? {
+        let host = sessions.first { $0.id == review.sessionId }?.connectionConfig.id
+        return sessions.first { $0.rtachSessionId == review.pane && (host == nil || $0.connectionConfig.id == host) }?.groupId
+    }
+
+    /// The Mac's: a workspace's oldest review not closed for now, there when the workspace
+    /// is on screen (one whose workspace the app doesn't have goes with the one shown)
+    func shownReview(in workspace: UUID) -> Review? {
+        reviews.first { review in
+            guard !hiddenReviews.contains(review.id) else { return false }
+            let home = self.workspace(of: review)
+            return home == workspace || home == nil
+        }
     }
 
     /// Close a review without answering it: the waiting command says so and exits
