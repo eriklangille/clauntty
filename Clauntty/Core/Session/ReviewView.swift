@@ -3,9 +3,15 @@ import SwiftUI
 /// A review from `clauntty review` (plans/2026-10-26-clauntty-code-review.md), the web
 /// prototype's page made native: the files in reading order with sticky headers, a file list
 /// (a sidebar when there's room, else a drawer), Claude's comments as rows of the diff with
-/// its symbol in the gutter, lines that scroll sideways under pinned numbers, and comments
-/// of the user's own on a line or a run of lines. Finish review sends them. Colours come from
+/// its symbol in the gutter, lines that scroll sideways beside fixed numbers, and comments of
+/// the user's own on a line or a run of lines. Finish review sends them. Colours come from
 /// the terminal's theme, and only marks carry them (dots, counts, the symbol), never text.
+///
+/// Thousands of lines are on screen at once, so nothing that changes often may rebuild
+/// them: what's typed lives in `ReviewDrafts` and where the page is scrolled in
+/// `PageScroll`, watched only by the views that show them; the page and each hunk are
+/// equatable, so a change elsewhere skips them; scrolling a hunk sideways moves nothing but
+/// its code; hover and picking are one layer drawn over the lines, from where the rows are.
 struct ReviewView: View {
     let review: Review
     let theme: Theme?
@@ -14,29 +20,28 @@ struct ReviewView: View {
 
     @EnvironmentObject private var sessionManager: SessionManager
 
+    @State private var colors: ReviewColors
+    @State private var drafts = ReviewDrafts()
+    @State private var scroll = PageScroll()
     @State private var comments: [ReviewUserComment] = []
-    @State private var note = ""
     /// Hunks opened against their priority's default (collapsed ones), or closed
     @State private var toggled: Set<String> = []
     @State private var editing: EditTarget?
-    @State private var draft = ""
     /// Lines being picked for a comment (drag in the gutter), by index in the hunk
     @State private var picking: Picking?
     @State private var drawer = false
-    @State private var footerShown = false
     @State private var jump: Jump?
     @State private var sending = false
     @State private var sent: String?
     @State private var error: String?
-    /// The file whose header was last pinned, for the file list
-    @State private var current: String?
-    /// How far the page is scrolled, how tall it shows, and where each file's header (and,
-    /// as "", Finish review) is on it
-    @State private var scrollY: CGFloat = 0
-    @State private var viewportHeight: CGFloat = 0
-    @State private var tops: [String: CGFloat] = [:]
 
-    private var colors: ReviewColors { ReviewColors(theme: theme) }
+    init(review: Review, theme: Theme?, onClose: @escaping () -> Void) {
+        self.review = review
+        self.theme = theme
+        self.onClose = onClose
+        // Once: the theme's colours are parsed out of its text
+        _colors = State(initialValue: ReviewColors(theme: theme))
+    }
 
     struct EditTarget: Equatable {
         let path: String
@@ -74,11 +79,10 @@ struct ReviewView: View {
                 main(wide: wide)
             }
             .overlay(alignment: .bottomTrailing) {
-                if !wide && !footerShown && sent == nil && editing == nil {
-                    Button { jump = Jump(file: "", target: "footer") } label: { finishLabel(chip: true) }
-                        .buttonStyle(ChipStyle(colors: colors))
-                        .padding(12)
-                        .transition(.opacity)
+                if !wide && sent == nil && editing == nil {
+                    FinishChip(place: scroll.place, count: comments.count, colors: colors) {
+                        jump = Jump(file: "", target: "footer")
+                    }
                 }
             }
             .overlay(alignment: .leading) {
@@ -109,18 +113,31 @@ struct ReviewView: View {
             topBar(wide: wide)
             ScrollViewReader { proxy in
                 ScrollView {
-                    page
+                    // A plain stack, not a lazy one: a lazy stack guesses the height of what
+                    // it hasn't laid out, and a jump past a big file landed on nothing (the
+                    // Mac) or under the wrong pinned header (the phone)
+                    VStack(alignment: .leading, spacing: 0) {
+                        ReviewPage(
+                            review: review, colors: colors, comments: comments, toggled: toggled,
+                            editing: editing, picking: picking, drafts: drafts, actions: actions
+                        )
+                        .equatable()
+                        footer
+                            .id("footer")
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: TopsKey.self, value: ["": g.frame(in: .named(PageScroll.space)).minY])
+                            })
+                    }
+                    .coordinateSpace(name: PageScroll.space)
+                    .onPreferenceChange(TopsKey.self) { [scroll] tops in scroll.setTops(tops) }
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .trackingScrollY($scrollY, viewport: $viewportHeight)
-                // The pinned header: the plain stack doesn't pin them
+                .trackingScrollY { [scroll] y, height in scroll.update(y: y, viewport: height) }
+                // The plain stack doesn't pin headers: the one under the top edge is drawn
                 .overlay(alignment: .top) {
-                    if let file = review.files.last(where: { (tops[$0.path] ?? .infinity) <= scrollY + 1 }), scrollY > 0 {
-                        fileHeader(file)
-                    }
+                    StickyHeader(scroll: scroll, files: review.files, colors: colors)
                 }
-                .onChange(of: scrollY) { _, _ in followScroll() }
-                .onChange(of: tops) { _, _ in followScroll() }
+                .onAppear { scroll.files = review.files.map(\.path) }
                 .onChange(of: jump) { _, jump in
                     guard let jump else { return }
                     let target = jump.target == "footer" ? "footer" : "file:" + jump.file
@@ -136,49 +153,6 @@ struct ReviewView: View {
                 }
             }
         }
-    }
-
-    /// The files with their headers, then Finish review, in a plain stack: a lazy one guesses
-    /// the height of what it hasn't laid out, and a jump past a big file landed on nothing
-    /// (the Mac) or under the wrong pinned header (the phone). So the header that stays at
-    /// the top is drawn over the page, from where it's scrolled.
-    private var page: some View {
-        VStack(alignment: .leading, spacing: 0) { pageContent }
-            .coordinateSpace(name: Self.pageSpace)
-            .onPreferenceChange(TopsKey.self) { tops = $0 }
-    }
-
-    @ViewBuilder
-    private var pageContent: some View {
-        ForEach(review.files) { file in
-            Section {
-                fileBody(file)
-            } header: {
-                fileHeader(file)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: TopsKey.self, value: [file.path: g.frame(in: .named(Self.pageSpace)).minY])
-                    })
-            }
-            .id("file:" + file.path)
-        }
-        footer
-            .id("footer")
-            .background(GeometryReader { g in
-                Color.clear.preference(key: TopsKey.self, value: ["": g.frame(in: .named(Self.pageSpace)).minY])
-            })
-    }
-
-    private static let pageSpace = "review-page"
-
-    /// The file under the top edge and whether Finish review is in view, from where the page
-    /// is scrolled
-    private func followScroll() {
-        if let file = review.files.last(where: { (tops[$0.path] ?? .infinity) <= scrollY + 1 }) ?? review.files.first,
-           current != file.path {
-            current = file.path
-        }
-        let shown = (tops[""] ?? .infinity) < scrollY + viewportHeight
-        if shown != footerShown { withAnimation(.easeOut(duration: 0.15)) { footerShown = shown } }
     }
 
     private func topBar(wide: Bool) -> some View {
@@ -212,151 +186,44 @@ struct ReviewView: View {
         .overlay(alignment: .bottom) { Rectangle().fill(colors.hairline).frame(height: 1) }
     }
 
-    // MARK: Files
-
-    private func fileHeader(_ file: Review.File) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            pathText(file.path)
-                .font(.system(size: 13, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.head)
-                .layoutPriority(1)
-            if let status = statusText(file) {
-                Text(status).font(.system(size: 12)).foregroundStyle(colors.dim).lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            PriorityMark(priority: file.priority, colors: colors)
-            counts(file)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(colors.bg)
-        .overlay(alignment: .bottom) { Rectangle().fill(colors.hairline).frame(height: 1) }
-    }
-
-    private func pathText(_ path: String) -> Text {
-        let name = (path as NSString).lastPathComponent
-        let dir = String(path.dropLast(name.count))
-        return Text(dir).foregroundColor(colors.dim) + Text(name).fontWeight(.semibold)
-    }
-
-    private func statusText(_ file: Review.File) -> String? {
-        switch file.status {
-        case "untracked": return "untracked"
-        case "added": return "new"
-        case "deleted": return "deleted"
-        case "renamed": return file.oldPath.map { "from \(($0 as NSString).lastPathComponent)" } ?? "renamed"
-        default: return nil
-        }
-    }
-
-    @ViewBuilder
-    private func counts(_ file: Review.File) -> some View {
-        if let added = file.added, let removed = file.removed {
-            HStack(spacing: 4) {
-                Text("+\(added)").foregroundStyle(colors.plus)
-                Text("−\(removed)").foregroundStyle(colors.minus)
-            }
-            .font(.system(size: 12, design: .monospaced))
-            .fixedSize()
-        }
-    }
-
-    /// Not in a stack of its own: on the phone each hunk is then an item of the page's lazy
-    /// stack, laid out as it comes on screen
-    @ViewBuilder
-    private func fileBody(_ file: Review.File) -> some View {
-        Group {
-            if let note = file.note {
-                Text(markdown(note))
-                    .font(.system(size: 14))
-                    .foregroundStyle(colors.fg.opacity(0.85))
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-            }
-            if let skipped = file.skipped {
-                Text("Not shown: \(skippedReason(skipped))")
-                    .font(.system(size: 13))
-                    .foregroundStyle(colors.dim)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 6)
-            }
-            // Comments whose line isn't in the diff
-            ForEach(file.comments.filter { comment in !file.hunks.contains { hunkHas($0, comment) } }) { comment in
-                ClaudeRow(text: comment.text, colors: colors, gutter: gutterWidth(file))
-                    .padding(.top, 6)
-                    .id("claude:\(comment.id)")
-            }
-            ForEach(file.hunks) { hunk in
-                let key = "\(file.path)#\(hunk.id)"
-                HunkView(
-                    file: file, hunk: hunk, key: key, colors: colors, gutter: gutterWidth(file),
-                    open: hunk.priority.collapsed == toggled.contains(key),
-                    showPriority: hunk.priority != file.priority,
-                    comments: comments.filter { $0.path == file.path },
-                    editing: editing?.path == file.path ? editing : nil,
-                    draft: $draft,
-                    picking: picking?.hunk == key ? picking : nil,
-                    toggle: { if toggled.contains(key) { toggled.remove(key) } else { toggled.insert(key) } },
-                    pick: { pick($0, file: file, hunk: hunk, key: key) },
-                    edit: { lines, existing in startEditing(file.path, lines: lines, existing: existing) },
-                    save: { saveDraft() },
-                    cancel: { editing = nil },
-                    delete: { id in comments.removeAll { $0.id == id } }
-                )
-            }
-            Spacer().frame(height: 12)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func hunkHas(_ hunk: Review.Hunk, _ comment: Review.Comment) -> Bool {
-        hunk.lines.contains { $0.side == comment.side && $0.number == comment.line }
-    }
-
-    /// Room for the file's longest line number, as the web page's 3.4em
-    private func gutterWidth(_ file: Review.File) -> CGFloat {
-        let biggest = file.hunks.flatMap(\.lines).compactMap(\.number).max() ?? 0
-        return max(44, CGFloat(String(biggest).count) * 7.6 + 16)
-    }
-
-    private func skippedReason(_ reason: String) -> String {
-        switch reason {
-        case "large": return "too large to show"
-        case "lockfile": return "a lockfile"
-        case "generated": return "generated"
-        case "minified": return "minified"
-        default: return "binary"
-        }
-    }
-
     // MARK: Commenting
 
+    private var actions: PageActions {
+        PageActions(
+            toggle: { key in if toggled.contains(key) { toggled.remove(key) } else { toggled.insert(key) } },
+            pick: { event, path, hunk, key in pick(event, path: path, hunk: hunk, key: key) },
+            edit: { path, lines, existing in startEditing(path, lines: lines, existing: existing) },
+            save: { saveDraft() },
+            cancel: { editing = nil },
+            delete: { id in comments.removeAll { $0.id == id } }
+        )
+    }
+
     /// Dragging in the gutter: the run so far; at the end the editor opens on it
-    private func pick(_ event: HunkView.PickEvent, file: Review.File, hunk: Review.Hunk, key: String) {
+    private func pick(_ event: HunkView.PickEvent, path: String, hunk: Review.Hunk, key: String) {
         switch event {
         case .began(let index):
             editing = nil
-            picking = Picking(path: file.path, hunk: key, anchor: index, current: index)
+            picking = Picking(path: path, hunk: key, anchor: index, current: index)
         case .moved(let index):
-            picking?.current = index
+            if picking?.current != index { picking?.current = index }
         case .ended:
             guard let p = picking else { return }
             let range = min(p.anchor, p.current)...max(p.anchor, p.current)
             picking = nil
-            startEditing(file.path, lines: Array(hunk.lines[range]), existing: nil)
+            startEditing(path, lines: Array(hunk.lines[range]), existing: nil)
         }
     }
 
     private func startEditing(_ path: String, lines: [Review.Line], existing: UUID?) {
         guard !lines.isEmpty else { return }
-        draft = existing.flatMap { id in comments.first { $0.id == id }?.text } ?? ""
+        drafts.draft = existing.flatMap { id in comments.first { $0.id == id }?.text } ?? ""
         editing = EditTarget(path: path, lines: lines, existing: existing)
     }
 
     private func saveDraft() {
         guard let target = editing else { return }
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = drafts.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if let id = target.existing, let index = comments.firstIndex(where: { $0.id == id }) {
             if text.isEmpty { comments.remove(at: index) } else { comments[index].text = text }
         } else if !text.isEmpty, let number = target.last.number {
@@ -367,77 +234,14 @@ struct ReviewView: View {
                 code: target.lines.map(\.text).joined(separator: "\n"), text: text))
         }
         editing = nil
-        draft = ""
+        drafts.draft = ""
     }
 
     // MARK: File list
 
     private var fileList: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(review.files) { file in
-                        Button { go(file: file.path, target: nil) } label: {
-                            HStack(spacing: 0) {
-                                PriorityDot(priority: file.priority, colors: colors)
-                                    .padding(.trailing, 8)
-                                Text(file.name)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Spacer(minLength: 8)
-                                counts(file)
-                            }
-                            .font(.system(size: 14))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(current == file.path ? colors.fg.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help(file.path)
-
-                        ForEach(file.comments) { comment in
-                            Button { go(file: file.path, target: comment.line.flatMap { lineId(file, comment.side, $0) }) } label: {
-                                HStack(alignment: .top, spacing: 7) {
-                                    ClaudeLogo().fill(ReviewColors.claude).frame(width: 11, height: 11).padding(.top, 3)
-                                    Text(gist(comment.text)).lineLimit(2)
-                                }
-                                .sidebarComment(colors: colors, mine: false)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        ForEach(comments.filter { $0.path == file.path }) { mine in
-                            Button { go(file: file.path, target: lineId(file, mine.side, mine.line)) } label: {
-                                Text(mine.text).lineLimit(2)
-                                    .sidebarComment(colors: colors, mine: true)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 12)
-            }
-            // Always at the bottom of the list
-            Button { go(file: "", target: "footer") } label: {
-                finishLabel(chip: false)
-                    .font(.system(size: 14, weight: .medium))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .overlay(alignment: .top) { Rectangle().fill(colors.hairline).frame(height: 1) }
-        }
-    }
-
-    private func finishLabel(chip: Bool) -> some View {
-        HStack(spacing: 0) {
-            Text("Finish review")
-            if !chip { Spacer(minLength: 10) }
-            if !comments.isEmpty {
-                Text("\(comments.count)").foregroundStyle(colors.dim).fontWeight(.regular).padding(.leading, chip ? 8 : 0)
-            }
+        FileList(files: review.files, comments: comments, colors: colors, place: scroll.place) { file, target in
+            go(file: file, target: target)
         }
     }
 
@@ -452,21 +256,6 @@ struct ReviewView: View {
         }
         withAnimation(.easeOut(duration: 0.2)) { drawer = false }
         jump = Jump(file: file, target: target)
-    }
-
-    private func lineId(_ file: Review.File, _ side: ReviewSide, _ number: Int) -> String? {
-        for hunk in file.hunks {
-            if let line = hunk.lines.first(where: { $0.side == side && $0.number == number }) { return "line:\(line.id)" }
-        }
-        return nil
-    }
-
-    private func gist(_ text: String) -> String {
-        let plain = text.replacingOccurrences(of: "`", with: "")
-        if let end = plain.range(of: #"[.!?](\s|$)"#, options: .regularExpression) {
-            return String(plain[..<end.lowerBound]) + String(plain[end.lowerBound])
-        }
-        return plain
     }
 
     // MARK: Finish
@@ -484,7 +273,7 @@ struct ReviewView: View {
                 ForEach(orderedComments) { c in
                     Button {
                         if let file = review.files.first(where: { $0.path == c.path }) {
-                            go(file: c.path, target: lineId(file, c.side, c.line))
+                            go(file: c.path, target: file.lineId(c.side, c.line))
                         }
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -503,22 +292,13 @@ struct ReviewView: View {
                 if !comments.isEmpty {
                     Rectangle().fill(colors.hairline).frame(height: 1).padding(.bottom, 12)
                 }
-                TextField("Note for Claude (optional)", text: $note, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(2...8)
-                    .font(.system(size: Self.inputSize))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 7)
-                    .background(colors.fg.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(colors.fg.opacity(0.12)))
+                NoteField(drafts: drafts, colors: colors)
                 HStack {
                     if let error {
                         Text(error).font(.system(size: 13)).foregroundStyle(colors.minus)
                     }
                     Spacer()
-                    Button(sending ? "Sending…" : comments.isEmpty && note.isEmpty ? "Looks good" : "Send") { send() }
-                        .buttonStyle(PrimaryStyle(colors: colors))
-                        .disabled(sending)
+                    SendButton(drafts: drafts, hasComments: !comments.isEmpty, sending: sending, colors: colors, send: send)
                 }
                 .padding(.top, 10)
             }
@@ -564,7 +344,7 @@ struct ReviewView: View {
         error = nil
         Task {
             do {
-                if let message = try await sessionManager.sendReview(review, note: note, comments: orderedComments) {
+                if let message = try await sessionManager.sendReview(review, note: drafts.note, comments: orderedComments) {
                     sent = message
                 } else {
                     sessionManager.closeReview(review)
@@ -577,11 +357,383 @@ struct ReviewView: View {
     }
 }
 
+// MARK: - State the page doesn't watch
+
+/// What's being typed: a comment and the note. Only their text fields (and Send's label)
+/// watch it, so a keystroke redraws those, not the page.
+final class ReviewDrafts: ObservableObject {
+    @Published var draft = ""
+    @Published var note = ""
+}
+
+/// Where the page is scrolled, for the header kept at the top (which watches `y`), and the
+/// file list and Finish chip (which watch `place`, only changing when the file under the
+/// top edge does, or Finish review comes into view)
+final class PageScroll: ObservableObject {
+    static let space = "review-page"
+
+    @Published private(set) var y: CGFloat = 0
+    private var viewport: CGFloat = 0
+    /// Where each file's header is on the page, and Finish review's (as "")
+    private(set) var tops: [String: CGFloat] = [:]
+    var files: [String] = []
+    let place = PagePlace()
+
+    func update(y: CGFloat, viewport: CGFloat) {
+        if y != self.y { self.y = y }
+        self.viewport = viewport
+        follow()
+    }
+
+    func setTops(_ tops: [String: CGFloat]) {
+        self.tops = tops
+        follow()
+    }
+
+    /// The file whose header is above the top edge (it's the one kept there)
+    var pinned: String? {
+        guard y > 0 else { return nil }
+        return files.last { (tops[$0] ?? .infinity) <= y + 1 }
+    }
+
+    private func follow() {
+        let current = pinned ?? files.first
+        if place.current != current { place.current = current }
+        let shown = (tops[""] ?? .infinity) < y + viewport
+        if place.footerShown != shown { withAnimation(.easeOut(duration: 0.15)) { place.footerShown = shown } }
+    }
+}
+
+final class PagePlace: ObservableObject {
+    @Published var current: String?
+    @Published var footerShown = false
+}
+
+/// What the page's hunks can do, as closures into the review's state
+struct PageActions {
+    let toggle: (String) -> Void
+    let pick: (HunkView.PickEvent, String, Review.Hunk, String) -> Void
+    let edit: (String, [Review.Line], UUID?) -> Void
+    let save: () -> Void
+    let cancel: () -> Void
+    let delete: (UUID) -> Void
+}
+
+/// The header of the file under the top edge, kept there
+private struct StickyHeader: View {
+    @ObservedObject var scroll: PageScroll
+    let files: [Review.File]
+    let colors: ReviewColors
+
+    var body: some View {
+        if let path = scroll.pinned, let file = files.first(where: { $0.path == path }) {
+            FileHeader(file: file, colors: colors)
+        }
+    }
+}
+
+/// Finish review on the phone, until it's on screen
+private struct FinishChip: View {
+    @ObservedObject var place: PagePlace
+    let count: Int
+    let colors: ReviewColors
+    let action: () -> Void
+
+    var body: some View {
+        if !place.footerShown {
+            Button(action: action) {
+                HStack(spacing: 0) {
+                    Text("Finish review")
+                    if count > 0 { Text("\(count)").foregroundStyle(colors.dim).fontWeight(.regular).padding(.leading, 8) }
+                }
+            }
+            .buttonStyle(ChipStyle(colors: colors))
+            .padding(12)
+            .transition(.opacity)
+        }
+    }
+}
+
+private struct NoteField: View {
+    @ObservedObject var drafts: ReviewDrafts
+    let colors: ReviewColors
+
+    var body: some View {
+        TextField("Note for Claude (optional)", text: $drafts.note, axis: .vertical)
+            .textFieldStyle(.plain)
+            .lineLimit(2...8)
+            .font(.system(size: ReviewView.inputSize))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(colors.fg.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(colors.fg.opacity(0.12)))
+    }
+}
+
+/// "Looks good" until there's something to say
+private struct SendButton: View {
+    @ObservedObject var drafts: ReviewDrafts
+    let hasComments: Bool
+    let sending: Bool
+    let colors: ReviewColors
+    let send: () -> Void
+
+    var body: some View {
+        Button(sending ? "Sending…" : !hasComments && drafts.note.isEmpty ? "Looks good" : "Send", action: send)
+            .buttonStyle(PrimaryStyle(colors: colors))
+            .disabled(sending)
+    }
+}
+
+// MARK: - File list
+
+/// The files in reading order, with Claude's comments and the user's under each; the file
+/// under the page's top edge lit
+private struct FileList: View {
+    let files: [Review.File]
+    let comments: [ReviewUserComment]
+    let colors: ReviewColors
+    @ObservedObject var place: PagePlace
+    let go: (String, String?) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(files) { file in
+                        Button { go(file.path, nil) } label: {
+                            HStack(spacing: 0) {
+                                PriorityDot(priority: file.priority, colors: colors)
+                                    .padding(.trailing, 8)
+                                Text(file.name)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer(minLength: 8)
+                                Counts(file: file, colors: colors)
+                            }
+                            .font(.system(size: 14))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(place.current == file.path ? colors.fg.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(file.path)
+
+                        ForEach(file.comments) { comment in
+                            Button { go(file.path, comment.line.flatMap { file.lineId(comment.side, $0) }) } label: {
+                                HStack(alignment: .top, spacing: 7) {
+                                    ClaudeLogo().fill(ReviewColors.claude).frame(width: 11, height: 11).padding(.top, 3)
+                                    Text(gist(comment.text)).lineLimit(2)
+                                }
+                                .sidebarComment(colors: colors, mine: false)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        ForEach(comments.filter { $0.path == file.path }) { mine in
+                            Button { go(file.path, file.lineId(mine.side, mine.line)) } label: {
+                                Text(mine.text).lineLimit(2)
+                                    .sidebarComment(colors: colors, mine: true)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 12)
+            }
+            // Always at the bottom of the list
+            Button { go("", "footer") } label: {
+                HStack(spacing: 0) {
+                    Text("Finish review")
+                    Spacer(minLength: 10)
+                    if !comments.isEmpty { Text("\(comments.count)").foregroundStyle(colors.dim).fontWeight(.regular) }
+                }
+                .font(.system(size: 14, weight: .medium))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .overlay(alignment: .top) { Rectangle().fill(colors.hairline).frame(height: 1) }
+        }
+    }
+
+    private func gist(_ text: String) -> String {
+        let plain = text.replacingOccurrences(of: "`", with: "")
+        if let end = plain.range(of: #"[.!?](\s|$)"#, options: .regularExpression) {
+            return String(plain[..<end.lowerBound]) + String(plain[end.lowerBound])
+        }
+        return plain
+    }
+}
+
+extension Review.File {
+    /// The page's id for a line of this file, to jump to
+    func lineId(_ side: ReviewSide, _ number: Int) -> String? {
+        for hunk in hunks {
+            if let line = hunk.lines.first(where: { $0.side == side && $0.number == number }) { return "line:\(line.id)" }
+        }
+        return nil
+    }
+
+    /// Room for its longest line number, as the web page's 3.4em
+    var gutterWidth: CGFloat {
+        let biggest = hunks.flatMap(\.lines).compactMap(\.number).max() ?? 0
+        return max(44, CGFloat(String(biggest).count) * 7.6 + 16)
+    }
+}
+
+// MARK: - The page
+
+/// The files: each header, note and hunks. Equatable, so the review's other changes
+/// (the drawer, sending, a jump) don't rebuild it.
+private struct ReviewPage: View, Equatable {
+    let review: Review
+    let colors: ReviewColors
+    let comments: [ReviewUserComment]
+    let toggled: Set<String>
+    let editing: ReviewView.EditTarget?
+    let picking: ReviewView.Picking?
+    let drafts: ReviewDrafts
+    let actions: PageActions
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.review.id == b.review.id && a.colors == b.colors && a.comments == b.comments && a.toggled == b.toggled
+            && a.editing == b.editing && a.picking == b.picking
+    }
+
+    var body: some View {
+        // A stack of its own: as the body of an equatable view, a bare list of files was
+        // drawn one over another
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(review.files) { file in
+                VStack(alignment: .leading, spacing: 0) {
+                    FileHeader(file: file, colors: colors)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: TopsKey.self, value: [file.path: g.frame(in: .named(PageScroll.space)).minY])
+                        })
+                    fileBody(file)
+                }
+                .id("file:" + file.path)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fileBody(_ file: Review.File) -> some View {
+        if let note = file.note {
+            Text(markdown(note))
+                .font(.system(size: 14))
+                .foregroundStyle(colors.fg.opacity(0.85))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+        }
+        if let skipped = file.skipped {
+            Text("Not shown: \(skippedReason(skipped))")
+                .font(.system(size: 13))
+                .foregroundStyle(colors.dim)
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+        }
+        // Comments whose line isn't in the diff
+        ForEach(file.comments.filter { comment in
+            !file.hunks.contains { $0.lines.contains { $0.side == comment.side && $0.number == comment.line } }
+        }) { comment in
+            ClaudeRow(text: comment.text, colors: colors, gutter: file.gutterWidth)
+                .padding(.top, 6)
+        }
+        ForEach(file.hunks) { hunk in
+            let key = "\(file.path)#\(hunk.id)"
+            HunkView(
+                file: file, hunk: hunk, key: key, colors: colors, gutter: file.gutterWidth,
+                open: hunk.priority.collapsed == toggled.contains(key),
+                showPriority: hunk.priority != file.priority,
+                comments: comments.filter { $0.path == file.path },
+                editing: editing?.path == file.path ? editing : nil,
+                picking: picking?.hunk == key ? picking : nil,
+                drafts: drafts, actions: actions
+            )
+            .equatable()
+        }
+        Spacer().frame(height: 12)
+    }
+
+    private func skippedReason(_ reason: String) -> String {
+        switch reason {
+        case "large": return "too large to show"
+        case "lockfile": return "a lockfile"
+        case "generated": return "generated"
+        case "minified": return "minified"
+        default: return "binary"
+        }
+    }
+}
+
+private struct FileHeader: View {
+    let file: Review.File
+    let colors: ReviewColors
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            pathText
+                .font(.system(size: 13, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.head)
+                .layoutPriority(1)
+            if let status {
+                Text(status).font(.system(size: 12)).foregroundStyle(colors.dim).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            PriorityMark(priority: file.priority, colors: colors)
+            Counts(file: file, colors: colors)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(colors.bg)
+        .overlay(alignment: .bottom) { Rectangle().fill(colors.hairline).frame(height: 1) }
+    }
+
+    private var pathText: Text {
+        let name = (file.path as NSString).lastPathComponent
+        let dir = String(file.path.dropLast(name.count))
+        return Text(dir).foregroundColor(colors.dim) + Text(name).fontWeight(.semibold)
+    }
+
+    private var status: String? {
+        switch file.status {
+        case "untracked": return "untracked"
+        case "added": return "new"
+        case "deleted": return "deleted"
+        case "renamed": return file.oldPath.map { "from \(($0 as NSString).lastPathComponent)" } ?? "renamed"
+        default: return nil
+        }
+    }
+}
+
+private struct Counts: View {
+    let file: Review.File
+    let colors: ReviewColors
+
+    var body: some View {
+        if let added = file.added, let removed = file.removed {
+            HStack(spacing: 4) {
+                Text("+\(added)").foregroundStyle(colors.plus)
+                Text("−\(removed)").foregroundStyle(colors.minus)
+            }
+            .font(.system(size: 12, design: .monospaced))
+            .fixedSize()
+        }
+    }
+}
+
 // MARK: - A hunk
 
-/// One hunk: its summary line, then its lines in one sideways scroll, with the line numbers
-/// and the comment rows pinned to the left edge as the code scrolls (the web page's sticky)
-struct HunkView: View {
+/// One hunk: its summary line, then its lines, numbers in a column of their own beside the
+/// code (which scrolls sideways), and the comments as rows across both, over spaces left
+/// for them in the two columns. The columns are equatable: hovering, picking and typing
+/// don't rebuild them.
+struct HunkView: View, Equatable {
     let file: Review.File
     let hunk: Review.Hunk
     let key: String
@@ -589,30 +741,27 @@ struct HunkView: View {
     let gutter: CGFloat
     let open: Bool
     let showPriority: Bool
+    /// The user's comments on this file
     let comments: [ReviewUserComment]
+    /// The comment being written, if it's on this file
     let editing: ReviewView.EditTarget?
-    @Binding var draft: String
     let picking: ReviewView.Picking?
-    let toggle: () -> Void
-    let pick: (PickEvent) -> Void
-    let edit: ([Review.Line], UUID?) -> Void
-    let save: () -> Void
-    let cancel: () -> Void
-    let delete: (UUID) -> Void
+    let drafts: ReviewDrafts
+    let actions: PageActions
 
     enum PickEvent { case began(Int), moved(Int), ended }
 
-    @State private var scrollX: CGFloat = 0
-    @State private var viewport: CGFloat = 0
-    @State private var hovered: Int?
-    /// Each line's frame in the rows, for a drag in the gutter
-    @State private var frames: [Int: CGRect] = [:]
+    static func == (a: Self, b: Self) -> Bool {
+        a.key == b.key && a.open == b.open && a.showPriority == b.showPriority && a.colors == b.colors
+            && a.gutter == b.gutter && a.comments == b.comments && a.editing == b.editing && a.picking == b.picking
+    }
 
-    private static let rowHeight: CGFloat = 19
-    /// The sideways scroll's frame, to tell how far it's scrolled
-    private var space: String { "hunk:" + key }
-    /// The rows' own, for where each line is
-    private var rowsSpace: String { "rows:" + key }
+    /// Comment rows' heights, measured
+    @State private var heights: [String: CGFloat] = [:]
+    @State private var hovered: Int?
+    @State private var viewport: CGFloat = 0
+
+    static let rowHeight: CGFloat = 19
     #if os(iOS)
     private static let touch = true
     #else
@@ -623,50 +772,47 @@ struct HunkView: View {
         VStack(alignment: .leading, spacing: 0) {
             summary
             if open {
-                // In a container of its own: named on the scroll view, the space would
-                // move with its content
-                ZStack(alignment: .topLeading) {
+                let layout = HunkLayout(items: items, heights: heights)
+                HStack(alignment: .top, spacing: 0) {
+                    GutterColumn(hunk: hunk, layout: layout, colors: colors, gutter: gutter)
+                        .equatable()
+                        .contentShape(Rectangle())
+                        .gesture(gutterGesture(layout))
                     ScrollView(.horizontal, showsIndicators: false) {
-                        rows
-                            .coordinateSpace(name: rowsSpace)
-                            .frame(minWidth: viewport, alignment: .leading)
-                            .background(GeometryReader { g in
-                                Color.clear.preference(key: ScrollXKey.self, value: -g.frame(in: .named(space)).minX)
+                        CodeColumn(hunk: hunk, layout: layout, colors: colors)
+                            .equatable()
+                            .frame(minWidth: max(0, viewport - gutter), alignment: .leading)
+                            .contentShape(Rectangle())
+                            #if os(iOS)
+                            // On the phone a tap anywhere on a line comments on it
+                            .gesture(SpatialTapGesture().onEnded { tap in
+                                if let index = layout.line(at: tap.location.y) { actions.edit(file.path, [hunk.lines[index]], nil) }
                             })
+                            #endif
                     }
-                    .trackingScrollX($scrollX)
-                }
-                .coordinateSpace(name: space)
-                .onPreferenceChange(ScrollXKey.self) { scrollX = max(0, $0) }
-                .onPreferenceChange(LineFramesKey.self) { frames = $0 }
-                // Where the page jumps to for a comment: outside the sideways scroll, which
-                // would otherwise be the one scrolled to show it
-                .overlay(alignment: .topLeading) {
-                    ZStack(alignment: .topLeading) {
-                        ForEach(targets, id: \.self) { index in
-                            // A spacer above it, not an offset or padding: scrolling to it
-                            // goes by its own laid-out frame
-                            VStack(spacing: 0) {
-                                Color.clear.frame(width: 1, height: frames[index]?.minY ?? CGFloat(index) * Self.rowHeight)
-                                Color.clear.frame(width: 1, height: Self.rowHeight)
-                                    .id("line:\(hunk.lines[index].id)")
-                            }
-                        }
-                    }
-                    .allowsHitTesting(false)
                 }
                 .background(GeometryReader { g in
                     Color.clear
                         .onAppear { viewport = g.size.width }
                         .onChange(of: g.size.width) { _, width in viewport = width }
                 })
+                .overlay(alignment: .topLeading) { lights(layout).allowsHitTesting(false) }
+                .overlay(alignment: .topLeading) { commentRows(layout) }
+                .onPreferenceChange(HeightsKey.self) { if heights != $0 { heights = $0 } }
+                #if os(macOS)
+                .onContinuousHover { phase in
+                    var index: Int?
+                    if case .active(let at) = phase { index = layout.line(at: at.y, exactly: true) }
+                    if hovered != index { hovered = index }
+                }
+                #endif
             }
         }
         .padding(.top, 6)
     }
 
     private var summary: some View {
-        Button(action: toggle) {
+        Button { actions.toggle(key) } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(open ? "▾" : "▸")
                 Text("@@ \(hunk.newStart) \(hunk.section)")
@@ -686,47 +832,84 @@ struct HunkView: View {
         .buttonStyle(.plain)
     }
 
-    private var rows: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(hunk.lines.indices, id: \.self) { index in
-                let line = hunk.lines[index]
-                lineRow(line, index: index)
-                ForEach(file.comments.filter { $0.side == line.side && $0.line == line.number }) { comment in
-                    pinned(ClaudeRow(text: comment.text, colors: colors, gutter: gutter))
-                }
-                ForEach(comments.filter { $0.side == line.side && $0.line == line.number }) { mine in
-                    if editing?.existing == mine.id {
-                        editor
-                    } else {
-                        pinned(MineRow(comment: mine, colors: colors, gutter: gutter,
-                                       edit: { edit(linesOf(mine), mine.id) }, delete: { delete(mine.id) }))
-                    }
-                }
-                if let editing, editing.existing == nil, editing.last.id == line.id {
-                    editor
+    /// The rows in order: each line, then the comments on it (Claude's, the user's, the one
+    /// being written)
+    private var items: [HunkLayout.Item] {
+        var items: [HunkLayout.Item] = []
+        for (index, line) in hunk.lines.enumerated() {
+            items.append(.line(index))
+            for comment in file.comments where comment.side == line.side && comment.line == line.number {
+                items.append(.claude(comment))
+            }
+            for mine in comments where mine.side == line.side && mine.line == line.number {
+                items.append(editing?.existing == mine.id ? .editor : .mine(mine))
+            }
+            if let editing, editing.existing == nil, editing.last.id == line.id {
+                items.append(.editor)
+            }
+        }
+        return items
+    }
+
+    /// The hovered line's light and its +, and the lines being picked or commented on
+    @ViewBuilder
+    private func lights(_ layout: HunkLayout) -> some View {
+        ZStack(alignment: .topLeading) {
+            if let picking {
+                band(layout, min(picking.anchor, picking.current), max(picking.anchor, picking.current), 0.10)
+            } else if let editing, editing.existing == nil,
+                      let first = hunk.lines.firstIndex(where: { $0.id == editing.lines[0].id }),
+                      let last = hunk.lines.firstIndex(where: { $0.id == editing.last.id }) {
+                band(layout, first, last, 0.10)
+            }
+            if !Self.touch, let hovered, picking == nil {
+                band(layout, hovered, hovered, 0.04)
+                if editing == nil {
+                    PlusMark(colors: colors)
+                        .offset(x: gutter + 4, y: layout.y(ofLine: hovered) + 0.5)
                 }
             }
         }
     }
 
-    /// A row as wide as what's on screen, kept at its left edge
-    private func pinned(_ row: some View) -> some View {
-        row.frame(width: max(viewport, 1), alignment: .leading).offset(x: scrollX)
+    private func band(_ layout: HunkLayout, _ first: Int, _ last: Int, _ opacity: Double) -> some View {
+        let top = layout.y(ofLine: first)
+        let bottom = layout.y(ofLine: last) + Self.rowHeight
+        return colors.fg.opacity(opacity)
+            .frame(height: bottom - top)
+            .frame(maxWidth: .infinity)
+            .offset(y: top)
     }
 
-    @ViewBuilder
-    private var editor: some View {
-        if let editing {
-            pinned(EditorRow(target: editing, draft: $draft, colors: colors, gutter: gutter, save: save, cancel: cancel))
+    /// The comment rows, across the numbers and the code, over the space left for them
+    private func commentRows(_ layout: HunkLayout) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(layout.placed.filter { !$0.item.isLine }, id: \.item.key) { placed in
+                commentRow(placed.item)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: HeightsKey.self, value: [placed.item.key: g.size.height])
+                    })
+                    .offset(y: placed.y)
+            }
         }
     }
 
-    /// Lines with a comment on them, by index: the file list and Finish review jump there
-    private var targets: [Int] {
-        hunk.lines.indices.filter { i in
-            let line = hunk.lines[i]
-            return file.comments.contains { $0.side == line.side && $0.line == line.number }
-                || comments.contains { $0.side == line.side && $0.line == line.number }
+    @ViewBuilder
+    private func commentRow(_ item: HunkLayout.Item) -> some View {
+        switch item {
+        case .claude(let comment):
+            ClaudeRow(text: comment.text, colors: colors, gutter: gutter)
+        case .mine(let mine):
+            MineRow(comment: mine, colors: colors, gutter: gutter,
+                    edit: { actions.edit(file.path, linesOf(mine), mine.id) }, delete: { actions.delete(mine.id) })
+        case .editor:
+            if let editing {
+                EditorRow(target: editing, drafts: drafts, colors: colors, gutter: gutter, save: actions.save, cancel: actions.cancel)
+            }
+        case .line:
+            EmptyView()
         }
     }
 
@@ -739,101 +922,125 @@ struct HunkView: View {
         return Array(hunk.lines[first...last])
     }
 
-    private func lineRow(_ line: Review.Line, index: Int) -> some View {
-        let inPick = picking.map { min($0.anchor, $0.current)...max($0.anchor, $0.current) }?.contains(index) == true
-        let inEdit = editing.map { $0.existing == nil && $0.lines.contains { $0.id == line.id } } == true
-        return HStack(spacing: 0) {
-            number(line, index: index)
-                .offset(x: scrollX)
-                .zIndex(1)
-            code(line)
-                .font(.system(size: 12.5, design: .monospaced))
-                .fixedSize()
-                .padding(.leading, 8)
-                .padding(.trailing, 12)
-            Spacer(minLength: 0)
-        }
-        .frame(height: Self.rowHeight)
-        .background(rowTint(line))
-        // The hover's and the pick's light, not something to click
-        .overlay((inPick || inEdit ? colors.fg.opacity(0.10) : hovered == index ? colors.fg.opacity(0.04) : .clear).allowsHitTesting(false))
-        .background(GeometryReader { g in
-            Color.clear.preference(key: LineFramesKey.self, value: [index: g.frame(in: .named(rowsSpace))])
-        })
-        .contentShape(Rectangle())
-        .onHover { inside in
-            if inside { hovered = index } else if hovered == index { hovered = nil }
-        }
-        #if os(iOS)
-        // On the phone a tap anywhere on the line comments on it
-        .onTapGesture { edit([line], nil) }
-        #endif
-    }
-
-    @ViewBuilder
-    private func number(_ line: Review.Line, index: Int) -> some View {
-        #if os(macOS)
-        // A button for the click, with the drag beside it
-        Button { edit([line], nil) } label: { numberLabel(line, index: index) }
-            .buttonStyle(.plain)
-            .simultaneousGesture(gutterGesture(line, index: index))
-        #else
-        numberLabel(line, index: index)
-            .gesture(gutterGesture(line, index: index))
-        #endif
-    }
-
-    private func numberLabel(_ line: Review.Line, index: Int) -> some View {
-        Text(line.number.map(String.init) ?? "")
-            .font(.system(size: 12.5, design: .monospaced))
-            .foregroundStyle(numberColor(line))
-            .frame(width: gutter - 6, alignment: .trailing)
-            .padding(.trailing, 6)
-            .frame(height: Self.rowHeight)
-            // Opaque: the code scrolls under it
-            .background(gutterTint(line))
-            .background(colors.bg)
-            .overlay(alignment: .trailing) {
-                // With a mouse, a + where comments start
-                if !Self.touch && hovered == index && picking == nil && editing == nil {
-                    PlusMark(colors: colors).offset(x: 22)
-                }
-            }
-            .contentShape(Rectangle())
-    }
-
     /// A click on a number comments on its line; dragging down the numbers picks a run of
     /// lines. On the phone, hold a number, then drag.
-    private func gutterGesture(_ line: Review.Line, index: Int) -> some Gesture {
-        let drag = DragGesture(minimumDistance: Self.touch ? 0 : 2, coordinateSpace: .named(rowsSpace))
+    private func gutterGesture(_ layout: HunkLayout) -> some Gesture {
+        let drag = DragGesture(minimumDistance: Self.touch ? 0 : 2)
             .onChanged { value in
-                if picking == nil { pick(.began(index)) }
-                if let at = frames.first(where: { $0.value.minY <= value.location.y && value.location.y < $0.value.maxY })?.key {
-                    pick(.moved(at))
+                guard let at = layout.line(at: value.location.y) else { return }
+                if picking == nil, let start = layout.line(at: value.startLocation.y) {
+                    actions.pick(.began(start), file.path, hunk, key)
                 }
+                actions.pick(.moved(at), file.path, hunk, key)
             }
-            .onEnded { _ in pick(.ended) }
+            .onEnded { _ in actions.pick(.ended, file.path, hunk, key) }
         #if os(iOS)
-        return LongPressGesture(minimumDuration: 0.3).sequenced(before: drag).onEnded { _ in pick(.ended) }
+        return LongPressGesture(minimumDuration: 0.3).sequenced(before: drag)
+            .onEnded { _ in actions.pick(.ended, file.path, hunk, key) }
         #else
-        return drag
+        return drag.exclusively(before: SpatialTapGesture().onEnded { tap in
+            if let index = layout.line(at: tap.location.y) { actions.edit(file.path, [hunk.lines[index]], nil) }
+        })
         #endif
     }
+}
 
-    private func code(_ line: Review.Line) -> Text {
-        guard let runs = line.runs else { return Text(line.text) }
-        return runs.reduce(Text("")) { text, run in
-            guard let kind = run.kind, let colour = colors.tokens[kind] else { return text + Text(run.text) }
-            let piece = Text(run.text).foregroundColor(colour)
-            return text + (kind == .comment ? piece.italic() : piece)
+/// Where a hunk's rows are: lines are a row high, comment rows as tall as they measured
+struct HunkLayout: Equatable {
+    enum Item: Equatable {
+        case line(Int)
+        case claude(Review.Comment)
+        case mine(ReviewUserComment)
+        case editor
+
+        var key: String {
+            switch self {
+            case .line(let i): return "l\(i)"
+            case .claude(let c): return "c\(c.id)"
+            case .mine(let m): return "m\(m.id)"
+            case .editor: return "editor"
+            }
         }
+
+        var isLine: Bool { if case .line = self { return true } else { return false } }
     }
 
-    private func rowTint(_ line: Review.Line) -> Color {
-        switch line.kind {
-        case .added: return colors.add
-        case .removed: return colors.del
-        case .context: return .clear
+    struct Placed: Equatable {
+        let item: Item
+        let y: CGFloat
+        let height: CGFloat
+    }
+
+    let placed: [Placed]
+    /// Each line's top, by index in the hunk
+    private let lineTops: [CGFloat]
+
+    init(items: [Item], heights: [String: CGFloat]) {
+        var placed: [Placed] = []
+        var tops: [CGFloat] = []
+        var y: CGFloat = 0
+        for item in items {
+            let height: CGFloat
+            if case .line = item {
+                height = HunkView.rowHeight
+                tops.append(y)
+            } else {
+                height = heights[item.key] ?? 0
+            }
+            placed.append(Placed(item: item, y: y, height: height))
+            y += height
+        }
+        self.placed = placed
+        lineTops = tops
+    }
+
+    func y(ofLine index: Int) -> CGFloat {
+        index < lineTops.count ? lineTops[index] : 0
+    }
+
+    /// The line at a height in the hunk; over a comment row, the line it's on (or none,
+    /// `exactly`)
+    func line(at y: CGFloat, exactly: Bool = false) -> Int? {
+        guard !lineTops.isEmpty, y >= 0 else { return nil }
+        var lo = 0, hi = lineTops.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if lineTops[mid] <= y { lo = mid } else { hi = mid - 1 }
+        }
+        if exactly && y >= lineTops[lo] + HunkView.rowHeight { return nil }
+        return lo
+    }
+}
+
+/// The line numbers, not scrolling; a space where each comment row goes. Each is the
+/// target a jump to its line scrolls to (outside the sideways scroll, so that isn't the one
+/// scrolled).
+private struct GutterColumn: View, Equatable {
+    let hunk: Review.Hunk
+    let layout: HunkLayout
+    let colors: ReviewColors
+    let gutter: CGFloat
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.hunk.lines.first?.id == b.hunk.lines.first?.id && a.layout == b.layout && a.colors == b.colors && a.gutter == b.gutter
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(layout.placed, id: \.item.key) { placed in
+                if case .line(let index) = placed.item {
+                    let line = hunk.lines[index]
+                    Text(line.number.map(String.init) ?? "")
+                        .font(.system(size: 12.5, design: .monospaced))
+                        .foregroundStyle(numberColor(line))
+                        .frame(width: gutter - 6, height: HunkView.rowHeight, alignment: .trailing)
+                        .padding(.trailing, 6)
+                        .background(gutterTint(line))
+                        .id("line:\(line.id)")
+                } else {
+                    Color.clear.frame(width: gutter, height: placed.height)
+                }
+            }
         }
     }
 
@@ -854,30 +1061,63 @@ struct HunkView: View {
     }
 }
 
-private extension View {
-    /// How far a sideways scroll is scrolled, as it scrolls. iOS 18 and macOS 15 say so; on
-    /// older ones the content's frame (ScrollXKey) does, though not always while scrolling.
-    @ViewBuilder
-    func trackingScrollX(_ x: Binding<CGFloat>) -> some View {
-        if #available(iOS 18, macOS 15, *) {
-            onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.x }) { _, new in
-                x.wrappedValue = max(0, new)
+/// The code, a row per line, a space where each comment row goes; it scrolls sideways
+private struct CodeColumn: View, Equatable {
+    let hunk: Review.Hunk
+    let layout: HunkLayout
+    let colors: ReviewColors
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.hunk.lines.first?.id == b.hunk.lines.first?.id && a.layout == b.layout && a.colors == b.colors
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(layout.placed, id: \.item.key) { placed in
+                if case .line(let index) = placed.item {
+                    let line = hunk.lines[index]
+                    code(line)
+                        .font(.system(size: 12.5, design: .monospaced))
+                        .fixedSize()
+                        .padding(.leading, 8)
+                        .padding(.trailing, 12)
+                        .frame(maxWidth: .infinity, minHeight: HunkView.rowHeight, maxHeight: HunkView.rowHeight, alignment: .leading)
+                        .background(tint(line))
+                } else {
+                    Color.clear.frame(height: placed.height)
+                }
             }
-        } else {
-            self
+        }
+    }
+
+    private func code(_ line: Review.Line) -> Text {
+        guard let runs = line.runs else { return Text(line.text) }
+        return runs.reduce(Text("")) { text, run in
+            guard let kind = run.kind, let colour = colors.tokens[kind] else { return text + Text(run.text) }
+            let piece = Text(run.text).foregroundColor(colour)
+            return text + (kind == .comment ? piece.italic() : piece)
+        }
+    }
+
+    private func tint(_ line: Review.Line) -> Color {
+        switch line.kind {
+        case .added: return colors.add
+        case .removed: return colors.del
+        case .context: return .clear
         }
     }
 }
 
 private extension View {
-    /// How far the page is scrolled and how tall it shows (iOS 18 and macOS 15; older ones
-    /// get no header kept at the top, and the Finish review chip stays)
+    /// How far the page is scrolled and how tall it shows, as it scrolls (iOS 18 and macOS
+    /// 15; older ones get no header kept at the top, and the Finish review chip stays)
     @ViewBuilder
-    func trackingScrollY(_ y: Binding<CGFloat>, viewport: Binding<CGFloat>) -> some View {
+    func trackingScrollY(_ changed: @escaping (CGFloat, CGFloat) -> Void) -> some View {
         if #available(iOS 18, macOS 15, *) {
-            onScrollGeometryChange(for: CGRect.self, of: { CGRect(x: 0, y: $0.contentOffset.y + $0.contentInsets.top, width: 0, height: $0.containerSize.height) }) { _, new in
-                y.wrappedValue = new.minY
-                viewport.wrappedValue = new.height
+            onScrollGeometryChange(for: CGRect.self, of: {
+                CGRect(x: 0, y: $0.contentOffset.y + $0.contentInsets.top, width: 0, height: $0.containerSize.height)
+            }) { _, new in
+                changed(new.minY, new.height)
             }
         } else {
             self
@@ -892,14 +1132,9 @@ private struct TopsKey: PreferenceKey {
     }
 }
 
-private struct ScrollXKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-private struct LineFramesKey: PreferenceKey {
-    static let defaultValue: [Int: CGRect] = [:]
-    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+private struct HeightsKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
         value.merge(nextValue()) { $1 }
     }
 }
@@ -965,7 +1200,8 @@ private struct MineRow: View {
 /// The comment being written looks like the one it becomes: the same band, label and place
 private struct EditorRow: View {
     let target: ReviewView.EditTarget
-    @Binding var draft: String
+    /// Watched here only: a keystroke redraws this row, not the page
+    @ObservedObject var drafts: ReviewDrafts
     let colors: ReviewColors
     let gutter: CGFloat
     let save: () -> Void
@@ -982,7 +1218,7 @@ private struct EditorRow: View {
             }
             .font(.system(size: 12))
             .foregroundStyle(colors.dim)
-            TextField(placeholder, text: $draft, axis: .vertical)
+            TextField(placeholder, text: $drafts.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: ReviewView.inputSize))
                 .lineLimit(1...12)
@@ -1186,7 +1422,7 @@ enum SVGPath {
 
 /// The review's colours, from the terminal's theme: its background and text, and its 16
 /// colours for the highlighting, the diff and the marks
-struct ReviewColors {
+struct ReviewColors: Equatable {
     let bg: Color
     let fg: Color
     let isLight: Bool

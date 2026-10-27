@@ -171,7 +171,7 @@ struct Review: Identifiable {
         var number: Int? { kind == .removed ? old : new }
     }
 
-    struct Comment: Identifiable {
+    struct Comment: Identifiable, Equatable {
         let id: Int
         let side: ReviewSide
         /// Nil when its line isn't in the diff
