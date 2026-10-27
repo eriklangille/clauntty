@@ -43,6 +43,22 @@ class RtachDeployer {
 
     /// Remote path where rtach is installed (versioned to allow updates without killing sessions)
     static var remoteBinPath: String { "~/.clauntty/bin/rtach-\(expectedVersion)" }
+
+    /// Points `rtach` (and through it `clauntty`) at the newest version on the host, run in
+    /// ~/.clauntty/bin. Never this app's version when it's older: two apps on different
+    /// versions would move it back and forth, and the cleanup deleted what an older one left
+    /// it on (`clauntty: command not found`).
+    static let linkNewest = """
+        newest=$(ls -1 rtach-[0-9]* 2>/dev/null | sed "s/^rtach-//" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+        [ -n "$newest" ] && ln -sfn "rtach-$newest" rtach
+        """
+
+    /// Whether version `a` ("2.36.0") is newer than `b`
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        let parts = { (v: String) in v.split(separator: ".").map { Int($0) ?? 0 } }
+        return parts(b).lexicographicallyPrecedes(parts(a))
+    }
+
     static let remoteSessionsPath = "~/.clauntty/sessions"
     static let remoteMetadataPath = "~/.clauntty/sessions.json"
     static let claudeSettingsPath = "~/.claude/settings.json"
@@ -447,8 +463,9 @@ class RtachDeployer {
             for binary in allBinaries {
                 let binaryPath = binary.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                // Skip if current version
-                if binaryPath.hasSuffix("rtach-\(Self.expectedVersion)") {
+                // Keep this version, and newer ones: another device's app put those there
+                let version = binaryPath.components(separatedBy: "rtach-").last ?? ""
+                if version == Self.expectedVersion || Self.isNewer(version, than: Self.expectedVersion) {
                     continue
                 }
 
@@ -475,13 +492,15 @@ class RtachDeployer {
 
     // MARK: - Helper Scripts
 
-    /// Link the `clauntty` command and the older helper names to rtach, which runs as the
-    /// command when invoked by those names (rtach 2.9.0+). Also links `clauntty` into
-    /// ~/.local/bin when that directory exists, so shells rtach didn't start (Herdr,
-    /// tmux, plain ssh) find it; an existing file there that isn't our link is left alone.
+    /// Point `rtach` at the newest version on the host (`linkNewest`, on every launch, not
+    /// just after an upload), and link the `clauntty` command and the older helper names to
+    /// it, which runs as the command when invoked by those names (rtach 2.9.0+). Also links
+    /// `clauntty` into ~/.local/bin when that directory exists, so shells rtach didn't start
+    /// (Herdr, tmux, plain ssh) find it; an existing file there that isn't our link is left alone.
     private func deployHelperScripts() async throws {
         let script = """
             cd ~/.clauntty/bin || exit 1
+            \(Self.linkNewest)
             for name in clauntty open-browser forward-port open-tab; do ln -sfn rtach "$name"; done
             if [ -d ~/.local/bin ]; then
               link=~/.local/bin/clauntty
@@ -758,11 +777,8 @@ class RtachDeployer {
             throw RtachDeployError.deploymentFailed
         }
 
-        // Create/update symlink for easy command-line access
-        // This allows users to run 'rtach' instead of 'rtach-2.6.6'
-        _ = try await connection.executeCommand(
-            "ln -sf \(Self.remoteBinPath) ~/.clauntty/bin/rtach"
-        )
+        // `rtach` on the command line: this version, unless the host has a newer one
+        _ = try await connection.executeCommand("cd ~/.clauntty/bin && sh -c '\(Self.linkNewest)'")
 
         Logger.clauntty.debugOnly("rtach deployed successfully")
     }
