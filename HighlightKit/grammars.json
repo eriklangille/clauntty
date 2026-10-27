@@ -1,0 +1,317 @@
+{
+  "_comment": "Grammars and their highlight queries, pinned together: each grammar at the revision nvim-treesitter's parsers.lua pins at the queries' revision. Built by scripts/build-highlightkit.py.",
+  "tree_sitter": {
+    "url": "https://github.com/tree-sitter/tree-sitter",
+    "revision": "v0.27.1"
+  },
+  "queries": {
+    "url": "https://github.com/nvim-treesitter/nvim-treesitter",
+    "revision": "a2f694478be07f89c2d03cc17858a8745a400c4b"
+  },
+  "languages": [
+    {
+      "name": "swift",
+      "url": "https://github.com/alex-pinkus/tree-sitter-swift",
+      "revision": "82bb3a533e0801fd2bbaa11dc49676e10bf41948",
+      "extensions": [
+        "swift"
+      ],
+      "_note": "Tag 0.7.4-with-generated-files: the repo doesn't commit parser.c, and generating it needs the tree-sitter CLI. nvim-treesitter pins main (9e3b87f) and generates it."
+    },
+    {
+      "name": "zig",
+      "url": "https://github.com/tree-sitter-grammars/tree-sitter-zig",
+      "revision": "6479aa13f32f701c383083d8b28360ebd682fb7d",
+      "extensions": [
+        "zig",
+        "zon"
+      ]
+    },
+    {
+      "name": "typescript",
+      "url": "https://github.com/tree-sitter/tree-sitter-typescript",
+      "revision": "75b3874edb2dc714fb1fd77a32013d0f8699989f",
+      "location": "typescript",
+      "extensions": [
+        "ts",
+        "mts",
+        "cts"
+      ]
+    },
+    {
+      "name": "tsx",
+      "url": "https://github.com/tree-sitter/tree-sitter-typescript",
+      "revision": "75b3874edb2dc714fb1fd77a32013d0f8699989f",
+      "location": "tsx",
+      "extensions": [
+        "tsx"
+      ]
+    },
+    {
+      "name": "javascript",
+      "url": "https://github.com/tree-sitter/tree-sitter-javascript",
+      "revision": "58404d8cf191d69f2674a8fd507bd5776f46cb11",
+      "extensions": [
+        "js",
+        "mjs",
+        "cjs",
+        "jsx"
+      ]
+    },
+    {
+      "name": "python",
+      "url": "https://github.com/tree-sitter/tree-sitter-python",
+      "revision": "v0.25.0",
+      "extensions": [
+        "py",
+        "pyi"
+      ]
+    },
+    {
+      "name": "go",
+      "url": "https://github.com/tree-sitter/tree-sitter-go",
+      "revision": "2346a3ab1bb3857b48b29d779a1ef9799a248cd7",
+      "extensions": [
+        "go"
+      ]
+    },
+    {
+      "name": "rust",
+      "url": "https://github.com/tree-sitter/tree-sitter-rust",
+      "revision": "77a3747266f4d621d0757825e6b11edcbf991ca5",
+      "extensions": [
+        "rs"
+      ]
+    },
+    {
+      "name": "c",
+      "url": "https://github.com/tree-sitter/tree-sitter-c",
+      "revision": "b780e47fc780ddc8da13afa35a3f4ed5c157823d",
+      "extensions": [
+        "c",
+        "h"
+      ]
+    },
+    {
+      "name": "cpp",
+      "url": "https://github.com/tree-sitter/tree-sitter-cpp",
+      "revision": "c009222808634c1014f82438d4883753516a2c24",
+      "extensions": [
+        "cc",
+        "cpp",
+        "cxx",
+        "hpp",
+        "hh",
+        "hxx"
+      ]
+    },
+    {
+      "name": "c_sharp",
+      "url": "https://github.com/tree-sitter/tree-sitter-c-sharp",
+      "revision": "v0.23.5",
+      "extensions": [
+        "cs"
+      ]
+    },
+    {
+      "name": "java",
+      "url": "https://github.com/tree-sitter/tree-sitter-java",
+      "revision": "e10607b45ff745f5f876bfa3e94fbcc6b44bdc11",
+      "extensions": [
+        "java"
+      ]
+    },
+    {
+      "name": "kotlin",
+      "url": "https://github.com/fwcd/tree-sitter-kotlin",
+      "revision": "1852ea17b7f60fb3f9d84e0b1555d56b46b39fb1",
+      "extensions": [
+        "kt",
+        "kts"
+      ]
+    },
+    {
+      "name": "ruby",
+      "url": "https://github.com/tree-sitter/tree-sitter-ruby",
+      "revision": "ad907a69da0c8a4f7a943a7fe012712208da6dee",
+      "extensions": [
+        "rb",
+        "rake",
+        "gemspec"
+      ],
+      "filenames": [
+        "Gemfile",
+        "Rakefile"
+      ]
+    },
+    {
+      "name": "php",
+      "url": "https://github.com/tree-sitter/tree-sitter-php",
+      "revision": "58d5643086ae60e93a3746cca648363ee97c8761",
+      "location": "php",
+      "extensions": [
+        "php"
+      ]
+    },
+    {
+      "name": "dart",
+      "url": "https://github.com/UserNobody14/tree-sitter-dart",
+      "revision": "0038280b774b65c1b89ba7fec50624d8baed9fe1",
+      "extensions": [
+        "dart"
+      ]
+    },
+    {
+      "name": "scala",
+      "url": "https://github.com/tree-sitter/tree-sitter-scala",
+      "revision": "c76bab0092b622e34df4916d80b117436683d16e",
+      "extensions": [
+        "scala",
+        "sc"
+      ]
+    },
+    {
+      "name": "elixir",
+      "url": "https://github.com/elixir-lang/tree-sitter-elixir",
+      "revision": "cb32ccbe17c67037b09e31bf9beb22cdae6ed8e9",
+      "extensions": [
+        "ex",
+        "exs"
+      ]
+    },
+    {
+      "name": "lua",
+      "url": "https://github.com/tree-sitter-grammars/tree-sitter-lua",
+      "revision": "10fe0054734eec83049514ea2e718b2a56acd0c9",
+      "extensions": [
+        "lua"
+      ]
+    },
+    {
+      "name": "bash",
+      "url": "https://github.com/tree-sitter/tree-sitter-bash",
+      "revision": "a06c2e4415e9bc0346c6b86d401879ffb44058f7",
+      "extensions": [
+        "sh",
+        "bash",
+        "zsh"
+      ],
+      "filenames": [
+        ".bashrc",
+        ".bash_profile",
+        ".zshrc",
+        ".zprofile",
+        ".profile"
+      ]
+    },
+    {
+      "name": "css",
+      "url": "https://github.com/tree-sitter/tree-sitter-css",
+      "revision": "dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f",
+      "extensions": [
+        "css"
+      ]
+    },
+    {
+      "name": "html",
+      "url": "https://github.com/tree-sitter/tree-sitter-html",
+      "revision": "73a3947324f6efddf9e17c0ea58d454843590cc0",
+      "extensions": [
+        "html",
+        "htm"
+      ]
+    },
+    {
+      "name": "yaml",
+      "url": "https://github.com/tree-sitter-grammars/tree-sitter-yaml",
+      "revision": "a1c4812a73ec5e089de8e441fdea3a921e8d5079",
+      "extensions": [
+        "yml",
+        "yaml"
+      ]
+    },
+    {
+      "name": "toml",
+      "url": "https://github.com/tree-sitter-grammars/tree-sitter-toml",
+      "revision": "64b56832c2cffe41758f28e05c756a3a98d16f41",
+      "extensions": [
+        "toml"
+      ]
+    },
+    {
+      "name": "json",
+      "url": "https://github.com/tree-sitter/tree-sitter-json",
+      "revision": "254c42a6476413b776221e03982ac8ae159eeb72",
+      "extensions": [
+        "json"
+      ]
+    },
+    {
+      "name": "objc",
+      "url": "https://github.com/tree-sitter-grammars/tree-sitter-objc",
+      "revision": "181a81b8f23a2d593e7ab4259981f50122909fda",
+      "extensions": [
+        "m",
+        "mm"
+      ]
+    },
+    {
+      "name": "markdown",
+      "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown",
+      "revision": "41ff24a6c775492c543b09228aeb98d1cd2b3a0f",
+      "location": "tree-sitter-markdown",
+      "extensions": [
+        "md",
+        "markdown"
+      ]
+    },
+    {
+      "name": "markdown_inline",
+      "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown",
+      "revision": "41ff24a6c775492c543b09228aeb98d1cd2b3a0f",
+      "location": "tree-sitter-markdown-inline",
+      "extensions": []
+    },
+    {
+      "name": "sql",
+      "url": "https://github.com/derekstride/tree-sitter-sql",
+      "revision": "e038788e5d4daba82dea35676bf49a216629e141",
+      "extensions": [
+        "sql"
+      ]
+    },
+    {
+      "name": "dockerfile",
+      "url": "https://github.com/camdencheek/tree-sitter-dockerfile",
+      "revision": "971acdd908568b4531b0ba28a445bf0bb720aba5",
+      "extensions": [
+        "dockerfile"
+      ],
+      "filenames": [
+        "Dockerfile",
+        "Containerfile"
+      ]
+    },
+    {
+      "name": "make",
+      "url": "https://github.com/tree-sitter-grammars/tree-sitter-make",
+      "revision": "70613f3d812cbabbd7f38d104d60a409c4008b43",
+      "extensions": [
+        "mk"
+      ],
+      "filenames": [
+        "Makefile",
+        "makefile",
+        "GNUmakefile"
+      ]
+    },
+    {
+      "name": "nix",
+      "url": "https://github.com/nix-community/tree-sitter-nix",
+      "revision": "6e3b9cb43a6af5afd074b692599bf42389c23704",
+      "extensions": [
+        "nix"
+      ]
+    }
+  ]
+}

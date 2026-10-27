@@ -165,7 +165,7 @@ struct ReviewView: View {
                 .padding(.trailing, 8)
             Text(line.kind == .added ? "+" : line.kind == .removed ? "−" : " ")
                 .frame(width: 14)
-            Text(line.text)
+            code(line)
                 .fixedSize()
                 .padding(.trailing, 16)
         }
@@ -186,6 +186,25 @@ struct ReviewView: View {
                 .onTapGesture { editing = Editing(path: file.path, line: line, existing: mine) }
         }
     }
+
+    /// The line in its highlighting's colours (the web prototype's, until the review
+    /// screen takes them from the theme)
+    private func code(_ line: Review.Line) -> Text {
+        guard let runs = line.runs else { return Text(line.text) }
+        return runs.reduce(Text("")) { text, run in
+            guard let kind = run.kind else { return text + Text(run.text) }
+            let piece = Text(run.text).foregroundColor(Self.colours[kind])
+            return text + (kind == .comment ? piece.italic() : piece)
+        }
+    }
+
+    private static let colours: [TokenKind: Color] = [
+        .keyword: Color(red: 0.78, green: 0.30, blue: 0.93), .string: Color(red: 0.59, green: 0.88, blue: 0.45),
+        .comment: Color(red: 0.63, green: 0.63, blue: 0.65), .constant: Color(red: 0.95, green: 0.61, blue: 0.07),
+        .function: Color(red: 1.0, green: 0.90, blue: 0.43), .type: Color(red: 0.0, green: 0.91, blue: 0.78),
+        .attribute: Color(red: 0.93, green: 0.36, blue: 0.26), .operator: Color(red: 0.93, green: 0.36, blue: 0.26),
+        .punctuation: Color(red: 0.72, green: 0.74, blue: 0.77),
+    ]
 
     private func claudeComment(_ text: String) -> some View {
         commentRow(label: "Claude", text: text)

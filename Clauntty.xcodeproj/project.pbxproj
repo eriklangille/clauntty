@@ -56,6 +56,7 @@
 		C00000A3 /* SSHAuthPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A3 /* SSHAuthPrompts.swift */; };
 		C0000015 /* KeyboardAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000015 /* KeyboardAccessoryView.swift */; };
 		C0000016 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000016 /* Session.swift */; };
+		AC0000000000000000000008 /* Highlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000008 /* Highlighter.swift */; };
 		AC0000000000000000000007 /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000007 /* ReviewView.swift */; };
 		AC0000000000000000000006 /* SessionManager+Reviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000006 /* SessionManager+Reviews.swift */; };
 		AC0000000000000000000005 /* Review.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000005 /* Review.swift */; };
@@ -68,6 +69,7 @@
 		55E77F7247B5040EF5FD7BFF /* SessionManager+Connections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4874ED9A2E6E254D7091964 /* SessionManager+Connections.swift */; };
 		C0000019 /* RtachDeployer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000019 /* RtachDeployer.swift */; };
 		C0000020 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; };
+		C0000021 /* HighlightKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000021 /* HighlightKit.xcframework */; };
 		7A000001 /* TailscaleManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A100001 /* TailscaleManager.swift */; };
 		7A000002 /* TailscaleKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7A100002 /* TailscaleKit.xcframework */; };
 		7A000003 /* TailscaleKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7A100002 /* TailscaleKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -168,6 +170,7 @@
 		C10000A3 /* SSHAuthPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthPrompts.swift; sourceTree = "<group>"; };
 		C1000015 /* KeyboardAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessoryView.swift; sourceTree = "<group>"; };
 		C1000016 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		AC1000000000000000000008 /* Highlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlighter.swift; sourceTree = "<group>"; };
 		AC1000000000000000000007 /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
 		AC1000000000000000000006 /* SessionManager+Reviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Reviews.swift"; sourceTree = "<group>"; };
 		AC1000000000000000000005 /* Review.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Review.swift; sourceTree = "<group>"; };
@@ -180,6 +183,7 @@
 		D4874ED9A2E6E254D7091964 /* SessionManager+Connections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Connections.swift"; sourceTree = "<group>"; };
 		C1000019 /* RtachDeployer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RtachDeployer.swift; sourceTree = "<group>"; };
 		C1000020 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
+		C1000021 /* HighlightKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = HighlightKit.xcframework; sourceTree = "<group>"; };
 		7A100001 /* TailscaleManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscaleManager.swift; sourceTree = "<group>"; };
 		7A100002 /* TailscaleKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = TailscaleKit.xcframework; sourceTree = "<group>"; };
 		C1000022 /* rtach */ = {isa = PBXFileReference; lastKnownFileType = folder; path = rtach; sourceTree = "<group>"; };
@@ -222,6 +226,7 @@
 				876C56372EFB1A6E00B28BC1 /* NIOPosix in Frameworks */,
 				876C56362EFB1A6E00B28BC1 /* NIOCore in Frameworks */,
 				C0000020 /* GhosttyKit.xcframework in Frameworks */,
+				C0000021 /* HighlightKit.xcframework in Frameworks */,
 				7A000002 /* TailscaleKit.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -413,6 +418,7 @@
 			isa = PBXGroup;
 			children = (
 				C1000016 /* Session.swift */,
+				AC1000000000000000000008 /* Highlighter.swift */,
 				AC1000000000000000000007 /* ReviewView.swift */,
 				AC1000000000000000000006 /* SessionManager+Reviews.swift */,
 				AC1000000000000000000005 /* Review.swift */,
@@ -431,6 +437,7 @@
 			isa = PBXGroup;
 			children = (
 				C1000020 /* GhosttyKit.xcframework */,
+				C1000021 /* HighlightKit.xcframework */,
 				7A100002 /* TailscaleKit.xcframework */,
 				9288A4E4FA9722C67B531048 /* iOS */,
 			);
@@ -653,6 +660,7 @@
 				C0000019 /* RtachDeployer.swift in Sources */,
 				C0000015 /* KeyboardAccessoryView.swift in Sources */,
 				C0000016 /* Session.swift in Sources */,
+				AC0000000000000000000008 /* Highlighter.swift in Sources */,
 				AC0000000000000000000007 /* ReviewView.swift in Sources */,
 				AC0000000000000000000006 /* SessionManager+Reviews.swift in Sources */,
 				AC0000000000000000000005 /* Review.swift in Sources */,

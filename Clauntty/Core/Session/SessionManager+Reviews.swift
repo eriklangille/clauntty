@@ -19,8 +19,12 @@ extension SessionManager {
                 let data = try await session.downloadFile(".clauntty/reviews/\(id).json", maxBytes: Self.maxReviewBytes)
                 // Gone meanwhile (answered elsewhere, or the command was stopped)
                 guard !data.isEmpty else { return }
-                let bundle = try ReviewBundle.decode(data)
-                let review = Review(bundle: bundle, sessionId: session.id, host: self.hostName(of: session))
+                let host = self.hostName(of: session)
+                let sessionId = session.id
+                // Decoding and highlighting every file takes a moment for a big change
+                let review = try await Task.detached(priority: .userInitiated) {
+                    Review(bundle: try ReviewBundle.decode(data), sessionId: sessionId, host: host)
+                }.value
                 Logger.clauntty.debugOnly("SessionManager: review \(id) with \(review.files.count) file(s)")
                 self.reviews.append(review)
             } catch {

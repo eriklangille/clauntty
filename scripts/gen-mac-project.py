@@ -133,6 +133,7 @@ def main():
 
     o += "/* Begin PBXBuildFile section */\n"
     o += f'{T}{i("bf_ghostty")} /* GhosttyKit.xcframework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {i("fr_ghostty")} /* GhosttyKit.xcframework */; }};\n'
+    o += f'{T}{i("bf_highlight")} /* HighlightKit.xcframework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {i("fr_highlight")} /* HighlightKit.xcframework */; }};\n'
     for p in products:
         o += f'{T}{i("bf_" + p)} /* {p} in Frameworks */ = {{isa = PBXBuildFile; productRef = {i("pd_" + p)} /* {p} */; }};\n'
     for r in resources:
@@ -142,6 +143,7 @@ def main():
     o += "/* Begin PBXFileReference section */\n"
     o += f'{T}{i("fr_app")} /* Clauntty.app */ = {{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; }};\n'
     o += f'{T}{i("fr_ghostty")} /* GhosttyKit.xcframework */ = {{isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = GhosttyKit.xcframework; path = Frameworks/GhosttyKit.xcframework; sourceTree = "<group>"; }};\n'
+    o += f'{T}{i("fr_highlight")} /* HighlightKit.xcframework */ = {{isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = HighlightKit.xcframework; path = Frameworks/HighlightKit.xcframework; sourceTree = "<group>"; }};\n'
     for f, r in zip(RESOURCE_FOLDERS, resources):
         o += f'{T}{i("fr_res_" + r)} /* {r} */ = {{isa = PBXFileReference; lastKnownFileType = folder; name = {r}; path = {f}; sourceTree = "<group>"; }};\n'
     o += "/* End PBXFileReference section */\n\n"
@@ -161,7 +163,8 @@ def main():
 
     o += "/* Begin PBXFrameworksBuildPhase section */\n"
     o += f'{T}{i("ph_frameworks")} /* Frameworks */ = {{\n{T}\tisa = PBXFrameworksBuildPhase;\n{T}\tbuildActionMask = 2147483647;\n{T}\tfiles = (\n'
-    o += lines([f'{i("bf_ghostty")} /* GhosttyKit.xcframework in Frameworks */'] + [f'{i("bf_" + p)} /* {p} in Frameworks */' for p in products], T + "\t\t")
+    o += lines([f'{i("bf_ghostty")} /* GhosttyKit.xcframework in Frameworks */', f'{i("bf_highlight")} /* HighlightKit.xcframework in Frameworks */']
+               + [f'{i("bf_" + p)} /* {p} in Frameworks */' for p in products], T + "\t\t")
     o += f"{T}\t);\n{T}\trunOnlyForDeploymentPostprocessing = 0;\n{T}}};\n"
     o += "/* End PBXFrameworksBuildPhase section */\n\n"
 
@@ -175,7 +178,7 @@ def main():
                + [f'{i("fr_res_" + r)} /* {r} */' for r in resources], T + "\t\t")
     o += f'{T}\t);\n{T}\tname = "Shared with iOS";\n{T}\tsourceTree = "<group>";\n{T}}};\n'
     o += f'{T}{i("g_frameworks")} /* Frameworks */ = {{\n{T}\tisa = PBXGroup;\n{T}\tchildren = (\n'
-    o += lines([f'{i("fr_ghostty")} /* GhosttyKit.xcframework */'], T + "\t\t")
+    o += lines([f'{i("fr_ghostty")} /* GhosttyKit.xcframework */', f'{i("fr_highlight")} /* HighlightKit.xcframework */'], T + "\t\t")
     o += f'{T}\t);\n{T}\tname = Frameworks;\n{T}\tsourceTree = "<group>";\n{T}}};\n'
     o += f'{T}{i("g_products")} /* Products */ = {{\n{T}\tisa = PBXGroup;\n{T}\tchildren = (\n'
     o += lines([f'{i("fr_app")} /* Clauntty.app */'], T + "\t\t")

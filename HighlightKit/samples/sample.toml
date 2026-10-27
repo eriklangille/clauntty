@@ -1,0 +1,11 @@
+# Grammar pins
+[tree_sitter]
+url = "https://github.com/tree-sitter/tree-sitter"
+revision = "v0.27.1"
+
+[[languages]]
+name = "swift"
+extensions = ["swift"]
+size_mb = 4.2
+generate = false
+updated = 2026-10-27

@@ -1,0 +1,10 @@
+{
+  "title": "Resume handshake: retry on a stale channel",
+  "base": "HEAD",
+  "files": [
+    { "path": "Clauntty/Core/Session/Session.swift", "priority": "critical", "hunks": [] }
+  ],
+  "untracked_more": 0,
+  "working_tree": true,
+  "pane": null
+}

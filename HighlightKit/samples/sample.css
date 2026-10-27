@@ -1,0 +1,12 @@
+/* Claude's comments, as rows of the diff */
+:root { --claude: #d97757; }
+
+.cc.claude .logo {
+  position: absolute;
+  left: 15px;
+  fill: var(--claude);
+}
+
+@media (hover: hover) {
+  .ln:hover .no::after { content: "+"; width: calc(100% - 2px); }
+}

@@ -1,0 +1,16 @@
+# CI for the review page
+name: review
+on:
+  push:
+    branches: [main, "code-review"]
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      VERBOSE: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          zig build test
+          bun test tests/review.test.ts

@@ -59,6 +59,17 @@ restore upstream's dropped iOS xcframework slices. The rest add the `manual` ter
 iOS C API below. The audit of every patch is in `~/Projects/plans/2026-09-27-clauntty-ghostty-upgrade.md`.
 `main` tracks upstream; the pre-upgrade fork is tagged `clauntty-old`.
 
+`Frameworks/HighlightKit.xcframework` is a symlink into `build/highlightkit/`: tree-sitter and the grammars
+the code review highlights with, each with nvim-treesitter's highlight and injection queries compiled in. A fresh
+checkout needs `python3 scripts/build-highlightkit.py` (git and Xcode's clang only, about 30 s) before Xcode
+builds. Everything is pinned in `HighlightKit/grammars.json`: each grammar at the revision nvim-treesitter's
+`parsers.lua` gives for the queries' revision, so to update, take a new nvim-treesitter commit and its pins
+together. `scripts/highlight-check.sh queries` compiles every query against its grammar, and
+`scripts/highlight-check.sh html out.html HighlightKit/samples/*` renders the sample per language to look at.
+`Highlighter.swift` follows Neovim's rules: a later pattern beats an earlier one, inner nodes paint over outer,
+`#set! priority`, and its predicates (`#lua-match?`, `#any-of?`, `#has-ancestor?`, ...); injections
+(a Markdown fence, HTML's `<script>`) parse their ranges with their own grammar and paint over.
+
 `Frameworks/TailscaleKit.xcframework` is a symlink into `../libtailscale/swift/build/`. A fresh checkout
 needs `brew install go`, the libtailscale clone, and `./scripts/build-tailscalekit.sh` before Xcode builds.
 The script pins Go to libtailscale's `go.mod` version (newer Go breaks a pinned dependency).

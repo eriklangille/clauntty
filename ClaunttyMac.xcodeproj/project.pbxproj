@@ -8,23 +8,25 @@
 
 /* Begin PBXBuildFile section */
 		AC0000000000000000000001 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000002 /* GhosttyKit.xcframework */; };
-		AC0000000000000000000003 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000004 /* NIOSSH */; };
-		AC0000000000000000000005 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000006 /* NIOCore */; };
-		AC0000000000000000000007 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000008 /* NIOPosix */; };
-		AC0000000000000000000009 /* RtachClient in Frameworks */ = {isa = PBXBuildFile; productRef = AC000000000000000000000A /* RtachClient */; };
-		AC000000000000000000000B /* rtach in Resources */ = {isa = PBXBuildFile; fileRef = AC000000000000000000000C /* rtach */; };
-		AC000000000000000000000D /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = AC000000000000000000000E /* Themes */; };
+		AC0000000000000000000003 /* HighlightKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000004 /* HighlightKit.xcframework */; };
+		AC0000000000000000000005 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000006 /* NIOSSH */; };
+		AC0000000000000000000007 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000008 /* NIOCore */; };
+		AC0000000000000000000009 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = AC000000000000000000000A /* NIOPosix */; };
+		AC000000000000000000000B /* RtachClient in Frameworks */ = {isa = PBXBuildFile; productRef = AC000000000000000000000C /* RtachClient */; };
+		AC000000000000000000000D /* rtach in Resources */ = {isa = PBXBuildFile; fileRef = AC000000000000000000000E /* rtach */; };
+		AC000000000000000000000F /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000010 /* Themes */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		AC000000000000000000000F /* Clauntty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC0000000000000000000011 /* Clauntty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AC0000000000000000000002 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = GhosttyKit.xcframework; path = Frameworks/GhosttyKit.xcframework; sourceTree = "<group>"; };
-		AC000000000000000000000C /* rtach */ = {isa = PBXFileReference; lastKnownFileType = folder; name = rtach; path = Clauntty/Resources/rtach; sourceTree = "<group>"; };
-		AC000000000000000000000E /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Themes; path = Clauntty/Resources/Themes; sourceTree = "<group>"; };
+		AC0000000000000000000004 /* HighlightKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = HighlightKit.xcframework; path = Frameworks/HighlightKit.xcframework; sourceTree = "<group>"; };
+		AC000000000000000000000E /* rtach */ = {isa = PBXFileReference; lastKnownFileType = folder; name = rtach; path = Clauntty/Resources/rtach; sourceTree = "<group>"; };
+		AC0000000000000000000010 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Themes; path = Clauntty/Resources/Themes; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		AC0000000000000000000010 /* Exceptions for "Clauntty/Core" folder in "ClaunttyMac" target */ = {
+		AC0000000000000000000012 /* Exceptions for "Clauntty/Core" folder in "ClaunttyMac" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				"Notifications/NotificationManager.swift",
@@ -42,65 +44,67 @@
 				"Voice/VoiceText.swift",
 				"Voice/XAIRealtimeSocket.swift",
 			);
-			target = AC0000000000000000000011 /* ClaunttyMac */;
+			target = AC0000000000000000000013 /* ClaunttyMac */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		AC0000000000000000000012 /* ClaunttyMac */ = {isa = PBXFileSystemSynchronizedRootGroup; path = ClaunttyMac; sourceTree = "<group>"; };
-		AC0000000000000000000013 /* Clauntty/Core */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AC0000000000000000000010 /* Exceptions for "Clauntty/Core" folder in "ClaunttyMac" target */, ); path = Clauntty/Core; sourceTree = "<group>"; };
-		AC0000000000000000000014 /* Clauntty/Models */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Clauntty/Models; sourceTree = "<group>"; };
+		AC0000000000000000000014 /* ClaunttyMac */ = {isa = PBXFileSystemSynchronizedRootGroup; path = ClaunttyMac; sourceTree = "<group>"; };
+		AC0000000000000000000015 /* Clauntty/Core */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AC0000000000000000000012 /* Exceptions for "Clauntty/Core" folder in "ClaunttyMac" target */, ); path = Clauntty/Core; sourceTree = "<group>"; };
+		AC0000000000000000000016 /* Clauntty/Models */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Clauntty/Models; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		AC0000000000000000000015 /* Frameworks */ = {
+		AC0000000000000000000017 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				AC0000000000000000000001 /* GhosttyKit.xcframework in Frameworks */,
-				AC0000000000000000000003 /* NIOSSH in Frameworks */,
-				AC0000000000000000000005 /* NIOCore in Frameworks */,
-				AC0000000000000000000007 /* NIOPosix in Frameworks */,
-				AC0000000000000000000009 /* RtachClient in Frameworks */,
+				AC0000000000000000000003 /* HighlightKit.xcframework in Frameworks */,
+				AC0000000000000000000005 /* NIOSSH in Frameworks */,
+				AC0000000000000000000007 /* NIOCore in Frameworks */,
+				AC0000000000000000000009 /* NIOPosix in Frameworks */,
+				AC000000000000000000000B /* RtachClient in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		AC0000000000000000000016 = {
+		AC0000000000000000000018 = {
 			isa = PBXGroup;
 			children = (
-				AC0000000000000000000012 /* ClaunttyMac */,
-				AC0000000000000000000017 /* Shared with iOS */,
-				AC0000000000000000000018 /* Frameworks */,
-				AC0000000000000000000019 /* Products */,
+				AC0000000000000000000014 /* ClaunttyMac */,
+				AC0000000000000000000019 /* Shared with iOS */,
+				AC000000000000000000001A /* Frameworks */,
+				AC000000000000000000001B /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		AC0000000000000000000017 /* Shared with iOS */ = {
+		AC0000000000000000000019 /* Shared with iOS */ = {
 			isa = PBXGroup;
 			children = (
-				AC0000000000000000000013 /* Clauntty/Core */,
-				AC0000000000000000000014 /* Clauntty/Models */,
-				AC000000000000000000000C /* rtach */,
-				AC000000000000000000000E /* Themes */,
+				AC0000000000000000000015 /* Clauntty/Core */,
+				AC0000000000000000000016 /* Clauntty/Models */,
+				AC000000000000000000000E /* rtach */,
+				AC0000000000000000000010 /* Themes */,
 			);
 			name = "Shared with iOS";
 			sourceTree = "<group>";
 		};
-		AC0000000000000000000018 /* Frameworks */ = {
+		AC000000000000000000001A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				AC0000000000000000000002 /* GhosttyKit.xcframework */,
+				AC0000000000000000000004 /* HighlightKit.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		AC0000000000000000000019 /* Products */ = {
+		AC000000000000000000001B /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AC000000000000000000000F /* Clauntty.app */,
+				AC0000000000000000000011 /* Clauntty.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -108,82 +112,82 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		AC0000000000000000000011 /* ClaunttyMac */ = {
+		AC0000000000000000000013 /* ClaunttyMac */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AC000000000000000000001A /* Build configuration list for PBXNativeTarget "ClaunttyMac" */;
+			buildConfigurationList = AC000000000000000000001C /* Build configuration list for PBXNativeTarget "ClaunttyMac" */;
 			buildPhases = (
-				AC000000000000000000001B /* Sources */,
-				AC0000000000000000000015 /* Frameworks */,
-				AC000000000000000000001C /* Resources */,
+				AC000000000000000000001D /* Sources */,
+				AC0000000000000000000017 /* Frameworks */,
+				AC000000000000000000001E /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				AC0000000000000000000012 /* ClaunttyMac */,
-				AC0000000000000000000013 /* Clauntty/Core */,
-				AC0000000000000000000014 /* Clauntty/Models */,
+				AC0000000000000000000014 /* ClaunttyMac */,
+				AC0000000000000000000015 /* Clauntty/Core */,
+				AC0000000000000000000016 /* Clauntty/Models */,
 			);
 			name = ClaunttyMac;
 			packageProductDependencies = (
-				AC0000000000000000000004 /* NIOSSH */,
-				AC0000000000000000000006 /* NIOCore */,
-				AC0000000000000000000008 /* NIOPosix */,
-				AC000000000000000000000A /* RtachClient */,
+				AC0000000000000000000006 /* NIOSSH */,
+				AC0000000000000000000008 /* NIOCore */,
+				AC000000000000000000000A /* NIOPosix */,
+				AC000000000000000000000C /* RtachClient */,
 			);
 			productName = ClaunttyMac;
-			productReference = AC000000000000000000000F /* Clauntty.app */;
+			productReference = AC0000000000000000000011 /* Clauntty.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		AC000000000000000000001D /* Project object */ = {
+		AC000000000000000000001F /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2700;
 			};
-			buildConfigurationList = AC000000000000000000001E /* Build configuration list for PBXProject "ClaunttyMac" */;
+			buildConfigurationList = AC0000000000000000000020 /* Build configuration list for PBXProject "ClaunttyMac" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = AC0000000000000000000016;
+			mainGroup = AC0000000000000000000018;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				AC000000000000000000001F /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
-				AC0000000000000000000020 /* XCRemoteSwiftPackageReference "swift-nio" */,
-				AC0000000000000000000021 /* XCLocalSwiftPackageReference "RtachClient" */,
+				AC0000000000000000000021 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
+				AC0000000000000000000022 /* XCRemoteSwiftPackageReference "swift-nio" */,
+				AC0000000000000000000023 /* XCLocalSwiftPackageReference "RtachClient" */,
 			);
 			preferredProjectObjectVersion = 77;
-			productRefGroup = AC0000000000000000000019 /* Products */;
+			productRefGroup = AC000000000000000000001B /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				AC0000000000000000000011 /* ClaunttyMac */,
+				AC0000000000000000000013 /* ClaunttyMac */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		AC000000000000000000001C /* Resources */ = {
+		AC000000000000000000001E /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AC000000000000000000000B /* rtach in Resources */,
-				AC000000000000000000000D /* Themes in Resources */,
+				AC000000000000000000000D /* rtach in Resources */,
+				AC000000000000000000000F /* Themes in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		AC000000000000000000001B /* Sources */ = {
+		AC000000000000000000001D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -193,7 +197,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		AC0000000000000000000022 /* Debug */ = {
+		AC0000000000000000000024 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -216,7 +220,7 @@
 			};
 			name = Debug;
 		};
-		AC0000000000000000000023 /* Release */ = {
+		AC0000000000000000000025 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -232,7 +236,7 @@
 			};
 			name = Release;
 		};
-		AC0000000000000000000024 /* Debug */ = {
+		AC0000000000000000000026 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -264,7 +268,7 @@
 			};
 			name = Debug;
 		};
-		AC0000000000000000000025 /* Release */ = {
+		AC0000000000000000000027 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -299,16 +303,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AC000000000000000000001E /* Build configuration list for PBXProject "ClaunttyMac" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				AC0000000000000000000022 /* Debug */,
-				AC0000000000000000000023 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		AC000000000000000000001A /* Build configuration list for PBXNativeTarget "ClaunttyMac" */ = {
+		AC0000000000000000000020 /* Build configuration list for PBXProject "ClaunttyMac" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AC0000000000000000000024 /* Debug */,
@@ -317,17 +312,26 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		AC000000000000000000001C /* Build configuration list for PBXNativeTarget "ClaunttyMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AC0000000000000000000026 /* Debug */,
+				AC0000000000000000000027 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		AC0000000000000000000021 /* XCLocalSwiftPackageReference "RtachClient" */ = {
+		AC0000000000000000000023 /* XCLocalSwiftPackageReference "RtachClient" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = RtachClient;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		AC000000000000000000001F /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
+		AC0000000000000000000021 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-nio-ssh.git";
 			requirement = {
@@ -335,7 +339,7 @@
 				minimumVersion = 0.9.0;
 			};
 		};
-		AC0000000000000000000020 /* XCRemoteSwiftPackageReference "swift-nio" */ = {
+		AC0000000000000000000022 /* XCRemoteSwiftPackageReference "swift-nio" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-nio.git";
 			requirement = {
@@ -346,26 +350,26 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AC0000000000000000000004 /* NIOSSH */ = {
+		AC0000000000000000000006 /* NIOSSH */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = AC000000000000000000001F /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
+			package = AC0000000000000000000021 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
 			productName = NIOSSH;
 		};
-		AC0000000000000000000006 /* NIOCore */ = {
+		AC0000000000000000000008 /* NIOCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = AC0000000000000000000020 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			package = AC0000000000000000000022 /* XCRemoteSwiftPackageReference "swift-nio" */;
 			productName = NIOCore;
 		};
-		AC0000000000000000000008 /* NIOPosix */ = {
+		AC000000000000000000000A /* NIOPosix */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = AC0000000000000000000020 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			package = AC0000000000000000000022 /* XCRemoteSwiftPackageReference "swift-nio" */;
 			productName = NIOPosix;
 		};
-		AC000000000000000000000A /* RtachClient */ = {
+		AC000000000000000000000C /* RtachClient */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RtachClient;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = AC000000000000000000001D /* Project object */;
+	rootObject = AC000000000000000000001F /* Project object */;
 }

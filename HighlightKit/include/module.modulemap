@@ -1,0 +1,4 @@
+module HighlightKit {
+    header "HighlightKit.h"
+    export *
+}

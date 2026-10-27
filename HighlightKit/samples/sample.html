@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Review</title>
+  <!-- the page's styles -->
+  <link rel="stylesheet" href="review.css">
+  <style>
+    .badge { color: #d97757; margin: 0 4px; }
+  </style>
+</head>
+<body class="dark">
+  <aside id="files" hidden>Files</aside>
+  <button type="button" onclick="send()">Send</button>
+  <script>
+    // Send the comments back
+    async function send() { await fetch("/done", { method: "POST" }); }
+  </script>
+</body>
+</html>

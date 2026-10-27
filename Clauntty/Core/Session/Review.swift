@@ -156,13 +156,16 @@ struct Review: Identifiable {
         let lines: [Line]
     }
 
-    struct Line: Identifiable, Hashable {
+    struct Line: Identifiable, Equatable {
         enum Kind { case context, added, removed }
         let id: Int
         let kind: Kind
         let text: String
         let old: Int?
         let new: Int?
+        /// Highlighted from the whole file: removed lines from the old one, the rest from
+        /// the new. Nil without a grammar or the file's contents.
+        var runs: [HighlightedText.Run]?
 
         var side: ReviewSide { kind == .removed ? .old : .new }
         var number: Int? { kind == .removed ? old : new }
@@ -195,6 +198,8 @@ extension Review {
             // Unlisted: skim, or mechanical for a binary (a rebuilt artifact)
             let priority = note?.priority ?? (binary ? .mechanical : .skim)
             let lines = Contents(old: entry.old, new: entry.new)
+            let highlighted = (old: entry.old.flatMap { Highlighter.shared.highlight($0, path: entry.oldPath ?? entry.path) },
+                               new: entry.new.flatMap { Highlighter.shared.highlight($0, path: entry.path) })
 
             func lineOf(_ side: ReviewSide, _ match: String) -> Int? {
                 lines.lineOf(side, match, in: diff?.hunks ?? [])
@@ -210,7 +215,12 @@ extension Review {
                 }.map(\.priority).min()
                 let rows = hunk.lines.map { raw -> Line in
                     lineId += 1
-                    return Line(id: lineId, kind: raw.kind, text: raw.text, old: raw.old, new: raw.new)
+                    let source = raw.kind == .removed ? highlighted.old : highlighted.new
+                    let number = raw.kind == .removed ? raw.old : raw.new
+                    // Only if the file's line is the diff's: a file changed since would be off
+                    let runs = number.flatMap { n in source.flatMap { n - 1 < $0.lines.count ? $0.lines[n - 1] : nil } }
+                        .flatMap { $0.map(\.text).joined() == raw.text ? $0 : nil }
+                    return Line(id: lineId, kind: raw.kind, text: raw.text, old: raw.old, new: raw.new, runs: runs)
                 }
                 return Hunk(id: i, oldStart: hunk.oldStart, newStart: hunk.newStart, section: hunk.section,
                             priority: marked ?? priority, lines: rows)
