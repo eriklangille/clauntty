@@ -9,6 +9,9 @@ xcuserdata/
 .build/
 .swiftpm/
 Package.resolved
+# The apps' pins, so a fresh clone builds against the versions they're built with
+# (FluidAudio's 0.x releases break its API)
+!*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # macOS
 .DS_Store

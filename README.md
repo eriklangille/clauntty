@@ -61,7 +61,9 @@ itself, which the phone can then open too.
 
 ## Requirements
 
-- macOS with **Xcode** (the full app: iOS SDK, simulator, signing)
+- macOS with **Xcode** (the full app: iOS SDK, simulator, signing), and its Metal toolchain for
+  Ghostty's shaders: `xcodebuild -downloadComponent MetalToolchain` (since Xcode 26 it's a separate
+  download)
 - **Zig 0.16** (`brew install zig`) for Ghostty and rtach
 - **Go** (`brew install go`) for the Tailscale framework; any recent version, the build script
   fetches the one libtailscale pins
@@ -98,7 +100,9 @@ clauntty/
 
 ```bash
 # Ghostty: GhosttyKit.xcframework (a few minutes the first time)
-cd ghostty && zig build -Demit-xcframework -Demit-macos-app=false -Doptimize=ReleaseFast -Dsentry=false && cd ..
+cd ghostty
+zig build -Demit-xcframework -Demit-macos-app=false -Doptimize=ReleaseFast -Dsentry=false
+cd ..
 
 # rtach for every host platform, copied into the app's resources
 cd rtach && zig build cross && cd ..
@@ -180,8 +184,8 @@ review, debugging and logs.
 
 ## Dependencies
 
-| | |
-|-|-|
+| Dependency | Used for |
+|------------|----------|
 | [Ghostty](https://github.com/eriklangille/ghostty) (fork) | Terminal emulation and Metal rendering |
 | [rtach](https://github.com/eriklangille/rtach) | Session persistence on the host, the `clauntty` command |
 | [libtailscale](https://github.com/eriklangille/libtailscale) (fork) | Embedded Tailscale |
