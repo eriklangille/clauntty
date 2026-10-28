@@ -393,6 +393,8 @@ struct ReviewUserComment: Identifiable, Equatable {
     /// The lines' code, for the report
     let code: String
     var text: String
+    /// Claude's comment it answers
+    var replyTo: String?
 }
 
 enum ReviewReply {
@@ -414,9 +416,17 @@ enum ReviewReply {
                 while quoted.last == " " { quoted.removeLast() }
                 return quoted
             }
+            if let claude = c.replyTo { out.append("  re: " + firstSentence(claude)) }
             out.append("  " + c.text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: "\n  "))
         }
         return out.joined(separator: "\n")
+    }
+
+    /// Which of Claude's comments a reply answers: its first sentence, on one line
+    static func firstSentence(_ text: String) -> String {
+        let flat = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        guard let end = flat.range(of: #"[.!?](\s|$)"#, options: .regularExpression) else { return flat }
+        return String(flat[..<end.upperBound]).trimmingCharacters(in: .whitespaces)
     }
 
     /// `<unix ms>-<pid>-<index>`: digits and dashes, so safe in a shell command

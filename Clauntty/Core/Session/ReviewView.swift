@@ -64,6 +64,8 @@ struct ReviewView: View, Equatable {
         let lines: [Review.Line]
         /// The comment being changed
         var existing: UUID?
+        /// Claude's comment it answers
+        var replyTo: String?
 
         var last: Review.Line { lines[lines.count - 1] }
     }
@@ -235,6 +237,7 @@ struct ReviewView: View, Equatable {
             toggle: { key in if toggled.contains(key) { toggled.remove(key) } else { toggled.insert(key) } },
             pick: { event, path, hunk, key in pick(event, path: path, hunk: hunk, key: key) },
             edit: { path, lines, existing in startEditing(path, lines: lines, existing: existing) },
+            reply: { path, lines, claude in startEditing(path, lines: lines, existing: nil, replyTo: claude) },
             save: { saveDraft() },
             cancel: { editing = nil },
             delete: { id in comments.removeAll { $0.id == id } }
@@ -257,10 +260,11 @@ struct ReviewView: View, Equatable {
         }
     }
 
-    private func startEditing(_ path: String, lines: [Review.Line], existing: UUID?) {
+    private func startEditing(_ path: String, lines: [Review.Line], existing: UUID?, replyTo: String? = nil) {
         guard !lines.isEmpty else { return }
-        drafts.draft = existing.flatMap { id in comments.first { $0.id == id }?.text } ?? ""
-        editing = EditTarget(path: path, lines: lines, existing: existing)
+        let old = existing.flatMap { id in comments.first { $0.id == id } }
+        drafts.draft = old?.text ?? ""
+        editing = EditTarget(path: path, lines: lines, existing: existing, replyTo: old?.replyTo ?? replyTo)
     }
 
     private func saveDraft() {
@@ -273,7 +277,7 @@ struct ReviewView: View, Equatable {
             comments.append(ReviewUserComment(
                 path: target.path, side: target.last.side, line: number,
                 from: target.lines.count > 1 ? first.number : nil,
-                code: target.lines.map(\.text).joined(separator: "\n"), text: text))
+                code: target.lines.map(\.text).joined(separator: "\n"), text: text, replyTo: target.replyTo))
         }
         editing = nil
         drafts.draft = ""
@@ -509,6 +513,8 @@ struct PageActions {
     let toggle: (String) -> Void
     let pick: (HunkView.PickEvent, String, Review.Hunk, String) -> Void
     let edit: (String, [Review.Line], UUID?) -> Void
+    /// Answer Claude's comment (its text) on its line
+    let reply: (String, [Review.Line], String) -> Void
     let save: () -> Void
     let cancel: () -> Void
     let delete: (UUID) -> Void
@@ -1124,7 +1130,9 @@ struct HunkView: View, Equatable {
     private func commentRow(_ item: HunkLayout.Item) -> some View {
         switch item {
         case .claude(let comment):
-            ClaudeRow(text: comment.text, colors: colors, gutter: gutter)
+            ClaudeRow(text: comment.text, colors: colors, gutter: gutter, reply: hunk.lines.first {
+                $0.side == comment.side && $0.number == comment.line
+            }.map { line in { actions.reply(file.path, [line], comment.text) } })
         case .mine(let mine):
             MineRow(comment: mine, colors: colors, gutter: gutter,
                     edit: { actions.edit(file.path, linesOf(mine), mine.id) }, delete: { actions.delete(mine.id) })
@@ -1264,26 +1272,36 @@ private extension View {
 
 // MARK: - Rows
 
-/// Claude's comment: a row of the diff, its text where the code starts, its symbol in the gutter
+/// Claude's comment: a row of the diff, its text where the code starts, its symbol in the
+/// gutter. Reply (or a tap on it) comments on its line, under it.
 private struct ClaudeRow: View {
     let text: String
     let colors: ReviewColors
     let gutter: CGFloat
+    /// None for a comment whose line isn't in the diff
+    var reply: (() -> Void)?
 
     var body: some View {
-        Text(markdown(text))
-            .font(.system(size: 14))
-            .foregroundStyle(colors.fg.opacity(0.88))
-            .lineSpacing(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, gutter + 8)
-            .padding(.trailing, 14)
-            .padding(.vertical, 8)
-            .overlay(alignment: .topLeading) {
-                ClaudeLogo().fill(ReviewColors.claude).frame(width: 14, height: 14).padding(.leading, 15).padding(.top, 10)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(markdown(text))
+                .font(.system(size: 14))
+                .foregroundStyle(colors.fg.opacity(0.88))
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let reply {
+                Button("Reply", action: reply).buttonStyle(LinkStyle(colors: colors))
             }
-            .commentBand(colors)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, gutter + 8)
+        .padding(.trailing, 14)
+        .padding(.vertical, 8)
+        .overlay(alignment: .topLeading) {
+            ClaudeLogo().fill(ReviewColors.claude).frame(width: 14, height: 14).padding(.leading, 15).padding(.top, 10)
+        }
+        .commentBand(colors)
+        .contentShape(Rectangle())
+        .onTapGesture { reply?() }
     }
 }
 
@@ -1299,6 +1317,7 @@ private struct MineRow: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
                 Text("You").fontWeight(.semibold).foregroundStyle(colors.dim)
+                if comment.replyTo != nil { Text("replying to Claude").foregroundStyle(colors.dim) }
                 if let from = comment.from {
                     Text("lines \(from)–\(comment.line)").foregroundStyle(colors.dim)
                 }
@@ -1372,6 +1391,7 @@ private struct EditorRow: View {
     }
 
     private var placeholder: String {
+        if target.replyTo != nil { return "Reply to Claude" }
         let name = (target.path as NSString).lastPathComponent
         if target.lines.count > 1, let from = target.lines.first?.number, let to = target.last.number {
             return "Comment on \(name) lines \(from)–\(to)"
