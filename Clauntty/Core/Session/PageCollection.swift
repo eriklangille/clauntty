@@ -46,7 +46,7 @@ struct PageCollection: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+    final class Coordinator: NSObject, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate {
         static let cell = "row"
         private let rows: PageRows
         private let place: PagePlace
@@ -84,6 +84,11 @@ struct PageCollection: UIViewRepresentable {
                 }
             }
             NotificationCenter.default.addObserver(self, selector: #selector(keyboardShown), name: UIResponder.keyboardDidShowNotification, object: nil)
+            // Beside the rows' own taps, not instead of them
+            let tap = UITapGestureRecognizer(target: self, action: #selector(tappedAway))
+            tap.cancelsTouchesInView = false
+            tap.delegate = self
+            view.addGestureRecognizer(tap)
         }
 
         func update(state: PageState, footer: AnyView) {
@@ -117,12 +122,25 @@ struct PageCollection: UIViewRepresentable {
             for (row, height) in changes where top > 0 && rows.tops[row] + rows.heights[row] <= top + 0.5 {
                 shift += height - rows.heights[row]
             }
+            // Finish review growing with the note typed in it, at the bottom of the page:
+            // the page stays at the bottom, so Send stays above the keyboard
+            let pinned = changes[rows.rows.count - 1] != nil && view.contentOffset.y >= bottomOffset - 1
             rows.set(changes)
             UIView.performWithoutAnimation {
                 view.collectionViewLayout.invalidateLayout()
                 view.layoutIfNeeded()
             }
-            if shift != 0 { view.contentOffset.y += shift }
+            if pinned {
+                view.contentOffset.y = max(view.contentOffset.y, bottomOffset)
+            } else if shift != 0 {
+                view.contentOffset.y += shift
+            }
+        }
+
+        /// The offset that shows the end of the page
+        private var bottomOffset: CGFloat {
+            guard let view else { return 0 }
+            return max(-view.adjustedContentInset.top, view.contentSize.height + view.adjustedContentInset.bottom - view.bounds.height)
         }
 
         // MARK: Scrolling
@@ -159,12 +177,32 @@ struct PageCollection: UIViewRepresentable {
         }
 
         /// A comment's field, scrolled into what the keyboard leaves, with the line it's on
-        /// above it clear of the file's header kept at the top
+        /// above it clear of the file's header kept at the top. The note's is in Finish
+        /// review, with Send under it: the page goes to its end.
         @objc private func keyboardShown() {
             guard let view, let field = Self.firstResponder(in: view) else { return }
             let frame = field.convert(field.bounds, to: view)
+            if let path = view.indexPathForItem(at: CGPoint(x: frame.midX, y: frame.midY)),
+               sections[path.section].items[path.item] == rows.rows.count - 1 {
+                view.setContentOffset(CGPoint(x: 0, y: bottomOffset), animated: true)
+                return
+            }
             let above = rows.headerHeight + 3 * HunkView.rowHeight + 8
             view.scrollRectToVisible(CGRect(x: 0, y: frame.minY - above, width: 1, height: frame.height + above + 16), animated: true)
+        }
+
+        /// A tap away from the text box being typed in (and the buttons under it: Save,
+        /// Send, the mic) puts the keyboard away
+        @objc private func tappedAway(_ tap: UITapGestureRecognizer) {
+            guard let view, let field = Self.firstResponder(in: view) else { return }
+            let frame = field.convert(field.bounds, to: view)
+            let keep = CGRect(x: 0, y: frame.minY - 8, width: view.bounds.width, height: frame.height + 64)
+            if !keep.contains(tap.location(in: view)) { view.endEditing(true) }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
         }
 
         private static func firstResponder(in view: UIView) -> UIView? {

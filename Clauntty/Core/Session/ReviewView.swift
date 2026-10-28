@@ -2,9 +2,9 @@ import SwiftUI
 
 /// A review from `clauntty review` (plans/2026-10-26-clauntty-code-review.md), the web
 /// prototype's page made native: the files in reading order with sticky headers, a file list
-/// (a sidebar when there's room, else a drawer), Claude's comments as rows of the diff with
-/// its symbol in the gutter, lines that scroll sideways beside fixed numbers, and comments of
-/// the user's own on a line or a run of lines. Finish review sends them. Colours come from
+/// (a sidebar when there's room, else under the review, which slides aside), Claude's
+/// comments as rows of the diff with its symbol in the gutter, lines that scroll sideways
+/// beside fixed numbers, and comments of the user's own on a line or a run of lines. Finish review sends them. Colours come from
 /// the terminal's theme, and only marks carry them (dots, counts, the symbol), never text.
 ///
 /// Thousands of lines are on screen at once, so nothing that changes often may rebuild
@@ -90,34 +90,42 @@ struct ReviewView: View, Equatable {
             #else
             let wide = geometry.size.width >= 860
             #endif
-            HStack(spacing: 0) {
-                if wide {
-                    fileList
+            if wide {
+                HStack(spacing: 0) {
+                    fileList(finish: true)
                         .frame(width: geometry.size.width >= 1000 ? 270 : 230)
                         .background(colors.sidebar)
                     Rectangle().fill(colors.hairline).frame(width: 1)
+                    main(wide: true)
                 }
-                main(wide: wide)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if !wide && sent == nil && editing == nil {
-                    FinishChip(place: scroll.place, count: comments.count, colors: colors) {
-                        jump = Jump(file: "", target: "footer")
-                    }
-                }
-            }
-            .overlay(alignment: .leading) {
-                if !wide && drawer {
-                    ZStack(alignment: .leading) {
-                        Color.black.opacity(0.5)
-                            .ignoresSafeArea()
-                            .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { drawer = false } }
-                        fileList
-                            .frame(width: min(geometry.size.width * 0.82, 320))
-                            .background(colors.bg.overlay(colors.sidebar).ignoresSafeArea())
-                            .shadow(color: .black.opacity(0.5), radius: 20, x: 4)
-                            .transition(.move(edge: .leading))
-                    }
+            } else {
+                // The file list under the review, which slides aside to show it
+                let width = min(geometry.size.width * 0.82, 320)
+                ZStack(alignment: .leading) {
+                    phoneFiles
+                        .frame(width: width)
+                        .accessibilityHidden(!drawer)
+                    main(wide: false)
+                        .background(colors.bg.ignoresSafeArea())
+                        .overlay(alignment: .bottomTrailing) {
+                            if sent == nil && editing == nil && !drawer {
+                                FinishChip(place: scroll.place, count: comments.count, colors: colors) {
+                                    jump = Jump(file: "", target: "footer")
+                                }
+                            }
+                        }
+                        .overlay {
+                            if drawer {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { setDrawer(false) }
+                                    .gesture(DragGesture(minimumDistance: 10).onEnded { drag in
+                                        if drag.translation.width < -40 { setDrawer(false) }
+                                    })
+                            }
+                        }
+                        .shadow(color: .black.opacity(drawer ? 0.45 : 0), radius: 14)
+                        .offset(x: drawer ? width : 0)
                 }
             }
         }
@@ -172,33 +180,52 @@ struct ReviewView: View, Equatable {
 
     private func topBar(wide: Bool) -> some View {
         HStack(spacing: 10) {
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
+            if !wide {
+                barButton("sidebar.left", help: "Files") { setDrawer(!drawer) }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(colors.dim)
-            .help("Close (the review waits on the host)")
             Text(review.range)
                 .font(.system(size: 12.5, design: .monospaced))
                 .foregroundStyle(colors.dim)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
-            if !wide {
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) { drawer = true }
-                } label: {
-                    Text("Files")
-                }
-                .buttonStyle(ChipStyle(colors: colors))
-            }
+            barButton("xmark", help: "Close (the review waits on the host)", action: onClose)
         }
         .padding(.horizontal, 10)
         .frame(height: 44)
         .overlay(alignment: .bottom) { Rectangle().fill(colors.hairline).frame(height: 1) }
+    }
+
+    private func barButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(colors.dim)
+        .help(help)
+    }
+
+    /// The phone's file list, with a title row like the review's top bar. Finish review is
+    /// the chip on the review, not here.
+    private var phoneFiles: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                barButton("sidebar.left", help: "Close files") { setDrawer(false) }
+                Text("Files").font(.system(size: 15, weight: .semibold))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            fileList(finish: false)
+        }
+        .background(colors.bg.overlay(colors.sidebar).ignoresSafeArea())
+    }
+
+    private func setDrawer(_ open: Bool) {
+        withAnimation(.easeOut(duration: 0.22)) { drawer = open }
     }
 
     // MARK: Commenting
@@ -254,8 +281,8 @@ struct ReviewView: View, Equatable {
 
     // MARK: File list
 
-    private var fileList: some View {
-        FileList(files: review.files, comments: comments, colors: colors, place: scroll.place) { file, target in
+    private func fileList(finish: Bool) -> some View {
+        FileList(files: review.files, comments: comments, colors: colors, place: scroll.place, finish: finish) { file, target in
             go(file: file, target: target)
         }
         .equatable()
@@ -270,7 +297,7 @@ struct ReviewView: View, Equatable {
                 }
             }
         }
-        withAnimation(.easeOut(duration: 0.2)) { drawer = false }
+        if drawer { setDrawer(false) }
         jump = Jump(file: file, target: target)
     }
 
@@ -515,15 +542,66 @@ private struct NoteField: View {
     let send: () -> Void
 
     var body: some View {
-        TextField("Note for Claude (optional)", text: $drafts.note, axis: .vertical)
-            .textFieldStyle(.plain)
-            .newlineKeys(text: $drafts.note, submit: send)
-            .lineLimit(2...8)
-            .font(.system(size: ReviewView.inputSize))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .background(colors.fg.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(colors.fg.opacity(0.12)))
+        InputBox(text: $drafts.note, colors: colors) {
+            TextField("Note for Claude (optional)", text: $drafts.note, axis: .vertical)
+                .newlineKeys(text: $drafts.note, submit: send)
+                .lineLimit(2...8)
+        }
+    }
+}
+
+/// A review's text box: a comment's or the note. On the phone the terminal's dictation is in
+/// it, and its edge glows blue with the voice while it records, as the keyboard's bar does.
+private struct InputBox<Field: View>: View {
+    @Binding var text: String
+    let colors: ReviewColors
+    @ViewBuilder let field: Field
+    @State private var recording = false
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            field
+                .textFieldStyle(.plain)
+                .font(.system(size: ReviewView.inputSize))
+                .padding(.leading, 10)
+                .padding(.trailing, 4)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            #if os(iOS)
+            DictationButton(text: $text, recording: $recording, colors: colors)
+                .padding(.trailing, 2)
+                .padding(.bottom, 2)
+            #endif
+        }
+        .background { BoxEdge(recording: recording, colors: colors) }
+    }
+}
+
+/// The box's fill and edge; watching the voice's level here redraws only this
+private struct BoxEdge: View {
+    let recording: Bool
+    let colors: ReviewColors
+    #if os(iOS)
+    @ObservedObject private var speech = SpeechManager.shared
+    #endif
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8)
+        #if os(iOS)
+        // As the keyboard's bar: levels are low, so scaled up
+        let level = recording ? CGFloat(min(speech.audioLevel * 4, 1)) : 0
+        let blue = Color(uiColor: .systemBlue)
+        #else
+        let level: CGFloat = 0
+        let blue = Color.blue
+        #endif
+        shape
+            .fill(colors.bg)
+            .overlay(shape.fill(colors.fg.opacity(0.05)))
+            .overlay(shape.strokeBorder(recording ? blue : colors.fg.opacity(0.12), lineWidth: recording ? 1 + level * 2.5 : 1))
+            .shadow(color: recording ? blue.opacity(0.3 + level * 0.6) : .clear, radius: recording ? 8 + level * 12 : 0)
+            .animation(.easeOut(duration: 0.12), value: level)
+            .animation(.easeOut(duration: 0.15), value: recording)
     }
 }
 
@@ -552,10 +630,13 @@ private struct FileList: View, Equatable {
     let colors: ReviewColors
     /// Not watched here: only each file's light does
     let place: PagePlace
+    /// Finish review under the list (the phone has its chip instead)
+    let finish: Bool
     let go: (String, String?) -> Void
 
     static func == (a: Self, b: Self) -> Bool {
         a.files.map(\.path) == b.files.map(\.path) && a.comments == b.comments && a.colors == b.colors
+            && a.finish == b.finish
     }
 
     var body: some View {
@@ -605,16 +686,18 @@ private struct FileList: View, Equatable {
                 .padding(.vertical, 12)
             }
             // Always at the bottom of the list: the review's one primary action
-            Button { go("", "footer") } label: {
-                HStack(spacing: 6) {
-                    Text("Finish review")
-                    if !comments.isEmpty { Text("· \(comments.count)").fontWeight(.regular) }
+            if finish {
+                Button { go("", "footer") } label: {
+                    HStack(spacing: 6) {
+                        Text("Finish review")
+                        if !comments.isEmpty { Text("· \(comments.count)").fontWeight(.regular) }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
+                .buttonStyle(PrimaryStyle(colors: colors))
+                .padding(12)
+                .overlay(alignment: .top) { Rectangle().fill(colors.hairline).frame(height: 1) }
             }
-            .buttonStyle(PrimaryStyle(colors: colors))
-            .padding(12)
-            .overlay(alignment: .top) { Rectangle().fill(colors.hairline).frame(height: 1) }
         }
     }
 
@@ -1258,12 +1341,13 @@ private struct EditorRow: View {
             }
             .font(.system(size: 12))
             .foregroundStyle(colors.dim)
-            TextField(placeholder, text: $drafts.draft, axis: .vertical)
-                .newlineKeys(text: $drafts.draft, submit: save)
-                .textFieldStyle(.plain)
-                .font(.system(size: ReviewView.inputSize))
-                .lineLimit(1...12)
-                .focused($focused)
+            InputBox(text: $drafts.draft, colors: colors) {
+                TextField(placeholder, text: $drafts.draft, axis: .vertical)
+                    .newlineKeys(text: $drafts.draft, submit: save)
+                    .lineLimit(1...12)
+                    .focused($focused)
+            }
+            .padding(.top, 4)
             HStack(spacing: 4) {
                 #if os(macOS)
                 Text("⌘↩ to save").font(.system(size: 12)).foregroundStyle(colors.faint)
@@ -1295,6 +1379,92 @@ private struct EditorRow: View {
         return "Comment on \(name):\(target.last.number ?? 0)"
     }
 }
+
+#if os(iOS)
+/// The terminal's dictation (`SpeechManager`, on the phone) in a review's text box, as its
+/// mic works: tap to start and again to stop, or hold and talk. The words go after what's
+/// typed. Not there until the model is downloaded, which the terminal's mic offers.
+private struct DictationButton: View {
+    @Binding var text: String
+    /// Recording for this box (not another's, or the terminal's); the box glows
+    @Binding var recording: Bool
+    let colors: ReviewColors
+    @ObservedObject private var speech = SpeechManager.shared
+    @State private var transcribing = false
+    @State private var pressed = false
+    /// Held past this, it records until let go
+    @State private var hold: Task<Void, Never>?
+    @State private var holding = false
+
+    var body: some View {
+        if speech.modelState == .ready {
+            Group {
+                if transcribing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(recording ? Color(uiColor: .systemBlue) : colors.dim)
+                }
+            }
+            .frame(width: 34, height: 32)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { _ in press() }.onEnded { _ in release() })
+            .accessibilityLabel(recording ? "Stop dictation" : "Dictate")
+            .onDisappear {
+                if recording { speech.stopRecordingWithoutTranscription() }
+                recording = false
+            }
+        }
+    }
+
+    private func press() {
+        guard !pressed else { return }
+        pressed = true
+        guard !speech.isRecording, !transcribing else { return }
+        hold = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            holding = true
+            start()
+        }
+    }
+
+    private func release() {
+        pressed = false
+        hold?.cancel()
+        hold = nil
+        if holding {
+            holding = false
+            stop()
+        } else if recording {
+            stop()
+        } else if !speech.isRecording && !transcribing {
+            start()
+        }
+    }
+
+    private func start() {
+        speech.startRecording()
+        guard speech.isRecording else { return }
+        recording = true
+        Haptic.dictationStart.play()
+    }
+
+    private func stop() {
+        guard recording else { return }
+        recording = false
+        transcribing = true
+        Task {
+            defer { transcribing = false }
+            guard let words = await speech.stopRecording()?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !words.isEmpty else { return }
+            if let last = text.last, !last.isWhitespace { text += " " }
+            text += words
+        }
+    }
+}
+#endif
 
 private extension View {
     func commentBand(_ colors: ReviewColors) -> some View {
@@ -1580,7 +1750,7 @@ private struct LinkStyle: ButtonStyle {
     }
 }
 
-/// Files and Finish review on the phone: a small chip over the content
+/// Finish review on the phone: a small chip over the content
 private struct ChipStyle: ButtonStyle {
     let colors: ReviewColors
 
