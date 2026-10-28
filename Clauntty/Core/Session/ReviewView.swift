@@ -135,6 +135,9 @@ struct ReviewView: View, Equatable {
         .foregroundStyle(colors.fg)
         .environment(\.colorScheme, colors.isLight ? .light : .dark)
         .tint(colors.fg)
+        // The Mac's X is in the title bar, outside this view
+        .onAppear { sessionManager.reviewClosers[review.id] = close }
+        .onDisappear { sessionManager.reviewClosers[review.id] = nil }
     }
 
     // MARK: Main column
@@ -205,7 +208,7 @@ struct ReviewView: View, Equatable {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
-            barButton("xmark", help: "Close (the review waits on the host)", action: onClose)
+            barButton("xmark", help: "Close", action: close)
         }
         .padding(.horizontal, 10)
         .frame(height: 44)
@@ -333,7 +336,7 @@ struct ReviewView: View, Equatable {
             Text("Finish review").font(.system(size: 15, weight: .semibold))
             if let sent {
                 Text(sent).font(.system(size: 14)).foregroundStyle(colors.dim).padding(.top, 4)
-                Button("Close", action: onClose)
+                Button("Close", action: close)
                     .buttonStyle(PrimaryStyle(colors: colors))
                     .padding(.top, 12)
             } else {
@@ -404,6 +407,20 @@ struct ReviewView: View, Equatable {
     private var orderedComments: [ReviewUserComment] {
         let order = Dictionary(uniqueKeysWithValues: review.files.enumerated().map { ($1.path, $0) })
         return comments.sorted { (order[$0.path] ?? 0, $0.line) < (order[$1.path] ?? 0, $1.line) }
+    }
+
+    /// Closing it: answered, it's done; with comments or a note written, it's closed for now
+    /// (`onClose`) to finish later; with nothing written, it's gone, as images go, and the
+    /// waiting command says it was closed without comments
+    private func close() {
+        if sent != nil {
+            sessionManager.closeReview(review)
+        } else if !comments.isEmpty || !drafts.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || (editing != nil && !drafts.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+            onClose()
+        } else {
+            sessionManager.dismissReview(review)
+        }
     }
 
     private func send() {

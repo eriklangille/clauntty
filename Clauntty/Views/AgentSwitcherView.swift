@@ -968,6 +968,8 @@ struct AgentSwitcherView: View {
             imagesZoom: imagesZoom,
             onImages: { openImages = OpenImages(id: tabId) },
             onClearImages: { clearImages(tabId) },
+            reviews: session.groupId.map { sessionManager.reviews(in: $0) } ?? [],
+            onReview: { sessionManager.openReview($0) },
             voice: voiceLooks(at: paneSessions) ? voice.phase : nil,
             isScrubbed: scrubbing && index == i,
             isOverview: focused == nil
@@ -1311,6 +1313,9 @@ struct SwitcherWindow: View {
     let imagesZoom: Namespace.ID
     let onImages: () -> Void
     let onClearImages: () -> Void
+    /// Reviews from its panes' agents not on screen: a tile opens the first
+    let reviews: [Review]
+    let onReview: (Review) -> Void
     /// The voice agent is looking here, and what it's doing: its eyes and border
     var voice: VoiceAgent.Phase? = nil
     /// The finger scrubbing the status rail is on this window: its border lit
@@ -1429,8 +1434,8 @@ struct SwitcherWindow: View {
             }
         }
         .padding(.leading, 16)
-        // Clear of the images' thumbnail
-        .padding(.trailing, images?.items.isEmpty == false ? ImagesThumbnail.size + 16 : 16)
+        // Clear of the images' thumbnail and the review's tile
+        .padding(.trailing, 16 + CGFloat(tiles) * (ImagesThumbnail.size + 8))
         .frame(width: windowWidth, height: Self.cardHeight)
     }
 
@@ -1705,10 +1710,19 @@ struct SwitcherWindow: View {
     }
 
     @ViewBuilder private var thumbnail: some View {
+        if let review = reviews.first, !isMenuOpen {
+            ReviewTile(count: reviews.count) { onReview(review) }
+                .transition(.scale(scale: 0.4).combined(with: .opacity))
+        }
         if let images, !images.items.isEmpty, !isMenuOpen {
             ImagesThumbnail(content: images, zoom: imagesZoom, onOpen: onImages, onClear: onClearImages)
                 .transition(.scale(scale: 0.4).combined(with: .opacity))
         }
+    }
+
+    /// The images' thumbnail and the review's tile, in the header's corner
+    private var tiles: Int {
+        (reviews.isEmpty ? 0 : 1) + (images?.items.isEmpty == false ? 1 : 0)
     }
 
     @ViewBuilder private var fullscreenButton: some View {
@@ -1921,6 +1935,41 @@ struct WebWindow: View {
                 withAnimation(.spring(duration: 0.35)) { pullDown = 0 }
                 if exit { onExit() }
             }
+    }
+}
+
+/// A review from one of the window's agents (`clauntty review`) that came while its pane
+/// wasn't on screen, or was closed for now: tap to open it
+private struct ReviewTile: View {
+    let count: Int
+    let onOpen: () -> Void
+
+    var body: some View {
+        Image(systemName: "text.bubble")
+            .font(.system(size: 18, weight: .medium))
+            .foregroundStyle(.white)
+            .frame(width: ImagesThumbnail.size, height: ImagesThumbnail.size)
+            .background(Color.black.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                if count > 1 {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Capsule().fill(.white))
+                        .offset(x: 6, y: -6)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onOpen)
+            .accessibilityLabel(count == 1 ? "A review to read" : "\(count) reviews to read")
+            .accessibilityAddTraits(.isButton)
     }
 }
 

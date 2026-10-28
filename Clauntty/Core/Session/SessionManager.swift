@@ -82,6 +82,11 @@ class SessionManager: ObservableObject {
     @Published var reviews: [Review] = []
     /// Reviews closed for now: they wait, unanswered (the Mac's sidebar badge opens them)
     @Published var hiddenReviews: Set<String> = []
+    /// The phone's review opened from its window's tile, wherever the user is
+    @Published var openedReview: String?
+    /// How each review on screen closes when the user closes it: it knows whether they've
+    /// written anything (`closeByUser`)
+    var reviewClosers: [String: () -> Void] = [:]
     /// Reviews downloaded or downloading this run (the live command and the check on
     /// connect can both bring one)
     var reviewIdsSeen: Set<String> = []

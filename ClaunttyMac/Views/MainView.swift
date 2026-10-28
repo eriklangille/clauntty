@@ -184,7 +184,7 @@ struct MainView: View {
                                 PaneHostView.holdResizes()
                                 reviewFull.toggle()
                             } close: {
-                                sessionManager.hideReview(review)
+                                sessionManager.closeByUser(review)
                             }
                             .background(ThemeColors.background(ghostty.theme))
                             ReviewHost(review: review, theme: ghostty.theme, sessionManager: sessionManager, topBar: false) {

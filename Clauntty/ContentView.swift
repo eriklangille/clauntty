@@ -70,6 +70,10 @@ struct ContentView: View {
         sessionManager.hideReview(review)
       }
       .ignoresSafeArea()
+      // The terminal under it keeps the keyboard (and its key bar) otherwise
+      .onAppear {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+      }
     }
     .fullScreenCover(item: $sessionManager.imageViewer) { _ in
       // Images from `clauntty show` on a remote host
