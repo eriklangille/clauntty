@@ -1,126 +1,141 @@
 # Clauntty
 
-iOS SSH terminal with persistent sessions and GPU-accelerated rendering.
+A terminal for iPhone and Mac, built for running Claude Code on your own machines and keeping up
+with it from wherever you are.
 
-## Why Clauntty?
+You start Claude in a terminal on your Mac or a server. Clauntty keeps that session alive on the
+host, so you can pick it up on your phone, put the phone away mid-task, and come back to the same
+screen on your laptop. You see which agents are working, which are done and which need you, and
+you answer them by typing, talking, or commenting on the code they changed.
 
-Most mobile terminals lose your session when the app backgrounds or your connection drops. Clauntty solves this with **automatic session persistence** - no tmux or screen required.
+No tmux, no accounts, no telemetry. The host side is one small binary the app installs over SSH.
 
-### Key Features
+## What it does
 
-**Persistent Sessions (via rtach)**
-- Sessions survive app backgrounding, connection drops, and device restarts
-- Full scrollback history replayed on reconnect
-- Zero server-side setup - rtach binary auto-deployed on first connect
-- Battery-optimized pause/resume protocol
+**Sessions that don't end.** Every pane runs under [rtach](https://github.com/eriklangille/rtach),
+a small session daemon the app deploys to the host on first connect. Closing the app, losing
+signal, switching Wi-Fi or restarting the phone doesn't end anything: on reconnect you get the
+screen and recent scrollback back. The same session opens on the phone, the Mac app, or a plain
+`ssh` terminal, and the device you're typing on decides its size.
 
-**GPU-Accelerated Rendering (via Ghostty)**
-- Metal-based renderer from [Ghostty](https://ghostty.org)
-- Smooth 60fps scrolling and output
-- Proper Unicode, emoji, and color support
-- 20+ built-in themes (Dracula, Monokai, Solarized, etc.)
+**Built around agents.** Claude Code's hooks (installed with rtach) tell the app what each pane's
+agent is doing: working, blocked on you, or done, with the prompt it's working on. The phone shows
+a card per workspace with that state; the Mac app shows it in the sidebar. When an agent finishes
+or needs you and the app isn't open, you get a notification.
 
-**Native iOS Experience**
-- Multi-tab with swipe gestures
-- Keyboard accessory bar (Esc, Tab, Ctrl, arrows, ^C/^L/^D)
-- Text selection with long-press
-- Port forwarding with in-app browser
-- SSH key authentication (Ed25519)
+**Workspaces and split panes.** Each tab is a workspace on the host, with panes split side by side
+or stacked. The layout lives on the host, so the phone and the Mac show the same workspaces in the
+same order.
 
-**Open Source**
-- No accounts, no telemetry, no subscriptions
+**The `clauntty` command.** Inside any session, `clauntty` (installed with rtach) lets you, or the
+agent, drive the app:
+
+| Command | What it does |
+|---------|--------------|
+| `clauntty show shot.png` | Show images or videos in the app's viewer |
+| `clauntty tab 3000` | Open a local web server in a tab, forwarded over SSH |
+| `clauntty open <url>` | Open a URL on the phone (localhost ports forwarded) |
+| `clauntty ws new -- claude` | Open workspaces, tabs and split panes, optionally running a command |
+| `clauntty review notes.json` | Hand a code change to you as a review (below) and wait for your comments |
+
+**Code review.** An agent can send you its change as a review: the diff in reading order, the
+parts that need a careful look first and mechanical changes folded away, with syntax highlighting
+and a few comments of its own on the lines that matter. You comment on a line or a run of lines,
+reply to its comments, and press Send; your comments go back to the agent that asked. On the Mac
+the review sits beside the agent's pane, so its chat stays in view.
+
+**Voice.** Dictate into the terminal with an on-device speech model
+([Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) through
+[FluidAudio](https://github.com/FluidInference/FluidAudio)); nothing leaves the phone. There's also
+a voice agent you can talk to hands-free, which reads your panes and types into them (it needs an
+xAI API key).
+
+**A real terminal.** Rendering is [Ghostty](https://ghostty.org)'s, on Metal, with its themes,
+Unicode and colour support. On the phone, a key bar has Esc, Tab, Ctrl, arrows and the mic.
+
+**Tailscale built in.** The app can join your tailnet itself, so hosts on it are reachable without
+the Tailscale app or a VPN profile.
+
+**The Mac app** opens hosts from `~/.ssh/config` (including `ProxyJump`), and terminals on the Mac
+itself, which the phone can then open too.
 
 ## Requirements
 
-- **Xcode 15+** (full app, not just command-line tools — needed for iOS SDK, simulator, and signing)
-- **iOS 17.0+**
-- **Zig 0.15.2+** — install via `brew install zig` or from [ziglang.org/download](https://ziglang.org/download/)
-- **Go** — install via `brew install go`; builds the embedded Tailscale framework. Any recent Go works: the build script downloads the exact version libtailscale's `go.mod` pins
-- **Apple Developer account** — free Apple ID works for simulator and personal device builds; paid ($99/year) required for TestFlight distribution
+- macOS with **Xcode** (the full app: iOS SDK, simulator, signing)
+- **Zig 0.16** (`brew install zig`) for Ghostty and rtach
+- **Go** (`brew install go`) for the Tailscale framework; any recent version, the build script
+  fetches the one libtailscale pins
+- **Python 3** for the highlighting framework's build script
+- An **Apple ID** in Xcode for the simulator and your own devices
+- iPhone on **iOS 17** or later; Mac on **macOS 14** or later
+
+Hosts need SSH and nothing else: rtach is copied over (Linux x86_64 and arm64, glibc or musl;
+macOS).
 
 ## Building
 
-### 1. Clone the repos
+### 1. Clone the repos side by side
 
-The project is a monorepo of sibling repos. **The directory layout matters**: the app references `../ghostty`, `../rtach` and `../libtailscale` at build time.
+The app builds against its siblings by relative path, so the layout matters:
 
 ```bash
 mkdir clauntty && cd clauntty
 git clone https://github.com/eriklangille/clauntty.git clauntty
-git clone https://github.com/eriklangille/ghostty.git ghostty
+git clone -b clauntty https://github.com/eriklangille/ghostty.git ghostty
 git clone https://github.com/eriklangille/rtach.git rtach
 git clone -b clauntty https://github.com/eriklangille/libtailscale.git libtailscale
 ```
 
-You should end up with:
 ```
 clauntty/
-├── clauntty/   # iOS app (this repo)
-├── ghostty/    # Ghostty fork (terminal emulator)
-├── rtach/      # Session persistence daemon
-└── libtailscale/  # Tailscale's embeddable tsnet library (fork, branch clauntty)
+├── clauntty/       # the app, iOS and macOS (this repo)
+├── ghostty/        # Ghostty fork, branch clauntty: the terminal
+├── rtach/          # the session daemon and the clauntty command
+└── libtailscale/   # Tailscale's embeddable library, fork, branch clauntty
 ```
 
-### 2. Build dependencies
-
-Build in this order — each step depends on the previous:
+### 2. Build the frameworks and rtach
 
 ```bash
-# 1. Build GhosttyKit framework (Zig 0.16)
-cd ghostty && zig build -Demit-xcframework -Doptimize=ReleaseFast && cd ..
+# Ghostty: GhosttyKit.xcframework (a few minutes the first time)
+cd ghostty && zig build -Demit-xcframework -Demit-macos-app=false -Doptimize=ReleaseFast -Dsentry=false && cd ..
 
-# 2. Build rtach Linux binaries (auto-copies to clauntty/Clauntty/Resources/rtach/)
+# rtach for every host platform, copied into the app's resources
 cd rtach && zig build cross && cd ..
 
-# 3. Build TailscaleKit framework (requires Go and libtailscale at ../libtailscale).
-#    Creates the clauntty/Frameworks/TailscaleKit.xcframework symlink target.
-cd clauntty && ./scripts/build-tailscalekit.sh && cd ..
-```
-
-After building, verify both framework symlinks resolve:
-```bash
-ls clauntty/Frameworks/GhosttyKit.xcframework clauntty/Frameworks/TailscaleKit.xcframework
-```
-The app won't build without both. If only TailscaleKit is missing, run step 3 again.
-If missing, create it:
-```bash
-ln -s ../../ghostty/zig-out/GhosttyKit.xcframework clauntty/Frameworks/GhosttyKit.xcframework
-```
-
-### 3. Build the iOS app
-
-#### Simulator
-
-```bash
 cd clauntty
-./scripts/sim.sh run                    # Build, install, launch
-./scripts/sim.sh debug <connection>     # Full debug cycle with logs
-./scripts/sim.sh quick <connection>     # Skip build, faster iteration
-./scripts/sim.sh help                   # All commands
+# Tailscale: TailscaleKit.xcframework
+./scripts/build-tailscalekit.sh
+# Syntax highlighting for code review: HighlightKit.xcframework (about 30 s)
+python3 scripts/build-highlightkit.py
 ```
 
-> `<connection>` is a saved SSH connection profile name (e.g., `devbox`). Create one in the app's connection list UI first, or use the [Docker test server](#testing) for local testing.
-
-`sim.sh` uses [Facebook IDB](https://fbidb.io/) for simulator automation. Install it first:
-```bash
-./scripts/setup-idb.sh
-```
-
-#### Physical Device
-
-Replace `iPhone 16` with your device name (visible in Xcode → Window → Devices):
+`Frameworks/` holds a link to each of the three; check they all resolve before building the app:
 
 ```bash
-xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
-  -destination 'platform=iOS,name=<YOUR DEVICE>' -quiet build
-
-xcrun devicectl device install app --device "<YOUR DEVICE>" \
-  ~/Library/Developer/Xcode/DerivedData/Clauntty-*/Build/Products/Debug-iphoneos/Clauntty.app
+ls Frameworks/*/Info.plist
 ```
 
-### Building your own fork
+### 3. Build the app
 
-To ship under your own identity, update these:
+From `clauntty/clauntty`:
+
+```bash
+./scripts/sim.sh run       # iOS simulator: build, install, launch (sim.sh help for more)
+./scripts/device.sh run    # the iPhone connected by cable or on the same Wi-Fi
+./scripts/mac.sh run       # the Mac app
+```
+
+Or open `Clauntty.xcodeproj` (iOS) or `ClaunttyMac.xcodeproj` (macOS) in Xcode.
+
+`device.sh` builds Debug; `CONFIG=Release ./scripts/device.sh run` for a Release build, which is
+what to judge speed on. `sim.sh` drives the simulator with
+[IDB](https://fbidb.io/): run `./scripts/setup-idb.sh` once.
+
+### Building under your own Apple ID
+
+Open the project in Xcode, select the Clauntty target, and under **Signing & Capabilities** pick
+your team; Xcode sets up signing. To ship your own build, change these too:
 
 | What | Where | Current value |
 |------|-------|---------------|
@@ -129,110 +144,48 @@ To ship under your own identity, update these:
 | Team ID | `ExportOptions.plist` → `teamID` | `65533RB4LC` |
 | URL scheme | `Clauntty/Info.plist` → `CFBundleURLSchemes` | `clauntty` |
 
-The easiest way: open `Clauntty.xcodeproj` in Xcode, select the Clauntty target, go to **Signing & Capabilities**, and pick your team. Xcode will update the bundle ID and signing automatically.
+## Testing against a throwaway host
 
-## Project Structure
-
-```
-Clauntty/
-├── Core/
-│   ├── Terminal/          # GhosttyApp, TerminalSurface, GhosttyBridge
-│   ├── SSH/               # SSHConnection, SSHAuthenticator, RtachDeployer
-│   ├── Session/           # SessionManager, Session
-│   ├── Tailscale/         # TailscaleManager (embedded tsnet node)
-│   └── Storage/           # ConnectionStore, SSHKeyStore, KeychainHelper
-├── Views/                 # SwiftUI views
-├── Models/                # Data models
-└── Resources/
-    ├── rtach/             # Pre-built rtach binaries for deployment
-    ├── Themes/            # Terminal color themes
-    └── shell-integration/ # Shell scripts for title updates
-
-RtachClient/               # Swift module for rtach protocol parsing
-Frameworks/                # GhosttyKit.xcframework, TailscaleKit.xcframework (symlinks)
-scripts/                   # Build and test automation
-```
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `Core/Terminal/GhosttyApp.swift` | Ghostty C API wrapper, theme management |
-| `Core/Terminal/TerminalSurface.swift` | UIViewRepresentable for Metal rendering |
-| `Core/SSH/SSHConnection.swift` | SwiftNIO SSH client |
-| `Core/SSH/RtachDeployer.swift` | rtach binary deployment, session listing |
-| `Core/Session/SessionManager.swift` | Tab/session lifecycle management |
-| `RtachClient/` | rtach protocol parsing (Swift) |
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  SwiftUI Views                                              │
-│  ┌──────────────┐  ┌─────────────────┐  ┌────────────────┐  │
-│  │ Terminal UI  │  │ Connection List │  │ Keyboard Bar   │  │
-│  └──────┬───────┘  └─────────────────┘  └────────────────┘  │
-│         │                                                    │
-│         ▼                                                    │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ SessionManager                                        │   │
-│  │ - Manages tabs (terminal + web)                       │   │
-│  │ - Connection pooling (reuse SSH to same server)       │   │
-│  │ - Lazy reconnect (only active tab connected)          │   │
-│  └──────┬───────────────────────────────────────────────┘   │
-│         │                                                    │
-│  ┌──────┴──────┐  ┌─────────────────┐  ┌────────────────┐   │
-│  │ Session     │  │ GhosttyKit      │  │ RtachClient    │   │
-│  │ (per tab)   │  │ (Metal render)  │  │ (protocol)     │   │
-│  └──────┬──────┘  └────────┬────────┘  └───────┬────────┘   │
-│         │                  │                    │            │
-│         └──────────────────┴────────────────────┘            │
-│                            │                                 │
-│                    SSHConnection (SwiftNIO)                  │
-└────────────────────────────┼─────────────────────────────────┘
-                             │
-                             ▼
-                      Remote Server
-                    (rtach + $SHELL)
-```
-
-## Data Flow
-
-**Input**: User types → Keyboard → RtachClient (frame) → SSH channel → rtach server → PTY → shell
-
-**Output**: Shell → PTY → rtach server → SSH channel → RtachClient (parse) → GhosttyKit → Metal
-
-## Debugging
+Point the app at a test SSH server rather than a machine with real sessions on it:
 
 ```bash
-# Simulator logs
-./scripts/sim.sh logs
-./scripts/sim.sh logs 30s
-
-# Physical device logs
-idevicesyslog -u $(idevice_id -l) 2>&1 | grep -i clauntty
-
-# Crash reports
-uv run scripts/parse_crash.py --latest
+./scripts/docker-ssh/ssh-test-server.sh start            # with Docker
+./scripts/docker-ssh/container-ssh-server.sh start       # with Apple's container, no Docker
 ```
 
-## Testing
+Log in as `testuser` / `testpass`.
 
-```bash
-# Unit tests
-xcodebuild test -project Clauntty.xcodeproj -scheme ClaunttyTests \
-  -destination 'platform=iOS Simulator,name=iPhone 16'
+## How it works
 
-# Local SSH test server (Docker)
-./scripts/docker-ssh/ssh-test-server.sh start
-# Connect to localhost:22, user: testuser, pass: testpass
 ```
+ iPhone / Mac app                                   Host
+┌────────────────────────────┐                ┌──────────────────────────────┐
+│ SwiftUI                    │                │ rtach (one per pane)         │
+│ SessionManager             │   SSH, one     │  PTY, screen, scrollback     │
+│  workspaces, panes,        │   connection   │  agent state from hooks      │
+│  reconnects                │◄──────────────►│  workspaces, clauntty CLI    │
+│ GhosttyKit (Metal)         │   per host,    │        │                     │
+│ SwiftNIO SSH               │   a channel    │        ▼                     │
+└────────────────────────────┘   per pane     │ $SHELL → claude, vim, …      │
+                                              └──────────────────────────────┘
+```
+
+Each pane is an SSH channel running `rtach`, which attaches to the pane's session on the host,
+starting it if needed. rtach keeps the terminal state while no device is attached and replays it
+when one comes back. Keystrokes go app → SSH → rtach → the PTY; output comes back the same way
+into Ghostty, which draws it.
+
+`CLAUDE.md` in each repo has the details: the protocol, the connection handling, the Mac app, code
+review, debugging and logs.
 
 ## Dependencies
 
-| Dependency | Purpose | Source |
-|------------|---------|--------|
-| GhosttyKit | Terminal emulation + Metal rendering | [eriklangille/ghostty](https://github.com/eriklangille/ghostty) |
-| rtach | Session persistence daemon | [eriklangille/rtach](https://github.com/eriklangille/rtach) |
-| libxev | Cross-platform event loop (used by ghostty and rtach) | [mitchellh/libxev](https://github.com/mitchellh/libxev) |
-| swift-nio-ssh | SSH protocol | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) |
+| | |
+|-|-|
+| [Ghostty](https://github.com/eriklangille/ghostty) (fork) | Terminal emulation and Metal rendering |
+| [rtach](https://github.com/eriklangille/rtach) | Session persistence on the host, the `clauntty` command |
+| [libtailscale](https://github.com/eriklangille/libtailscale) (fork) | Embedded Tailscale |
+| [tree-sitter](https://tree-sitter.github.io) and [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter)'s queries | Highlighting in code review |
+| [swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | SSH |
+| [FluidAudio](https://github.com/FluidInference/FluidAudio) | On-device speech to text |
+| [libxev](https://github.com/mitchellh/libxev) | Event loop for Ghostty and rtach |
