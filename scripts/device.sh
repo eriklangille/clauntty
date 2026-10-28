@@ -6,6 +6,7 @@
 #                                            (and grep it for pattern)
 #
 # Env: DEVICE_ID  device UDID (default: first connected physical iPhone)
+#      CONFIG     Debug (default) or Release (to judge speed: Debug SwiftUI is much slower)
 #
 # Signing needs the login keychain, so Claude Code runs this script outside its
 # sandbox (sandbox.excludedCommands in ~/.claude/settings.json).
@@ -15,6 +16,7 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLE_ID="com.octerm.clauntty"
 LOG=/tmp/clauntty-device-build.log
+CONFIG="${CONFIG:-Debug}"
 
 # "available (paired)" is a phone reachable over the network (same Wi-Fi), no cable needed
 find_device() {
@@ -40,9 +42,9 @@ if [ -z "$DEVICE_ID" ]; then
 fi
 
 build() {
-    echo "Building for device $DEVICE_ID (log: $LOG)..."
+    echo "Building $CONFIG for device $DEVICE_ID (log: $LOG)..."
     cd "$APP_DIR"
-    if ! xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
+    if ! xcodebuild -project Clauntty.xcodeproj -scheme Clauntty -configuration "$CONFIG" \
         -destination "platform=iOS,id=$DEVICE_ID" \
         -allowProvisioningUpdates -quiet build > "$LOG" 2>&1; then
         grep -E 'error' "$LOG" | sort -u | head -20 >&2
@@ -53,7 +55,7 @@ build() {
 }
 
 app_path() {
-    xcodebuild -project "$APP_DIR/Clauntty.xcodeproj" -scheme Clauntty \
+    xcodebuild -project "$APP_DIR/Clauntty.xcodeproj" -scheme Clauntty -configuration "$CONFIG" \
         -destination "platform=iOS,id=$DEVICE_ID" -showBuildSettings 2>/dev/null |
         awk -F' = ' '/ TARGET_BUILD_DIR = /{d=$2} / FULL_PRODUCT_NAME = /{n=$2} END{print d "/" n}'
 }
