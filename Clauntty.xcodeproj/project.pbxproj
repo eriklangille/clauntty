@@ -60,6 +60,8 @@
 		AC0000000000000000000009 /* FrameMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000009 /* FrameMonitor.swift */; };
 		AC0000000000000000000008 /* Highlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000008 /* Highlighter.swift */; };
 		AC0000000000000000000007 /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000007 /* ReviewView.swift */; };
+		AC000000000000000000000C /* PageCollection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC100000000000000000000C /* PageCollection.swift */; };
+		AC000000000000000000000B /* PageRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC100000000000000000000B /* PageRows.swift */; };
 		AC0000000000000000000006 /* SessionManager+Reviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000006 /* SessionManager+Reviews.swift */; };
 		AC0000000000000000000005 /* Review.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000005 /* Review.swift */; };
 		AC0000000000000000000003 /* PaneModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000003 /* PaneModels.swift */; };
@@ -176,6 +178,8 @@
 		AC1000000000000000000009 /* FrameMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMonitor.swift; sourceTree = "<group>"; };
 		AC1000000000000000000008 /* Highlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlighter.swift; sourceTree = "<group>"; };
 		AC1000000000000000000007 /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
+		AC100000000000000000000C /* PageCollection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageCollection.swift; sourceTree = "<group>"; };
+		AC100000000000000000000B /* PageRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageRows.swift; sourceTree = "<group>"; };
 		AC1000000000000000000006 /* SessionManager+Reviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionManager+Reviews.swift"; sourceTree = "<group>"; };
 		AC1000000000000000000005 /* Review.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Review.swift; sourceTree = "<group>"; };
 		AC1000000000000000000003 /* PaneModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneModels.swift; sourceTree = "<group>"; };
@@ -426,6 +430,8 @@
 				AC1000000000000000000009 /* FrameMonitor.swift */,
 				AC1000000000000000000008 /* Highlighter.swift */,
 				AC1000000000000000000007 /* ReviewView.swift */,
+				AC100000000000000000000C /* PageCollection.swift */,
+				AC100000000000000000000B /* PageRows.swift */,
 				AC1000000000000000000006 /* SessionManager+Reviews.swift */,
 				AC1000000000000000000005 /* Review.swift */,
 				AC1000000000000000000003 /* PaneModels.swift */,
@@ -670,6 +676,8 @@
 				AC0000000000000000000009 /* FrameMonitor.swift in Sources */,
 				AC0000000000000000000008 /* Highlighter.swift in Sources */,
 				AC0000000000000000000007 /* ReviewView.swift in Sources */,
+				AC000000000000000000000C /* PageCollection.swift in Sources */,
+				AC000000000000000000000B /* PageRows.swift in Sources */,
 				AC0000000000000000000006 /* SessionManager+Reviews.swift in Sources */,
 				AC0000000000000000000005 /* Review.swift in Sources */,
 				AC0000000000000000000003 /* PaneModels.swift in Sources */,

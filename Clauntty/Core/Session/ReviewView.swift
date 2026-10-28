@@ -12,8 +12,8 @@ import SwiftUI
 /// `PageScroll`, watched only by the views that show them; the page and each hunk are
 /// equatable, so a change elsewhere skips them; scrolling a hunk sideways moves nothing but
 /// its code; hover and picking are one layer drawn over the lines, from where the rows are.
-/// On the Mac the page is a table of rows made as they come on screen (`PageTable`), on the
-/// phone one stack (`ReviewPage`).
+/// The page is a list of rows made as they come on screen (`PageRows`): a table on the Mac,
+/// a collection view on the phone.
 struct ReviewView: View, Equatable {
     let review: Review
     let theme: Theme?
@@ -39,7 +39,6 @@ struct ReviewView: View, Equatable {
     @State private var drawer = false
     @State private var jump: Jump?
     /// Where the page's jump anchor is: a jump scrolls to it
-    @State private var jumpY: CGFloat?
     @State private var sending = false
     @State private var sent: String?
     @State private var error: String?
@@ -134,16 +133,7 @@ struct ReviewView: View, Equatable {
         VStack(spacing: 0) {
             if topBar { topBar(wide: wide) }
             pageScroll
-                #if os(iOS)
-                // The plain stack doesn't pin headers: the one under the top edge is drawn
-                .overlay(alignment: .top) {
-                    StickyHeader(scroll: scroll, files: review.files, colors: colors)
-                }
-                #endif
-                .onAppear {
-                    FrameMonitor.shared?.start()
-                    scroll.files = review.files.map(\.path)
-                }
+                .onAppear { FrameMonitor.shared?.start() }
         }
     }
 
@@ -154,86 +144,31 @@ struct ReviewView: View, Equatable {
         )
     }
 
-    #if os(iOS)
-    /// The files, then Finish review, where each is measured
-    private var page: some View {
-        // A plain stack, not a lazy one: a lazy stack guesses the height of what it hasn't
-        // laid out, and a jump past a big file landed on nothing (the Mac) or under the
-        // wrong pinned header (the phone)
-        VStack(alignment: .leading, spacing: 0) {
-            ReviewPage(state: pageState)
-                .equatable()
-            footer
-                .id("footer")
-                .background(GeometryReader { g in
-                    Color.clear.preference(key: TopsKey.self, value: ["": g.frame(in: .named(PageScroll.space)).minY])
-                })
-        }
-        .coordinateSpace(name: PageScroll.space)
-        .onPreferenceChange(TopsKey.self) { [scroll] tops in scroll.setTops(tops) }
-    }
-    #endif
-
     /// Where a jump goes: the place it was measured at, and how far down the view to put it
     private func destination(_ jump: Jump) -> (key: String, fraction: CGFloat) {
         let key = jump.target == "footer" ? "" : jump.target ?? jump.file
         return (key, jump.target == nil || jump.target == "footer" ? 0 : 0.3)
     }
 
-    #if os(macOS)
-    /// A table, its rows made as they come on screen (`PageTable`): as one view, SwiftUI
-    /// laid the whole page out on every frame of a scroll
+    /// The page's rows, made as they come on screen (`PageRows`): as one SwiftUI view in a
+    /// scroll view, the whole page was laid out on every frame of a scroll
     private var pageScroll: some View {
-        PageTable(
+        PageList(
             state: pageState,
             footer: AnyView(footer),
             place: scroll.place,
-            files: review.files.map(\.path),
             jumper: { [scroll] jumper in scroll.jumper = jumper }
         )
+        #if os(iOS)
+        .ignoresSafeArea(.container, edges: .bottom)
+        #endif
         .onChange(of: jump) { _, jump in
             guard let jump else { return }
             let (key, fraction) = destination(jump)
-            // After the table has the rows the jump opened (a collapsed hunk)
+            // After the list has the rows the jump opened (a collapsed hunk)
             DispatchQueue.main.async { scroll.jumper?(key, fraction) }
         }
     }
-    #else
-    private var pageScroll: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                page
-                    // What a jump scrolls to, put where it's going: ids inside the page (an
-                    // equatable view) weren't found by the scroll view's reader
-                    .overlay(alignment: .topLeading) {
-                        if let jumpY {
-                            VStack(spacing: 0) {
-                                Color.clear.frame(width: 1, height: max(0, jumpY))
-                                Color.clear.frame(width: 1, height: 1).id("jump")
-                            }
-                            .allowsHitTesting(false)
-                        }
-                    }
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .trackingScrollY { [scroll] y, height in scroll.update(y: y, viewport: height) }
-            .perfAutoScroll()
-            .onChange(of: jump) { _, jump in
-                guard let jump else { return }
-                let (key, fraction) = destination(jump)
-                // After the page has laid out what the jump opened (a collapsed hunk)
-                DispatchQueue.main.async {
-                    guard let y = scroll.tops[key] else { return }
-                    jumpY = y
-                    // Straight there: animated, a long jump drew the whole way
-                    DispatchQueue.main.async {
-                        proxy.scrollTo("jump", anchor: UnitPoint(x: 0, y: fraction))
-                    }
-                }
-            }
-        }
-    }
-    #endif
 
     private func topBar(wide: Bool) -> some View {
         HStack(spacing: 10) {
@@ -521,56 +456,12 @@ final class ReviewDrafts: ObservableObject {
     @Published var note = ""
 }
 
-/// Where the page is scrolled, for the header kept at the top (which watches `y`), and the
-/// file list and Finish chip (which watch `place`, only changing when the file under the
-/// top edge does, or Finish review comes into view)
-final class PageScroll: ObservableObject {
-    static let space = "review-page"
-
-    /// Not published: it changes every frame of a scroll, and redrawing anything that often
-    /// cost a layout of the window each frame
-    private(set) var y: CGFloat = 0
-    private var viewport: CGFloat = 0
-    /// The file whose header is above the top edge (it's the one kept there): published
-    /// only when it changes
-    @Published private(set) var pinned: String?
-    /// Where each file's header is on the page, and Finish review's (as "")
-    private(set) var tops: [String: CGFloat] = [:]
-    var files: [String] = []
+/// Where the page is: the file at its top and whether Finish review is in view (`place`),
+/// and how to scroll it to a place (`jumper`, from the list of its rows)
+final class PageScroll {
     let place = PagePlace()
-    /// Scrolls to a measured place (`tops`' key), that fraction of the way down the view
-    /// (the Mac's `PageScroller`)
+    /// Scrolls to a place (`PageRows.target`'s key), that fraction of the way down the view
     var jumper: ((String, CGFloat) -> Void)?
-
-    func update(y: CGFloat, viewport: CGFloat) {
-        self.y = y
-        self.viewport = viewport
-        follow()
-    }
-
-    func setTops(_ tops: [String: CGFloat]) {
-        self.tops = tops
-        follow()
-    }
-
-    private func follow() {
-        let pinned = y > 0 ? lastFile(above: y + 1) : nil
-        if pinned != self.pinned { self.pinned = pinned }
-        place.set(current: pinned ?? files.first, footerShown: (tops[""] ?? .infinity) < y + viewport)
-    }
-}
-
-extension PageScroll {
-    /// The last file whose header is at or above `y`: the files are in page order, so a
-    /// binary search over their tops
-    fileprivate func lastFile(above y: CGFloat) -> String? {
-        var lo = 0, hi = files.count
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if (tops[files[mid]] ?? .infinity) <= y { lo = mid + 1 } else { hi = mid }
-        }
-        return lo > 0 ? files[lo - 1] : nil
-    }
 }
 
 /// The file at the top of the page (lit in the file list), and whether Finish review is
@@ -594,19 +485,6 @@ struct PageActions {
     let save: () -> Void
     let cancel: () -> Void
     let delete: (UUID) -> Void
-}
-
-/// The header of the file under the top edge, kept there
-private struct StickyHeader: View {
-    @ObservedObject var scroll: PageScroll
-    let files: [Review.File]
-    let colors: ReviewColors
-
-    var body: some View {
-        if let path = scroll.pinned, let file = files.first(where: { $0.path == path }) {
-            FileHeader(file: file, colors: colors)
-        }
-    }
 }
 
 /// Finish review on the phone, until it's on screen
@@ -779,8 +657,7 @@ extension Review.File {
 
 // MARK: - The page
 
-/// What the page shows, and the user's work on it: the files are drawn from this, on the
-/// phone as one stack (`ReviewPage`), on the Mac as rows (`PageTable`)
+/// What the page shows, and the user's work on it: its rows (`PageRows`) are drawn from this
 struct PageState: Equatable {
     let review: Review
     let colors: ReviewColors
@@ -825,33 +702,6 @@ final class CommentHeights {
     subscript(hunk: String) -> [String: CGFloat] {
         get { byHunk[hunk] ?? [:] }
         set { byHunk[hunk] = newValue }
-    }
-}
-
-/// The files, each header, note and hunks, in a stack (the phone). Equatable, so the
-/// review's other changes (the drawer, sending, a jump) don't rebuild it.
-private struct ReviewPage: View, Equatable {
-    let state: PageState
-
-    var body: some View {
-        // A stack of its own: as the body of an equatable view, a bare list of files was
-        // drawn one over another
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(state.review.files) { file in
-                VStack(alignment: .leading, spacing: 0) {
-                    FileHeader(file: file, colors: state.colors)
-                        .background(GeometryReader { g in
-                            Color.clear.preference(key: TopsKey.self, value: [file.path: g.frame(in: .named(PageScroll.space)).minY])
-                        })
-                    FileIntro(file: file, colors: state.colors)
-                    ForEach(file.hunks) { hunk in
-                        state.hunk(file, hunk).equatable()
-                    }
-                    Spacer().frame(height: PageState.fileGap)
-                }
-                .id("file:" + file.path)
-            }
-        }
     }
 }
 
@@ -1064,9 +914,6 @@ struct HunkView: View, Equatable {
                 // Not GeometryReaders: SwiftUI runs those again whenever the view moves on
                 // screen, so on every frame of a scroll
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewport = $0 }
-                #if os(iOS)
-                .overlay(alignment: .topLeading) { jumpTargets(layout).allowsHitTesting(false) }
-                #endif
                 .overlay(alignment: .topLeading) { lights(layout).allowsHitTesting(false) }
                 #if os(macOS)
                 // Its + takes a click, as the line's number does
@@ -1095,31 +942,6 @@ struct HunkView: View, Equatable {
     private var codeWidth: CGFloat {
         let longest = hunk.lines.map { $0.text.count + $0.text.filter { $0 == "\t" }.count * 3 }.max() ?? 0
         return CGFloat(longest) * 7.6 + 24
-    }
-
-    /// Where each commented line is on the page, for a jump to it
-    private func jumpTargets(_ layout: HunkLayout) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(targets, id: \.self) { index in
-                // A spacer above it, not an offset: scrolling to it goes by its laid-out frame
-                VStack(spacing: 0) {
-                    Color.clear.frame(width: 1, height: layout.y(ofLine: index))
-                    Color.clear.frame(width: 1, height: Self.rowHeight)
-                        .background(GeometryReader { g in
-                            Color.clear.preference(key: TopsKey.self, value: ["line:\(hunk.lines[index].id)": g.frame(in: .named(PageScroll.space)).minY])
-                        })
-                }
-            }
-        }
-    }
-
-    /// Lines with a comment on them, by index
-    private var targets: [Int] {
-        hunk.lines.indices.filter { i in
-            let line = hunk.lines[i]
-            return file.comments.contains { $0.side == line.side && $0.line == line.number }
-                || comments.contains { $0.side == line.side && $0.line == line.number }
-        }
     }
 
     private var summary: some View {
@@ -1334,37 +1156,6 @@ struct HunkLayout: Equatable {
 }
 
 private extension View {
-    /// `CLAUNTTY_REVIEW_PERF=scroll`: the page scrolls itself (`FrameMonitor`)
-    @ViewBuilder
-    func perfAutoScroll() -> some View {
-        #if os(iOS)
-        if #available(iOS 18, *), let monitor = FrameMonitor.shared, monitor.autoScroll {
-            modifier(PerfScroll(monitor: monitor))
-        } else {
-            self
-        }
-        #else
-        self
-        #endif
-    }
-
-    /// How far the page is scrolled and how tall it shows, as it scrolls (iOS 18 and macOS
-    /// 15; older ones get no header kept at the top, and the Finish review chip stays)
-    @ViewBuilder
-    func trackingScrollY(_ changed: @escaping (CGFloat, CGFloat) -> Void) -> some View {
-        if #available(iOS 18, macOS 15, *) {
-            onScrollGeometryChange(for: CGRect.self, of: {
-                CGRect(x: 0, y: $0.contentOffset.y + $0.contentInsets.top, width: 0, height: $0.containerSize.height)
-            }) { _, new in
-                changed(new.minY, new.height)
-            }
-        } else {
-            self
-        }
-    }
-}
-
-private extension View {
     /// The Mac's text fields: Shift+Return (and Option+Return) adds a line, as in Messages
     /// and Slack; a vertical TextField otherwise ends editing on any Return. ⌘Return submits.
     /// Plain Return is left as it was.
@@ -1387,34 +1178,6 @@ private extension View {
         #endif
     }
 }
-
-#if os(iOS)
-@available(iOS 18, *)
-private struct PerfScroll: ViewModifier {
-    let monitor: FrameMonitor
-    @State private var position = ScrollPosition(edge: .top)
-
-    func body(content: Content) -> some View {
-        content
-            .scrollPosition($position)
-            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentSize.height - $0.containerSize.height }) { _, height in
-                monitor.pageHeight = height
-            }
-            .onAppear {
-                monitor.scrollTo = { y in position.scrollTo(y: y) }
-            }
-    }
-}
-#endif
-
-struct TopsKey: PreferenceKey {
-    static let defaultValue: [String: CGFloat] = [:]
-    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
-        value.merge(nextValue()) { $1 }
-    }
-}
-
-
 
 // MARK: - Rows
 

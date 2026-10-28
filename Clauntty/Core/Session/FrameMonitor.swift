@@ -20,10 +20,10 @@ final class FrameMonitor: NSObject {
     }()
 
     let autoScroll: Bool
-    /// Moves the page to a scroll offset (set by the review, iOS 18/macOS 15)
+    /// Moves the page to a scroll offset (the phone's `PageCollection` sets it)
     var scrollTo: ((CGFloat) -> Void)?
-    /// How tall the page is, to turn around at its end
-    var pageHeight: CGFloat = 0
+    /// How far the page scrolls, to turn around at its end
+    var pageHeight: () -> CGFloat = { 0 }
 
     private var link: CADisplayLink?
     private var last: CFTimeInterval = 0
@@ -54,7 +54,7 @@ final class FrameMonitor: NSObject {
     }
 
     /// Move the page the way a trackpad does: its scroll view directly, not through SwiftUI.
-    /// On the phone, through SwiftUI (`scrollTo`).
+    /// On the phone, its collection view's (`scrollTo`).
     private func step(by distance: CGFloat) {
         #if canImport(AppKit)
         guard let scroll = pageScrollView(), let document = scroll.documentView else { return }
@@ -66,6 +66,7 @@ final class FrameMonitor: NSObject {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
         #else
+        let pageHeight = pageHeight()
         guard let scrollTo, pageHeight > 0 else { return }
         y += direction * distance
         if y > pageHeight { y = pageHeight; direction = -1 }

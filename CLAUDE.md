@@ -171,26 +171,28 @@ view (`MainView.workspace`: a divider to drag, `reviewShare`), or over them at f
 `ReviewHeader`, built as a pane's; the panes keep their size underneath), with a badge on the sidebar card (`shownReview(in:)`); X closes it for now (`hiddenReviews`), it waits on the host. Colours come from the
 terminal theme's palette (`ReviewColors.of`, worked out once per theme). It's built for thousands of
 lines: it sits in a hosting view of its own (`ReviewHost`), so the window's updates (every pane change)
-never reach it; typing lives in `ReviewDrafts` and the scroll position in `PageScroll`, watched only by
-the views that show them; the page and each hunk are equatable. A hunk's code and line numbers aren't views per
+never reach it; typing lives in `ReviewDrafts` and where the page is in `PagePlace`, watched only by the views
+that show them; the page and each hunk are equatable. A hunk's code and line numbers aren't views per
 line: each is one view that draws its lines with Core Text in tiles (`CodeDrawing.swift`, a CATiledLayer drawn on
 Core Animation's threads), only what's on screen; the code's scrolls sideways. Comment rows are SwiftUI, laid over
 both from measured heights (`HunkLayout`, kept in `CommentHeights`); hover is a view of its own over them
 (`HoverLight`), so it never rebuilds a hunk. Measure with `onGeometryChange`, not GeometryReaders: SwiftUI runs a
 GeometryReader again whenever its view moves on screen, so on every frame of a scroll.
-On the Mac the page is an NSTableView (`PageTable.swift`): each file's header, note, hunks and Finish review are
-rows of SwiftUI, made as they come on screen. As one SwiftUI view, in SwiftUI's scroll view or AppKit's, the whole
-page was laid out on every frame of a scroll (70% of the main thread at 60 Hz): SwiftUI's tells its content the
-offset, and AppKit has a hosting view lay itself out whenever it moves in the window. Things that move must stay
+The page is a list of rows (`PageRows.swift`: each file's header, note, hunks and Finish review, SwiftUI), made
+as they come on screen: an NSTableView on the Mac (`PageTable.swift`), a UICollectionView on the phone
+(`PageCollection.swift`). As one SwiftUI view, in SwiftUI's scroll view or AppKit's, the whole page was laid out on
+every frame of a scroll (70% of the Mac's main thread at 60 Hz; on the phone 27%, with 300 ms hitches): SwiftUI's
+tells its content the offset, and AppKit has a hosting view lay itself out whenever it moves in the window. Things that move must stay
 cheap: rows ignore AppKit's constraint updates (`RowHost`; they went up to the review's hosting view and laid it
 all out), and the code scrolls sideways in a plain view (`SidewaysView`), not an NSScrollView (SwiftUI's kept the
 page's vertical swipes; AppKit's laid itself out every frame). Row heights are known before rows are made (19 pt a
 line, comment rows measured once), so jumps land exactly; a row that changes height above the top edge moves the
-page by as much. File headers are group rows, which the table keeps at the top. On the phone the page is a plain
-`VStack` (a lazy one's guessed heights made jumps land under the wrong header), its sticky header drawn from the
-scroll position (iOS 18), and jumps go, unanimated, to an anchor placed at the target's measured position.
+page by as much. File headers stay at the top: the table's group rows on the Mac; on the phone a section per file,
+its header pinned by the flow layout. A comment's field is scrolled clear of the keyboard and the header.
 `CLAUNTTY_REVIEW_PERF=1` logs frame rate and late frames every 5 s ("review frames", `FrameMonitor`);
-`=scroll` also scrolls the page by itself. Measure scrolling in Release (with `CLAUNTTY_LOCAL_HOME`, never on
+`=scroll` also scrolls the page by itself (in the simulator, `SIMCTL_CHILD_CLAUNTTY_REVIEW_PERF=scroll xcrun simctl
+launch`; a Release simulator build needs `ARCHS=arm64 ONLY_ACTIVE_ARCH=YES`, as TailscaleKit has no x86_64 slice).
+Measure scrolling in Release (with `CLAUNTTY_LOCAL_HOME`, never on
 real sessions) and look at the main thread's share in `sample`, not frames per second: 60 Hz hides what 120 Hz
 can't afford. On the Mac, Shift/Option+Return adds a line in the comment and note
 fields and ⌘Return saves or sends. Send writes the report to `<id>.reply` (`ReviewReply.sendScript`); if
