@@ -14,7 +14,8 @@ struct MainView: View {
     @EnvironmentObject private var window: WindowState
     @EnvironmentObject private var ghostty: MacGhosttyApp
     let views: TerminalViews
-    @StateObject private var reviewLayout = ReviewLayout()
+    /// The review over its workspace's panes rather than beside them
+    @State private var reviewFull = false
     /// How much of a workspace a review takes, beside its panes
     @AppStorage("reviewShare") private var reviewShare = 0.6
     @State private var reviewDragStart: CGFloat?
@@ -176,18 +177,27 @@ struct MainView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let review {
                     HStack(spacing: 0) {
-                        SplitDivider(vertical: false).opacity(reviewLayout.full ? 0 : 1)
-                        // Its own view keeps its content below the title bar's place
-                        ReviewHost(review: review, theme: ghostty.theme, sessionManager: sessionManager, layout: reviewLayout) {
-                            sessionManager.hideReview(review)
+                        SplitDivider(vertical: false).opacity(reviewFull ? 0 : 1)
+                        VStack(spacing: 0) {
+                            // Up in the title bar's place, as the panes' title bars are
+                            ReviewHeader(review: review, full: reviewFull, topLeft: reviewFull) {
+                                PaneHostView.holdResizes()
+                                reviewFull.toggle()
+                            } close: {
+                                sessionManager.hideReview(review)
+                            }
+                            .background(ThemeColors.background(ghostty.theme))
+                            ReviewHost(review: review, theme: ghostty.theme, sessionManager: sessionManager, topBar: false) {
+                                sessionManager.hideReview(review)
+                            }
+                            .id(review.id)
                         }
                         .ignoresSafeArea(.container, edges: .top)
-                        .id(review.id)
                     }
-                    .frame(width: reviewLayout.full ? total : side + SplitDivider.thickness)
+                    .frame(width: reviewFull ? total : side + SplitDivider.thickness)
                     .transition(.opacity)
                     .overlay(alignment: .topLeading) {
-                        if !reviewLayout.full {
+                        if !reviewFull {
                             DividerHandle(vertical: false) { distance in
                                 // Terminals resize once, when the drag is over
                                 PaneHostView.holdResizes()

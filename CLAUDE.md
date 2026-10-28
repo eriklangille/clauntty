@@ -167,8 +167,8 @@ downloads `~/.clauntty/reviews/<id>.json` (also on connect and foreground: `chec
 `Review` (`Review.swift`: the diff parsed, files in priority order, the agent's comments placed by
 `match`, each file highlighted with HighlightKit). `ReviewView` shows it: full screen on the phone (the
 oldest not closed for now, `shownReview`), on the Mac beside its workspace's panes, so the agent's chat stays in
-view (`MainView.workspace`: a divider to drag, `reviewShare`), or over them at full width (the review's toggle,
-`ReviewLayout`; the panes keep their size underneath), with a badge on the sidebar card (`shownReview(in:)`); X closes it for now (`hiddenReviews`), it waits on the host. Colours come from the
+view (`MainView.workspace`: a divider to drag, `reviewShare`), or over them at full width (the toggle in its title bar,
+`ReviewHeader`, built as a pane's; the panes keep their size underneath), with a badge on the sidebar card (`shownReview(in:)`); X closes it for now (`hiddenReviews`), it waits on the host. Colours come from the
 terminal theme's palette (`ReviewColors.of`, worked out once per theme). It's built for thousands of
 lines: it sits in a hosting view of its own (`ReviewHost`), so the window's updates (every pane change)
 never reach it; typing lives in `ReviewDrafts` and the scroll position in `PageScroll`, watched only by

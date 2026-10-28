@@ -355,7 +355,7 @@ private struct PaneTile: View {
 struct PaneHeader: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @EnvironmentObject private var window: WindowState
-    private static let padding: CGFloat = 10
+    static let padding: CGFloat = 10
     let pane: TabPane
     let selection: PaneSelection
     let focused: Bool
@@ -440,6 +440,23 @@ struct PaneHeader: View {
     }
 
     private func button(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        TitleBarButton(symbol: symbol, help: help, action: action)
+    }
+
+    /// Split this pane, not the one you were in
+    private func splitPane(_ action: PaneAction) {
+        MainView.show(selection, sessionManager)
+        Task { await sessionManager.performPaneAction(action, groupId: selection.groupId) }
+    }
+}
+
+/// A pane title bar's button, and a review's
+struct TitleBarButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11))
@@ -449,11 +466,66 @@ struct PaneHeader: View {
         .buttonStyle(.plain)
         .help(help)
     }
+}
 
-    /// Split this pane, not the one you were in
-    private func splitPane(_ action: PaneAction) {
-        MainView.show(selection, sessionManager)
-        Task { await sessionManager.performPaneAction(action, groupId: selection.groupId) }
+/// Over a review in its workspace (`clauntty review`): a pane's title bar, with the
+/// review's title and what it compares, full width or beside the panes, and close
+struct ReviewHeader: View {
+    @EnvironmentObject private var window: WindowState
+    let review: Review
+    let full: Bool
+    /// The window's top left corner: the sidebar's toggle goes here when it's hidden
+    let topLeft: Bool
+    let toggle: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(height: window.titleBarHeight)
+            .overlay(alignment: .leading) { row }
+            .clipped()
+            .background {
+                ZStack {
+                    Color.white.opacity(0.07)
+                    WindowDragArea {}
+                }
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                    .allowsHitTesting(false)
+            }
+    }
+
+    private var row: some View {
+        HStack(spacing: 8) {
+            if topLeft && window.sidebar == .detailOnly {
+                SidebarToggle()
+                    .padding(.leading, window.toggleLeading - PaneHeader.padding)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(review.title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
+                Text(review.range)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            // Clicks go through to the drag area behind
+            .allowsHitTesting(false)
+            Spacer(minLength: 8)
+            Group {
+                TitleBarButton(symbol: full ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                               help: full ? "Show the Panes Beside It" : "Full Width", action: toggle)
+                TitleBarButton(symbol: "xmark", help: "Close Review (it waits on the host)", action: close)
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, PaneHeader.padding)
+        .frame(height: window.titleBarHeight)
     }
 }
 
