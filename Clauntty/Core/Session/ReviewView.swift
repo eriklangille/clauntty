@@ -142,7 +142,7 @@ struct ReviewView: View, Equatable {
     private func main(wide: Bool) -> some View {
         VStack(spacing: 0) {
             if topBar { topBar(wide: wide) }
-            pageScroll
+            pageScroll(wide: wide)
                 .onAppear { FrameMonitor.shared?.start() }
         }
     }
@@ -162,23 +162,37 @@ struct ReviewView: View, Equatable {
 
     /// The page's rows, made as they come on screen (`PageRows`): as one SwiftUI view in a
     /// scroll view, the whole page was laid out on every frame of a scroll
-    private var pageScroll: some View {
+    private func pageScroll(wide: Bool) -> some View {
+        pageList(wide: wide)
+            .onChange(of: jump) { _, jump in
+                guard let jump else { return }
+                let (key, fraction) = destination(jump)
+                // After the list has the rows the jump opened (a collapsed hunk)
+                DispatchQueue.main.async { scroll.jumper?(key, fraction) }
+            }
+    }
+
+    #if os(iOS)
+    private func pageList(wide: Bool) -> some View {
+        PageList(
+            state: pageState,
+            footer: AnyView(footer),
+            place: scroll.place,
+            jumper: { [scroll] jumper in scroll.jumper = jumper },
+            openFiles: wide ? nil : { setDrawer(true) }
+        )
+        .ignoresSafeArea(.container, edges: .bottom)
+    }
+    #else
+    private func pageList(wide: Bool) -> some View {
         PageList(
             state: pageState,
             footer: AnyView(footer),
             place: scroll.place,
             jumper: { [scroll] jumper in scroll.jumper = jumper }
         )
-        #if os(iOS)
-        .ignoresSafeArea(.container, edges: .bottom)
-        #endif
-        .onChange(of: jump) { _, jump in
-            guard let jump else { return }
-            let (key, fraction) = destination(jump)
-            // After the list has the rows the jump opened (a collapsed hunk)
-            DispatchQueue.main.async { scroll.jumper?(key, fraction) }
-        }
     }
+    #endif
 
     private func topBar(wide: Bool) -> some View {
         HStack(spacing: 10) {
@@ -962,11 +976,6 @@ struct HunkView: View, Equatable {
     @State private var viewport: CGFloat = 0
 
     static let rowHeight: CGFloat = 19
-    #if os(iOS)
-    private static let touch = true
-    #else
-    private static let touch = false
-    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -978,7 +987,9 @@ struct HunkView: View, Equatable {
                     LinesDrawing(lines: DrawnLines(key: key, lines: hunk.lines, tops: layout.lineTops, part: .numbers(width: gutter), style: style))
                         .frame(width: gutter, height: layout.height)
                         .contentShape(Rectangle())
+                        #if os(macOS)
                         .gesture(gutterGesture(layout))
+                        #endif
                     #if os(macOS)
                     // As wide as the longest line, or the room there is, in AppKit's scroll
                     // view: SwiftUI's kept the page's vertical swipes
@@ -1112,6 +1123,12 @@ struct HunkView: View, Equatable {
         hunk.lines.firstIndex { $0.id == id }.map { HunkLayout(items: items, heights: measures[key]).y(ofLine: $0) }
     }
 
+    /// The line (its index) at a height down the hunk's lines; over a comment row, the line
+    /// it's on, or none (`exactly`)
+    func line(atY y: CGFloat, exactly: Bool) -> Int? {
+        HunkLayout(items: items, heights: measures[key]).line(at: y, exactly: exactly)
+    }
+
     private func commentRows(_ layout: HunkLayout) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(layout.placed.filter { !$0.item.isLine }, id: \.item.key) { placed in
@@ -1155,9 +1172,11 @@ struct HunkView: View, Equatable {
     }
 
     /// A click on a number comments on its line; dragging down the numbers picks a run of
-    /// lines. On the phone, hold a number, then drag.
+    /// lines. (On the phone, hold a number and drag: `PageCollection`, as a SwiftUI gesture
+    /// lost the touch to the page's scrolling.)
+    #if os(macOS)
     private func gutterGesture(_ layout: HunkLayout) -> some Gesture {
-        let drag = DragGesture(minimumDistance: Self.touch ? 0 : 2)
+        let drag = DragGesture(minimumDistance: 2)
             .onChanged { value in
                 guard let at = layout.line(at: value.location.y) else { return }
                 if picking == nil, let start = layout.line(at: value.startLocation.y) {
@@ -1166,15 +1185,11 @@ struct HunkView: View, Equatable {
                 actions.pick(.moved(at), file.path, hunk, key)
             }
             .onEnded { _ in actions.pick(.ended, file.path, hunk, key) }
-        #if os(iOS)
-        return LongPressGesture(minimumDuration: 0.3).sequenced(before: drag)
-            .onEnded { _ in actions.pick(.ended, file.path, hunk, key) }
-        #else
         return drag.exclusively(before: SpatialTapGesture().onEnded { tap in
             if let index = layout.line(at: tap.location.y) { actions.edit(file.path, [hunk.lines[index]], nil) }
         })
-        #endif
     }
+    #endif
 }
 
 /// Where a hunk's rows are: lines are a row high, comment rows as tall as they measured

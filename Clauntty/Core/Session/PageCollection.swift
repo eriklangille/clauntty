@@ -14,6 +14,8 @@ struct PageCollection: UIViewRepresentable {
     let place: PagePlace
     /// Hands over what scrolls the page to a place (`PageScroll.jumper`)
     let jumper: (@escaping (String, CGFloat) -> Void) -> Void
+    /// A swipe in from the left edge shows the file list (none when it's beside the page)
+    let openFiles: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(rows: PageRows(state: state, footer: footer), place: place)
@@ -42,6 +44,7 @@ struct PageCollection: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UICollectionView, context: Context) {
+        context.coordinator.openFiles = openFiles
         context.coordinator.update(state: state, footer: footer)
     }
 
@@ -54,6 +57,12 @@ struct PageCollection: UIViewRepresentable {
         private var sections: [(header: Int?, items: [Int])] = []
         private var positions: [Int: IndexPath] = [:]
         private weak var view: UICollectionView?
+        var openFiles: (() -> Void)?
+        private weak var tapAway: UITapGestureRecognizer?
+        private weak var hold: UILongPressGestureRecognizer?
+        private weak var edge: UIScreenEdgePanGestureRecognizer?
+        /// The hunk a hold on its numbers is picking lines in, and its row
+        private var held: (file: Review.File, hunk: Review.Hunk, row: Int)?
 
         init(rows: PageRows, place: PagePlace) {
             self.rows = rows
@@ -89,6 +98,19 @@ struct PageCollection: UIViewRepresentable {
             tap.cancelsTouchesInView = false
             tap.delegate = self
             view.addGestureRecognizer(tap)
+            tapAway = tap
+            // Here, not in SwiftUI: once it's held, the page doesn't scroll under the finger
+            let hold = UILongPressGestureRecognizer(target: self, action: #selector(holding))
+            hold.minimumPressDuration = 0.3
+            hold.delegate = self
+            view.addGestureRecognizer(hold)
+            self.hold = hold
+            let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(swipedIn))
+            edge.edges = .left
+            edge.delegate = self
+            view.addGestureRecognizer(edge)
+            view.panGestureRecognizer.require(toFail: edge)
+            self.edge = edge
         }
 
         func update(state: PageState, footer: AnyView) {
@@ -202,7 +224,58 @@ struct PageCollection: UIViewRepresentable {
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            true
+            gestureRecognizer === tapAway
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === hold, let view {
+                return lineUnder(gestureRecognizer.location(in: view), numbersOnly: true) != nil
+            }
+            if gestureRecognizer === edge { return openFiles != nil }
+            return true
+        }
+
+        // MARK: Picking lines
+
+        /// The line under a point on the page: in an open hunk, on its numbers when
+        /// `numbersOnly`, not under the file's header kept at the top
+        private func lineUnder(_ point: CGPoint, numbersOnly: Bool) -> (file: Review.File, hunk: Review.Hunk, row: Int, index: Int)? {
+            guard let view, point.y - view.contentOffset.y - view.adjustedContentInset.top > rows.headerHeight,
+                  let row = rows.row(at: point.y), case .hunk(let f, let h) = rows.rows[row] else { return nil }
+            let state = rows.state, file = state.review.files[f], hunk = file.hunks[h]
+            guard state.isOpen(file, hunk), !numbersOnly || point.x < file.gutterWidth + 8,
+                  let index = state.hunk(file, hunk).line(atY: point.y - rows.tops[row] - rows.closedHunk, exactly: true)
+            else { return nil }
+            return (file, hunk, row, index)
+        }
+
+        /// Hold a line's number, then drag over more: the comment's editor opens on them
+        @objc private func holding(_ hold: UILongPressGestureRecognizer) {
+            guard let view else { return }
+            let point = hold.location(in: view)
+            let pick = rows.state.actions.pick
+            switch hold.state {
+            case .began:
+                guard let line = lineUnder(point, numbersOnly: true) else { return }
+                held = (line.file, line.hunk, line.row)
+                Haptic.selectStart.play()
+                pick(.began(line.index), line.file.path, line.hunk, PageState.key(line.file, line.hunk))
+            case .changed:
+                guard let held else { return }
+                // Past the hunk's ends, its first or last line
+                let y = point.y - rows.tops[held.row] - rows.closedHunk
+                let index = y < 0 ? 0 : rows.state.hunk(held.file, held.hunk).line(atY: y, exactly: false) ?? 0
+                pick(.moved(min(index, held.hunk.lines.count - 1)), held.file.path, held.hunk, PageState.key(held.file, held.hunk))
+            default:
+                guard let held else { return }
+                self.held = nil
+                pick(.ended, held.file.path, held.hunk, PageState.key(held.file, held.hunk))
+            }
+        }
+
+        @objc private func swipedIn(_ edge: UIScreenEdgePanGestureRecognizer) {
+            guard edge.state == .began else { return }
+            openFiles?()
         }
 
         private static func firstResponder(in view: UIView) -> UIView? {
