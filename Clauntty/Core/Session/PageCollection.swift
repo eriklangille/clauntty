@@ -229,7 +229,7 @@ struct PageCollection: UIViewRepresentable {
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             if gestureRecognizer === hold, let view {
-                return lineUnder(gestureRecognizer.location(in: view), numbersOnly: true) != nil
+                return lineUnder(gestureRecognizer.location(in: view)) != nil
             }
             if gestureRecognizer === edge { return openFiles != nil }
             return true
@@ -237,26 +237,27 @@ struct PageCollection: UIViewRepresentable {
 
         // MARK: Picking lines
 
-        /// The line under a point on the page: in an open hunk, on its numbers when
-        /// `numbersOnly`, not under the file's header kept at the top
-        private func lineUnder(_ point: CGPoint, numbersOnly: Bool) -> (file: Review.File, hunk: Review.Hunk, row: Int, index: Int)? {
+        /// The line under a point on the page: in an open hunk, not on a comment, not under
+        /// the file's header kept at the top
+        private func lineUnder(_ point: CGPoint) -> (file: Review.File, hunk: Review.Hunk, row: Int, index: Int)? {
             guard let view, point.y - view.contentOffset.y - view.adjustedContentInset.top > rows.headerHeight,
                   let row = rows.row(at: point.y), case .hunk(let f, let h) = rows.rows[row] else { return nil }
             let state = rows.state, file = state.review.files[f], hunk = file.hunks[h]
-            guard state.isOpen(file, hunk), !numbersOnly || point.x < file.gutterWidth + 8,
+            guard state.isOpen(file, hunk),
                   let index = state.hunk(file, hunk).line(atY: point.y - rows.tops[row] - rows.closedHunk, exactly: true)
             else { return nil }
             return (file, hunk, row, index)
         }
 
-        /// Hold a line's number, then drag over more: the comment's editor opens on them
+        /// Hold a line (its number or its code), then drag over more: the comment's editor
+        /// opens on them
         @objc private func holding(_ hold: UILongPressGestureRecognizer) {
             guard let view else { return }
             let point = hold.location(in: view)
             let pick = rows.state.actions.pick
             switch hold.state {
             case .began:
-                guard let line = lineUnder(point, numbersOnly: true) else { return }
+                guard let line = lineUnder(point) else { return }
                 held = (line.file, line.hunk, line.row)
                 Haptic.selectStart.play()
                 pick(.began(line.index), line.file.path, line.hunk, PageState.key(line.file, line.hunk))

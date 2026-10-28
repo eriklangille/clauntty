@@ -262,6 +262,7 @@ struct ReviewView: View, Equatable {
     private func pick(_ event: HunkView.PickEvent, path: String, hunk: Review.Hunk, key: String) {
         switch event {
         case .began(let index):
+            guard !keepsDraft else { return }
             editing = nil
             picking = Picking(path: path, hunk: key, anchor: index, current: index)
         case .moved(let index):
@@ -275,10 +276,16 @@ struct ReviewView: View, Equatable {
     }
 
     private func startEditing(_ path: String, lines: [Review.Line], existing: UUID?, replyTo: String? = nil) {
-        guard !lines.isEmpty else { return }
+        guard !lines.isEmpty, !keepsDraft else { return }
         let old = existing.flatMap { id in comments.first { $0.id == id } }
         drafts.draft = old?.text ?? ""
         editing = EditTarget(path: path, lines: lines, existing: existing, replyTo: old?.replyTo ?? replyTo)
+    }
+
+    /// A comment being written isn't thrown away by a tap on another line (or Reply, or
+    /// Edit): that only puts the keyboard away. Save or Cancel it first.
+    private var keepsDraft: Bool {
+        editing != nil && !drafts.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func saveDraft() {
@@ -388,7 +395,7 @@ struct ReviewView: View, Equatable {
     }
 
     #if os(iOS)
-    private static let hint = "No comments. Tap a line to add one, or hold a line number and drag for several."
+    private static let hint = "No comments. Tap a line to add one, or hold a line and drag for several."
     #else
     private static let hint = "No comments. Click a line number to add one, or drag down the numbers for several."
     #endif
@@ -1172,7 +1179,7 @@ struct HunkView: View, Equatable {
     }
 
     /// A click on a number comments on its line; dragging down the numbers picks a run of
-    /// lines. (On the phone, hold a number and drag: `PageCollection`, as a SwiftUI gesture
+    /// lines. (On the phone, hold a line and drag: `PageCollection`, as a SwiftUI gesture
     /// lost the touch to the page's scrolling.)
     #if os(macOS)
     private func gutterGesture(_ layout: HunkLayout) -> some Gesture {
