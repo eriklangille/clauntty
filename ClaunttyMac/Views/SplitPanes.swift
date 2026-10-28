@@ -244,7 +244,7 @@ private struct LayoutNode: View {
 }
 
 /// A line between two panes; stacked panes get a horizontal one
-private struct SplitDivider: View {
+struct SplitDivider: View {
     static let thickness: CGFloat = 1
     let vertical: Bool
 
@@ -257,7 +257,7 @@ private struct SplitDivider: View {
 
 /// Where a divider can be grabbed: a few points either side of the line, with the
 /// resize cursor. Reports how far it's been dragged (right or down), then that it's let go.
-private struct DividerHandle: NSViewRepresentable {
+struct DividerHandle: NSViewRepresentable {
     /// Either side of the line
     static let reach: CGFloat = 3
     let vertical: Bool

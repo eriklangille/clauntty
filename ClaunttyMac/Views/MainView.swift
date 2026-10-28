@@ -14,6 +14,10 @@ struct MainView: View {
     @EnvironmentObject private var window: WindowState
     @EnvironmentObject private var ghostty: MacGhosttyApp
     let views: TerminalViews
+    @StateObject private var reviewLayout = ReviewLayout()
+    /// How much of a workspace a review takes, beside its panes
+    @AppStorage("reviewShare") private var reviewShare = 0.6
+    @State private var reviewDragStart: CGFloat?
 
     var body: some View {
         NavigationSplitView(columnVisibility: $window.sidebar) {
@@ -136,23 +140,9 @@ struct MainView: View {
             WebPane(webTab: webTab)
                 .ignoresSafeArea(.container, edges: .top)
         } else if let session = sessionManager.activeSession, let group = sessionManager.sessionGroup(for: session) {
-            // Up into the title bar's place: the pane title bars are the window's
-            SplitPanes(group: group, views: views)
-                .background(ThemeColors.background(ghostty.theme))
-                .ignoresSafeArea(.container, edges: .top)
+            workspace(group)
                 // Images its panes sent: over this workspace only, so the sidebar stays
                 // and another workspace's don't interrupt. A new one each workspace.
-                // A review its agent asked for (`clauntty review`): over this workspace,
-                // as its images are
-                .overlay {
-                    if let review = sessionManager.shownReview(in: group.id) {
-                        // Over the panes' title bars too: its own view keeps its content below them
-                        ReviewHost(review: review, theme: ghostty.theme, sessionManager: sessionManager) { sessionManager.hideReview(review) }
-                            .ignoresSafeArea(.container, edges: .top)
-                            .id(review.id)
-                            .transition(.opacity)
-                    }
-                }
                 .overlay {
                     ImageViewer(content: $sessionManager.windowImages[group.id],
                                 paneFrame: { views.frameInWindow(of: $0) },
@@ -167,6 +157,60 @@ struct MainView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// A workspace's panes, and the review its agent asked for (`clauntty review`) beside
+    /// them, so the agent's chat stays in view; or over them, full width. Full width keeps
+    /// the panes at their size underneath, so switching doesn't resize the terminals
+    private func workspace(_ group: SessionGroup) -> some View {
+        let review = sessionManager.shownReview(in: group.id)
+        return GeometryReader { geometry in
+            let total = geometry.size.width
+            let side = reviewWidth(in: total)
+            ZStack(alignment: .topTrailing) {
+                // Up into the title bar's place: the pane title bars are the window's
+                SplitPanes(group: group, views: views)
+                    .background(ThemeColors.background(ghostty.theme))
+                    .ignoresSafeArea(.container, edges: .top)
+                    .frame(width: review == nil ? total : max(0, total - side - SplitDivider.thickness))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let review {
+                    HStack(spacing: 0) {
+                        SplitDivider(vertical: false).opacity(reviewLayout.full ? 0 : 1)
+                        // Its own view keeps its content below the title bar's place
+                        ReviewHost(review: review, theme: ghostty.theme, sessionManager: sessionManager, layout: reviewLayout) {
+                            sessionManager.hideReview(review)
+                        }
+                        .ignoresSafeArea(.container, edges: .top)
+                        .id(review.id)
+                    }
+                    .frame(width: reviewLayout.full ? total : side + SplitDivider.thickness)
+                    .transition(.opacity)
+                    .overlay(alignment: .topLeading) {
+                        if !reviewLayout.full {
+                            DividerHandle(vertical: false) { distance in
+                                // Terminals resize once, when the drag is over
+                                PaneHostView.holdResizes()
+                                let start = reviewDragStart ?? side
+                                reviewDragStart = start
+                                reviewShare = Double((start - distance) / max(total, 1))
+                            } onEnd: {
+                                reviewDragStart = nil
+                            }
+                            .frame(width: DividerHandle.reach * 2)
+                            .offset(x: -DividerHandle.reach)
+                        }
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// The review's share of the workspace, leaving the panes and the review room to work
+    private func reviewWidth(in total: CGFloat) -> CGFloat {
+        let wanted = total * CGFloat(reviewShare)
+        return max(min(wanted, total - 320), min(480, total * 0.6))
     }
 
     /// Markup's Send to Claude: the marked-up image takes the original's place (so

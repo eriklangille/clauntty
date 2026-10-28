@@ -22,6 +22,8 @@ struct ReviewView: View, Equatable {
     let sessionManager: SessionManager
     /// Leave it for now: it stays on the host, waiting
     let onClose: () -> Void
+    /// Beside its workspace's panes or over them (the Mac)
+    let layout: ReviewLayout?
 
     @State private var colors: ReviewColors
     @State private var drafts = ReviewDrafts()
@@ -41,10 +43,11 @@ struct ReviewView: View, Equatable {
     @State private var sent: String?
     @State private var error: String?
 
-    init(review: Review, theme: Theme?, sessionManager: SessionManager, onClose: @escaping () -> Void) {
+    init(review: Review, theme: Theme?, sessionManager: SessionManager, layout: ReviewLayout? = nil, onClose: @escaping () -> Void) {
         self.review = review
         self.theme = theme
         self.sessionManager = sessionManager
+        self.layout = layout
         self.onClose = onClose
         _colors = State(initialValue: ReviewColors.of(theme))
     }
@@ -250,6 +253,9 @@ struct ReviewView: View, Equatable {
                 }
                 .buttonStyle(ChipStyle(colors: colors))
             }
+            if let layout {
+                LayoutToggle(layout: layout, colors: colors)
+            }
         }
         .padding(.horizontal, 10)
         .frame(height: 44)
@@ -438,12 +444,40 @@ struct ReviewHost: View {
     let review: Review
     let theme: Theme?
     let sessionManager: SessionManager
+    var layout: ReviewLayout? = nil
     let onClose: () -> Void
 
     var body: some View {
         IsolatedHost(id: "\(review.id)|\(theme?.id ?? "")") {
-            ReviewView(review: review, theme: theme, sessionManager: sessionManager, onClose: onClose)
+            ReviewView(review: review, theme: theme, sessionManager: sessionManager, layout: layout, onClose: onClose)
         }
+    }
+}
+
+/// Whether the review is beside its workspace's panes (the agent's chat stays in view) or
+/// over them, full width. An object, watched by the review's button: the review's hosting
+/// view takes nothing else from the window
+final class ReviewLayout: ObservableObject {
+    @Published var full = false
+}
+
+/// The top bar's button between beside the panes and full width
+private struct LayoutToggle: View {
+    @ObservedObject var layout: ReviewLayout
+    let colors: ReviewColors
+
+    var body: some View {
+        Button {
+            layout.full.toggle()
+        } label: {
+            Image(systemName: layout.full ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(colors.dim)
+        .help(layout.full ? "Show the panes beside it" : "Full width")
     }
 }
 
