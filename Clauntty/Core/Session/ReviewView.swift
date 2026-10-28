@@ -83,11 +83,17 @@ struct ReviewView: View, Equatable {
 
     var body: some View {
         GeometryReader { geometry in
+            // The Mac keeps the file list beside the page however narrow the review is
+            // (beside the panes, it's the way around a review); the phone needs the room
+            #if os(macOS)
+            let wide = true
+            #else
             let wide = geometry.size.width >= 860
+            #endif
             HStack(spacing: 0) {
                 if wide {
                     fileList
-                        .frame(width: 270)
+                        .frame(width: geometry.size.width >= 1000 ? 270 : 230)
                         .background(colors.sidebar)
                     Rectangle().fill(colors.hairline).frame(width: 1)
                 }

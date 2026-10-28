@@ -207,10 +207,11 @@ struct MainView: View {
         .ignoresSafeArea(.container, edges: .top)
     }
 
-    /// The review's share of the workspace, leaving the panes and the review room to work
+    /// The review's share of the workspace, leaving the panes and the review room to work:
+    /// its file list and at least 500 points of code
     private func reviewWidth(in total: CGFloat) -> CGFloat {
         let wanted = total * CGFloat(reviewShare)
-        return max(min(wanted, total - 320), min(480, total * 0.6))
+        return max(min(wanted, total - 320), min(730, total * 0.7))
     }
 
     /// Markup's Send to Claude: the marked-up image takes the original's place (so
