@@ -1054,6 +1054,16 @@ struct HunkView: View, Equatable {
                 .overlay(alignment: .topLeading) { jumpTargets(layout).allowsHitTesting(false) }
                 #endif
                 .overlay(alignment: .topLeading) { lights(layout).allowsHitTesting(false) }
+                #if os(macOS)
+                // Its + takes a click, as the line's number does
+                .overlay(alignment: .topLeading) {
+                    if picking == nil {
+                        HoverLight(hover: hover, layout: layout, gutter: gutter, colors: colors, plus: editing == nil) { index in
+                            actions.edit(file.path, [hunk.lines[index]], nil)
+                        }
+                    }
+                }
+                #endif
                 .overlay(alignment: .topLeading) { commentRows(layout) }
                 #if os(macOS)
                 .onContinuousHover { phase in
@@ -1138,7 +1148,7 @@ struct HunkView: View, Equatable {
         return items
     }
 
-    /// The hovered line's light and its +, and the lines being picked or commented on
+    /// The lines being picked or commented on
     @ViewBuilder
     private func lights(_ layout: HunkLayout) -> some View {
         ZStack(alignment: .topLeading) {
@@ -1148,9 +1158,6 @@ struct HunkView: View, Equatable {
                       let first = hunk.lines.firstIndex(where: { $0.id == editing.lines[0].id }),
                       let last = hunk.lines.firstIndex(where: { $0.id == editing.last.id }) {
                 band(layout, first, last, 0.10)
-            }
-            if !Self.touch, picking == nil {
-                HoverLight(hover: hover, layout: layout, gutter: gutter, colors: colors, plus: editing == nil)
             }
         }
     }
@@ -1567,20 +1574,23 @@ final class HoveredLine: ObservableObject {
     @Published var index: Int?
 }
 
-/// The hovered line's light, and its + by the number
+/// The hovered line's light, and its + by the number, which comments on the line
 private struct HoverLight: View {
     @ObservedObject var hover: HoveredLine
     let layout: HunkLayout
     let gutter: CGFloat
     let colors: ReviewColors
     let plus: Bool
+    let add: (Int) -> Void
 
     var body: some View {
         if let index = hover.index {
             ZStack(alignment: .topLeading) {
                 HunkView.band(layout, index, index, colors.fg.opacity(0.04))
+                    .allowsHitTesting(false)
                 if plus {
-                    PlusMark(colors: colors)
+                    Button { add(index) } label: { PlusMark(colors: colors) }
+                        .buttonStyle(.plain)
                         .offset(x: gutter + 4, y: layout.y(ofLine: index) + 0.5)
                 }
             }
@@ -1603,7 +1613,6 @@ private struct PlusMark: View {
                 }
                 .foregroundStyle(colors.bg)
             }
-            .allowsHitTesting(false)
     }
 }
 
