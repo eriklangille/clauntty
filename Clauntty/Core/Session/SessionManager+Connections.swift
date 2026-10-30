@@ -158,6 +158,48 @@ extension SessionManager {
         }
     }
 
+    /// After a change of network open connections can be stuck on the old one: check them
+    /// once it settles.
+    func watchNetwork() {
+        NetworkMonitor.shared.onChange = { [weak self] change in
+            guard let self else { return }
+            #if os(iOS)
+            // The Tailscale node can miss changes made while the app was suspended
+            TailscaleManager.shared.networkChanged()
+            // Coming back to a network that was left while suspended, don't wait to find
+            // the old ones dead: start over. (The Mac app runs on in the background.)
+            if change.whileAway && change.lostInterface {
+                dropAllConnections(reason: "network changed while suspended")
+            }
+            #endif
+            checkConnections(reason: "network changed")
+        }
+        NetworkMonitor.shared.start()
+    }
+
+    /// Back at the app: the phone in the foreground, the Mac active again or awake. A
+    /// connection can have died meanwhile without closing (the host drops it while the
+    /// device sleeps), so the active tab reconnects if it lost its channel, and otherwise
+    /// every connection is checked before typing goes into one.
+    func cameBack(reason: String) {
+        if let active = activeSession {
+            if active.needsReconnect {
+                Logger.clauntty.debugOnly("SessionManager: reconnecting active session on \(reason) (state=\(active.stateDescription))")
+                Task { try? await reconnect(session: active) }
+            } else {
+                checkConnections(reason: reason)
+                // Images may have gone to a tab whose connection died meanwhile
+                // (a reconnect checks the inbox itself)
+                checkImageInbox(for: active)
+                checkReviews(for: active)
+            }
+        }
+        // The pane on screen has been seen
+        if let paneId = activeSession?.pane?.paneId {
+            markPaneSeen(paneId)
+        }
+    }
+
     /// Close the connections of hosts with no tab left, and a host's extra connections
     /// once no pane is on them. The first stays for commands, forwards and new panes.
     func closeIdleConnections() {

@@ -534,17 +534,7 @@ class SessionManager: ObservableObject {
     /// Reconnect a disconnected session
     /// Uses the session's existing rtach session ID to reattach
     func reconnect(session: Session) async throws {
-        let needsReconnect: Bool
-        switch session.state {
-        case .disconnected:
-            needsReconnect = true
-        case .connected:
-            needsReconnect = !session.hasAttachedChannel
-        case .connecting, .error, .remotelyDeleted:
-            needsReconnect = false
-        }
-
-        guard needsReconnect else {
+        guard session.needsReconnect else {
             Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) is healthy (state=\(session.stateDescription)), skipping reconnect")
             return
         }

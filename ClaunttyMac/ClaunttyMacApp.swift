@@ -37,9 +37,15 @@ struct ClaunttyMacApp: App {
                 // Back at the Mac: the panes on screen take their size back from the phone,
                 // and workspaces changed elsewhere show up (the phone does this on foreground)
                 sessionManager.showSplitPanes()
+                sessionManager.cameBack(reason: "activated")
                 Task {
                     for connection in hosts.opened { await sessionManager.refreshWorkspaces(for: connection) }
                 }
+            }
+            // Awake again: the host may have dropped the connections while the Mac slept.
+            // With the app already in front it isn't activated, so this is the only notice.
+            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+                sessionManager.cameBack(reason: "woke")
             }
             // Remember the pane you're on, so a relaunch (or a crash) comes back to it
             .onChange(of: sessionManager.activeSessionId) { _, _ in
@@ -97,6 +103,7 @@ struct ClaunttyMacApp: App {
         sessionManager.loadPersistedWebTabs(connectionStore: hosts.store)
         // The order you've dragged workspaces to
         sessionManager.loadTabOrder()
+        sessionManager.watchNetwork()
         for connection in hosts.opened {
             await sessionManager.refreshWorkspaces(for: connection)
         }

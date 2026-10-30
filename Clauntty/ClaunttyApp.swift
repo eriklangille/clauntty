@@ -351,20 +351,8 @@ struct AppContentView: View {
                     sessionManager.loadPersistedTabs(connectionStore: connectionStore)
                     sessionManager.loadPersistedWebTabs(connectionStore: connectionStore)
                     sessionManager.loadTabOrder()  // Load or migrate global tab order
-
-                    // After Wi-Fi ↔ cellular open connections can be stuck on the old
-                    // network. Tell the Tailscale node (it can miss changes made while
-                    // the app was suspended), then check the connections. Coming back to
-                    // a network that was left meanwhile, don't wait to find the old ones
-                    // dead: start over.
-                    NetworkMonitor.shared.onChange = { [sessionManager] change in
-                        TailscaleManager.shared.networkChanged()
-                        if change.whileAway && change.lostInterface {
-                            sessionManager.dropAllConnections(reason: "network changed while suspended")
-                        }
-                        sessionManager.checkConnections(reason: "network changed")
-                    }
-                    NetworkMonitor.shared.start()
+                    // After Wi-Fi ↔ cellular open connections can be stuck on the old network
+                    sessionManager.watchNetwork()
                 }
             }
             .onChange(of: scenePhase) { _, newPhase in
@@ -429,42 +417,19 @@ struct AppContentView: View {
             // Process any pending session switch from notification tap
             NotificationManager.shared.processPendingSessionSwitch()
 
-            // Only reconnect/resume the ACTIVE session (lazy reconnect for others)
-            if let activeSession = sessionManager.activeSession {
-                let needsReconnect =
-                    activeSession.state == .disconnected ||
-                    (activeSession.state == .connected && !activeSession.hasAttachedChannel)
-
-                if needsReconnect {
-                    // Active session is disconnected (or lost its channel) - reconnect it
-                    Logger.clauntty.debugOnly("APP_LIFECYCLE: reconnecting active session (state=\(activeSession.stateDescription), channel=\(activeSession.hasAttachedChannel ? "attached" : "missing"))")
-                    Task {
-                        try? await sessionManager.reconnect(session: activeSession)
-                    }
-                } else {
-                    // Active session is connected - just resume output
-                    Logger.clauntty.debugOnly("APP_LIFECYCLE: resuming connected active session")
-                    activeSession.beginResuming()
-                    activeSession.resumeOutput()
-                    // Commands come here again; the terminal size stays with a device
-                    // typing in the pane until the phone is used (typing, or a tap)
-                    activeSession.claimActive(commandsOnly: true)
-                    // It may have died while the app was suspended without closing
-                    sessionManager.checkConnections(reason: "foreground")
-                    // Images may have gone to a tab whose connection died meanwhile
-                    // (a reconnect checks the inbox itself)
-                    sessionManager.checkImageInbox(for: activeSession)
-                    sessionManager.checkReviews(for: activeSession)
-                }
-            } else {
-                Logger.clauntty.debugOnly("APP_LIFECYCLE: no active session to resume")
+            // Only the ACTIVE session resumes (lazy reconnect for others)
+            if let activeSession = sessionManager.activeSession, !activeSession.needsReconnect {
+                Logger.clauntty.debugOnly("APP_LIFECYCLE: resuming connected active session")
+                activeSession.beginResuming()
+                activeSession.resumeOutput()
+                // Commands come here again; the terminal size stays with a device
+                // typing in the pane until the phone is used (typing, or a tap)
+                activeSession.claimActive(commandsOnly: true)
             }
+            // Reconnects the active session, or checks the connections it may have lost
+            sessionManager.cameBack(reason: "foreground")
             // Workspaces may have changed on the desktop meanwhile
             Task { await sessionManager.refreshAllWorkspaces() }
-            // The pane on screen has been seen
-            if let paneId = sessionManager.activeSession?.pane?.paneId {
-                sessionManager.markPaneSeen(paneId)
-            }
         case .inactive:
             // Transitional state, don't change background flag
             break

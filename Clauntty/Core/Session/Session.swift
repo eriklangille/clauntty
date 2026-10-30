@@ -204,6 +204,11 @@ class Session: ObservableObject, Identifiable {
         sshChannel != nil && channelHandler != nil
     }
 
+    /// Disconnected, or connected with its channel gone
+    var needsReconnect: Bool {
+        state == .disconnected || (state == .connected && !hasAttachedChannel)
+    }
+
     /// When this pane was last on screen; the app keeps the most recent ones attached
     var lastShownAt: Date?
 
