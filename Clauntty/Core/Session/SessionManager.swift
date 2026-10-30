@@ -45,6 +45,12 @@ class SessionManager: ObservableObject {
     var imageWindows: Set<UUID> { Set(windowImages.keys).union(recentImages.keys) }
     /// A window whose images should open (a notification for them was tapped)
     @Published var openImagesWindow: UUID?
+    /// A session whose window should open, from the overview too (a notification for its
+    /// pane was tapped)
+    @Published var openPaneSession: UUID?
+    /// A tapped notification's pane that isn't in a workspace here yet (made while the app
+    /// was away): shown when the host lists it, if that's before `until`
+    var paneToShow: (id: String, until: Date)?
 
     /// A Mac host to offer spawnd for, so code signing works in its sessions (asked
     /// while non-nil)

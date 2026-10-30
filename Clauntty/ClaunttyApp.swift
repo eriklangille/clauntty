@@ -304,6 +304,15 @@ struct ClaunttyApp: App {
             let mask: UIInterfaceOrientationMask = to == "left" ? .landscapeLeft : to == "right" ? .landscapeRight : .portrait
             (UIApplication.shared.connectedScenes.first as? UIWindowScene)?
                 .requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+        case "show-pane":
+            // clauntty://show-pane?id=<pane>: what tapping a push for that pane does
+            // (NotificationManager's tap handler), without a notification to tap
+            if let paneId = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "id" })?.value {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    NotificationCenter.default.post(name: .switchToPane, object: nil, userInfo: ["paneId": paneId])
+                }
+            }
         #endif
         default:
             Logger.clauntty.warning("Unknown URL command: \(url.host ?? "nil")")

@@ -474,6 +474,12 @@ struct AgentSwitcherView: View {
             sessionManager.openImagesWindow = nil
             if sessionManager.windowImages[window] != nil { openImages = OpenImages(id: window) }
         }
+        // A notification for a pane was tapped
+        .onChange(of: sessionManager.openPaneSession) { _, sessionId in
+            guard let sessionId else { return }
+            sessionManager.openPaneSession = nil
+            openTapped(sessionId)
+        }
         // The window above slides under the status bar: fade it there, so only its last
         // lines show below
         .overlay(alignment: .top) {
@@ -1011,6 +1017,23 @@ struct AgentSwitcherView: View {
         sessionManager.switchTo(session)
         // Typing into it: the keyboard comes up even if it was hidden with the key bar
         DispatchQueue.main.async { session.showKeyboard?() }
+    }
+
+    /// A notification's pane, now the tab shown: open its window from the overview too
+    /// (while typing, `onChange(of: activeTab)` has already moved there)
+    private func openTapped(_ sessionId: UUID) {
+        guard focused == nil, !fullscreen,
+              let target = windows.firstIndex(where: {
+                  if case .terminal(let session) = $0 { return session.id == sessionId }
+                  return false
+              }),
+              case .terminal(let session) = windows[target] else { return }
+        withAnimation(snap) {
+            focused = windows[target].id
+            index = target
+            drag = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { session.showKeyboard?() }
     }
 
     /// Show a web tab fullscreen: in its workspace's window, or its own. Remembers the

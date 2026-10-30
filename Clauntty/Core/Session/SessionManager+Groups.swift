@@ -257,12 +257,18 @@ extension SessionManager {
         sessionGroups[index].panes[paneIndex].status = paneStatus(paneId)
     }
 
-    /// Show a pane (a notification was tapped)
+    /// Show a pane (a notification was tapped). One not listed here yet waits for the
+    /// workspaces the app fetches on coming back (`applyWorkspaces`).
     func showPane(_ paneId: String) {
-        guard let group = sessionGroups.first(where: { $0.panes.contains { $0.id == paneId } }) else { return }
+        guard let group = sessionGroups.first(where: { $0.panes.contains { $0.id == paneId } }) else {
+            paneToShow = (paneId, Date().addingTimeInterval(30))
+            return
+        }
+        paneToShow = nil
         selectPane(groupId: group.id, paneId: paneId)
         if let updated = sessionGroups.first(where: { $0.id == group.id }), let session = currentSession(of: updated) {
             switchTo(session)
+            openPaneSession = session.id
         }
     }
 
@@ -341,11 +347,13 @@ extension SessionManager {
         }
     }
 
-    /// Refresh every host with a tab open (the app came to the foreground)
+    /// Refresh every host with a tab open (the app came to the foreground) that has rtach
+    /// this launch. Not just those with a deployer: a connection found dead on coming back
+    /// takes its deployer with it, and `withHost` connects again.
     func refreshAllWorkspaces() async {
         var seen = Set<UUID>()
         let configs = sessions.map(\.connectionConfig).filter { seen.insert($0.id).inserted }
-        for config in configs where rtachDeployers[connectionKey(for: config)] != nil {
+        for config in configs where verifiedHosts.contains(connectionKey(for: config)) {
             await refreshWorkspaces(for: config)
         }
     }
@@ -400,6 +408,15 @@ extension SessionManager {
         }
         saveGroups()
         saveTabOrder()
+
+        // A tapped notification's pane this list brought
+        if let pending = paneToShow {
+            if pending.until < Date() {
+                paneToShow = nil
+            } else if sessionGroups.contains(where: { $0.panes.contains { $0.id == pending.id } }) {
+                showPane(pending.id)
+            }
+        }
     }
 
     /// A host's workspace tabs in the host's order (`rtach ws reorder`, from any
