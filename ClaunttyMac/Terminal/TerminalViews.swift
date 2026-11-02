@@ -72,9 +72,31 @@ final class TerminalViews {
         window.makeFirstResponder(view)
     }
 
-    /// An image into the session's pane as Cmd+V pastes one: uploaded, then its path typed
-    func pasteImage(_ image: NSImage, into session: Session) {
-        views[session.id]?.view.onPasteImages?([image])
+    /// Images sent to the session's pane as one message: each uploaded, its path pasted
+    /// as Cmd+V pastes one (so Claude Code attaches it) and its note after it, a line per
+    /// image, then Return. If an upload fails, the rest is left typed, not sent.
+    func sendImages(_ images: [(image: NSImage, note: String)], into session: Session) {
+        Task { @MainActor [weak self, weak session] in
+            var lines: [(path: String?, note: String)] = []
+            for (image, note) in images {
+                lines.append((await session?.uploadImage(image), note))
+            }
+            guard let session, let view = self?.views[session.id]?.view else { return }
+            for (index, line) in lines.enumerated() {
+                if let path = line.path {
+                    view.pasteText(path)
+                    // Its own paste, so it's taken as an image
+                    try? await Task.sleep(for: .milliseconds(60))
+                }
+                let text = (line.path == nil || line.note.isEmpty ? "" : " ") + line.note
+                    + (index < lines.count - 1 ? "\n" : "")
+                if !text.isEmpty { view.pasteText(text) }
+            }
+            guard lines.allSatisfy({ $0.path != nil }) else { return }
+            // After Claude Code has taken the pastes in
+            try? await Task.sleep(for: .milliseconds(300))
+            session.sendData(Data("\r".utf8))
+        }
     }
 
     /// Where the session's pane is in its window, from the top left, if it's on screen

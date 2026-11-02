@@ -581,9 +581,16 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   straight into the image: no text field, the layer draws it and a caret as it'll be flattened,
   with keys from the viewer's `markupKey` (backspace comes as `onDeleteCommand`). Dragging text
   moves it; clicking it with Text types into it again. Return finishes the text, then sends;
-  Esc drops the text, then leaves Markup. Send to Claude (Return) flattens them at full
-  size (`Mark.render`), pastes it into the pane that sent the image as Cmd+V would (upload,
-  path typed, not sent), and keeps the marked-up copy as the workspace's newest image. It opens out of the pane that ran it (`ImageViewerContent.source`,
+  Esc drops the text, then leaves Markup (Done), keeping the marks. While marking up,
+  Markup's tools take the top bar's place; turning the page (arrows, swipe, thumbnails) stays
+  in Markup on the next still, with the same tool and color. Each still has a note
+  field in the bar under it, with the thumbnails and Send; marks and notes stay with their image (`ImageDrafts`) across page turns and
+  closing, until sent, and its thumbnail gets a dot. Send to Claude (the button, or Return in
+  Markup or the note) sends every image with marks or a note (else the one shown) to the pane
+  that sent them as one message, and submits it (`TerminalViews.sendImages`): each flattened at
+  full size (`Mark.render`), uploaded, its path pasted as Cmd+V would and its note after it, a
+  line per image, then Return (not if an upload failed). A marked-up copy takes the original's
+  place in the workspace's images. It opens out of the pane that ran it (`ImageViewerContent.source`,
   `TerminalViews.frameInWindow`). Zoom, paging, the
   bar (always shown; each button's label under it on hover) and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).

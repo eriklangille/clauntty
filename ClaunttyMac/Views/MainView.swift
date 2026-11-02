@@ -147,7 +147,7 @@ struct MainView: View {
                 .overlay {
                     ImageViewer(content: $sessionManager.windowImages[group.id],
                                 paneFrame: { views.frameInWindow(of: $0) },
-                                send: { marked, original in sendMarkup(marked, replacing: original, in: group) })
+                                send: { outgoing in sendImages(outgoing, in: group) })
                         .ignoresSafeArea(.container, edges: .top)
                         .id(group.id)
                 }
@@ -224,15 +224,17 @@ struct MainView: View {
         return max(min(wanted, total - 320), min(730, total * 0.7))
     }
 
-    /// Markup's Send to Claude: the marked-up image takes the original's place (so
-    /// reopening brings it back, the original with it), the viewer closes, and it's
-    /// pasted into the pane that sent the image, as Cmd+V would, for the user to add words
-    private func sendMarkup(_ marked: NSImage, replacing original: ImageViewerContent.Item, in group: SessionGroup) {
-        let item = ImageViewerContent.Item(name: original.name, image: marked)
-        if let png = marked.platformPNGData() { WaitingImages.store(png, item: item.id, workspace: group.id) }
+    /// The viewer's Send to Claude: a marked-up image takes the original's place (so
+    /// reopening brings it back, the original with it), the viewer closes, and the images
+    /// go to the pane that sent them as one message, each with its note
+    private func sendImages(_ outgoing: [ImageViewer.Outgoing], in group: SessionGroup) {
         let source = sessionManager.windowImages[group.id]?.source
-        if var content = sessionManager.windowImages[group.id], let index = content.items.firstIndex(where: { $0.id == original.id }) {
-            content.items[index] = item
+        if var content = sessionManager.windowImages[group.id] {
+            for sent in outgoing where sent.marked {
+                let item = ImageViewerContent.Item(name: sent.item.name, image: sent.image)
+                if let png = sent.image.platformPNGData() { WaitingImages.store(png, item: item.id, workspace: group.id) }
+                if let index = content.items.firstIndex(where: { $0.id == sent.item.id }) { content.items[index] = item }
+            }
             sessionManager.windowImages[group.id] = content
         }
         sessionManager.windowImages[group.id] = nil
@@ -243,7 +245,7 @@ struct MainView: View {
         if let pane = target.pane?.paneId, sessionManager.activeSessionId != target.id {
             MainView.show(PaneSelection(groupId: group.id, paneId: pane), sessionManager)
         }
-        views.pasteImage(marked, into: target)
+        views.sendImages(outgoing.map { ($0.image, $0.note) }, into: target)
         DispatchQueue.main.async { views.focus(target) }
     }
 

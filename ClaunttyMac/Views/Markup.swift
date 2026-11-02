@@ -84,6 +84,34 @@ struct Mark: Identifiable {
     }
 }
 
+/// What the user has put on the viewer's images to send: marks and a note each, by item.
+/// Kept when the page turns or the viewer closes (reopening brings them back), until sent.
+@MainActor
+final class ImageDrafts: ObservableObject {
+    static let shared = ImageDrafts()
+
+    @Published var marks: [UUID: [Mark]] = [:]
+    @Published var notes: [UUID: String] = [:]
+
+    /// Marked up or noted: it goes with the next Send
+    func touched(_ id: UUID) -> Bool {
+        marks[id]?.isEmpty == false || !note(id).isEmpty
+    }
+
+    func note(_ id: UUID) -> String {
+        notes[id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    func noteBinding(_ id: UUID) -> Binding<String> {
+        Binding { self.notes[id] ?? "" } set: { self.notes[id] = $0 }
+    }
+
+    func forget(_ id: UUID) {
+        marks[id] = nil
+        notes[id] = nil
+    }
+}
+
 /// What Markup draws with
 struct MarkupState {
     enum Tool: CaseIterable {
@@ -306,13 +334,13 @@ struct MarkupLayer: View {
     }
 }
 
-/// Under the image while marking up: tools, colors, undo, and what to do with it
+/// The viewer's top bar while marking up: tools, colors, undo, Copy and Done. Send is
+/// in the bar under the image.
 struct MarkupBar: View {
     @Binding var state: MarkupState
-    /// Nil when there's no pane to send it to
-    let send: (() -> Void)?
     let copy: () -> Void
-    let cancel: () -> Void
+    /// Leaves Markup; the marks stay on the image
+    let done: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -365,16 +393,10 @@ struct MarkupBar: View {
                 .disabled(state.marks.isEmpty && state.typing == nil)
                 .help("Clear")
             Divider().frame(height: 20)
-            Button("Cancel", action: cancel)
-                .help("Esc")
             Button("Copy", action: copy)
                 .disabled(state.allMarks.isEmpty)
-            if let send {
-                // Return is the viewer's: it finishes text being typed first
-                Button("Send to Claude", action: send)
-                    .buttonStyle(.borderedProminent)
-                    .help("Pastes it into the pane (Return)")
-            }
+            Button("Done", action: done)
+                .help("Keeps the marks (Esc)")
         }
         .font(.system(size: 14))
         .padding(.horizontal, 14)

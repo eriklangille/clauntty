@@ -12,14 +12,25 @@ import UniformTypeIdentifiers
 /// image. A two-finger swipe, the arrow keys, the side arrows or a thumbnail turn the
 /// page. Esc, Space or a click outside the image closes. Images that arrive while it's
 /// open are added, and it moves to the first of them.
+///
+/// Each still has a note field under it. Marks and notes stay with their image
+/// (`ImageDrafts`) until Send, which sends every image that has either, each with its note,
+/// to the pane as one message.
 struct ImageViewer: View {
     @Binding var content: ImageViewerContent?
     /// Where a session's pane is in the window (from its top left), to open out of and
     /// close back into
     let paneFrame: (UUID) -> CGRect?
-    /// Markup's Send to Claude: the marked-up image and the item it was made from. Nil
-    /// where there's no pane to send it to.
-    var send: ((NSImage, ImageViewerContent.Item) -> Void)?
+    /// Send to Claude: the images going, in order. Nil where there's no pane to send to.
+    var send: (([Outgoing]) -> Void)?
+
+    /// An image going to Claude: as marked up (else as it is) and its note
+    struct Outgoing {
+        let item: ImageViewerContent.Item
+        let image: NSImage
+        let marked: Bool
+        let note: String
+    }
 
     /// Cmd+= (+1), Cmd+− (−1) and Cmd+0 (nil) from the View menu, as an NSNumber
     static let zoomCommand = Notification.Name("ImageViewer.zoom")
@@ -37,7 +48,11 @@ struct ImageViewer: View {
     @State private var swipe: CGFloat = 0
     /// Marking up the image shown (Markup), else nil
     @State private var marking: MarkupState?
-    @FocusState private var focused: Bool
+    @ObservedObject private var drafts = ImageDrafts.shared
+    /// The viewer's keys (the backdrop's), or the note field
+    @FocusState private var focus: Focus?
+
+    private enum Focus { case viewer, note }
 
     /// How far the image is zoomed past fitting the window, and where it's moved to
     private struct Zoom: Equatable {
@@ -52,7 +67,7 @@ struct ImageViewer: View {
                 if let content, !content.items.isEmpty {
                     let items = content.items
                     let index = min(page, items.count - 1)
-                    let area = imageArea(in: geometry.size, thumbnails: items.count > 1)
+                    let area = imageArea(in: geometry.size, content: content, item: items[index])
                     backdrop
                         .transition(.opacity)
                     // The pane where it is in this view, which may not start at the
@@ -80,8 +95,8 @@ struct ImageViewer: View {
             zoomCommand((note.object as? NSNumber)?.floatValue)
         }
         // Markup's keys come through the backdrop
-        .onChange(of: marking == nil) { _, done in if !done { focused = true } }
-        .onChange(of: marking?.typing != nil) { _, typing in if typing { focused = true } }
+        .onChange(of: marking == nil) { _, done in if !done { focus = .viewer } }
+        .onChange(of: marking?.typing != nil) { _, typing in if typing { focus = .viewer } }
     }
 
     // MARK: Pieces
@@ -104,16 +119,17 @@ struct ImageViewer: View {
             }
             .focusable()
             .focusEffectDisabled()
-            .focused($focused)
+            .focused($focus, equals: .viewer)
             // Marking up, keys are Markup's (the others step aside)
             .onKeyPress(phases: [.down, .repeat]) { press in markupKey(press) }
+            // Marking up too, unless typing text
             .onKeyPress(.leftArrow) {
-                guard marking == nil else { return .ignored }
+                guard marking?.typing == nil else { return .ignored }
                 turn(by: -1)
                 return .handled
             }
             .onKeyPress(.rightArrow) {
-                guard marking == nil else { return .ignored }
+                guard marking?.typing == nil else { return .ignored }
                 turn(by: 1)
                 return .handled
             }
@@ -183,7 +199,10 @@ struct ImageViewer: View {
             .frame(width: size.width, height: size.height)
             .overlay {
                 if marking?.itemId == item.id {
-                    MarkupLayer(state: Binding { marking ?? MarkupState(itemId: item.id) } set: { marking = $0 })
+                    MarkupLayer(state: markingBinding(item.id))
+                } else if let marks = drafts.marks[item.id], !marks.isEmpty {
+                    Canvas { context, size in Mark.draw(marks, in: context, size: size) }
+                        .allowsHitTesting(false)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: zoom.isZoomed ? 0 : 10))
@@ -224,39 +243,43 @@ struct ImageViewer: View {
             .shadow(color: .black.opacity(0.5), radius: 30, y: 12)
     }
 
-    /// The bar, the side arrows (when the mouse comes near) and the thumbnails
+    /// The bar (Markup's tools while marking up), the side arrows (when the mouse comes
+    /// near) and the bar under the image
     private func chrome(_ content: ImageViewerContent, index: Int, size: CGSize) -> some View {
         let items = content.items
         let nearLeft = (pointer?.x ?? .infinity) < 160 && index > 0
         let nearRight = (pointer?.x ?? -.infinity) > size.width - 160 && index < items.count - 1
         return ZStack {
             VStack {
-                topBar(items[index], host: content.host, index: index, count: items.count)
-                    .padding(.top, 14)
+                Group {
+                    if marking != nil {
+                        MarkupBar(state: markingBinding(items[index].id),
+                                  copy: { copyMarkup() },
+                                  done: { endMarking() })
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    } else {
+                        topBar(items[index], host: content.host, index: index, count: items.count)
+                            .transition(.opacity)
+                    }
+                }
+                .padding(.top, 14)
                 Spacer()
-                if marking != nil {
-                    MarkupBar(state: Binding { marking ?? MarkupState(itemId: items[index].id) } set: { marking = $0 },
-                              send: send == nil ? nil : { sendMarkup() },
-                              copy: { copyMarkup() },
-                              cancel: { marking = nil })
-                        .padding(.bottom, 18)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else if items.count > 1 {
-                    thumbnails(items, index: index)
+                if hasBottomBar(content, item: items[index]) {
+                    bottomBar(content, index: index)
                         .padding(.bottom, 18)
                 }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: marking == nil)
             HStack {
                 SideArrow(symbol: "chevron.left", help: "Previous (←)") { turn(by: -1) }
-                    .opacity(nearLeft && marking == nil ? 1 : 0)
+                    .opacity(nearLeft ? 1 : 0)
                     .scaleEffect(nearLeft ? 1 : 0.8)
-                    .allowsHitTesting(nearLeft && marking == nil)
+                    .allowsHitTesting(nearLeft)
                 Spacer()
                 SideArrow(symbol: "chevron.right", help: "Next (→)") { turn(by: 1) }
-                    .opacity(nearRight && marking == nil ? 1 : 0)
+                    .opacity(nearRight ? 1 : 0)
                     .scaleEffect(nearRight ? 1 : 0.8)
-                    .allowsHitTesting(nearRight && marking == nil)
+                    .allowsHitTesting(nearRight)
             }
             .padding(.horizontal, 18)
             .animation(.spring(response: 0.3, dampingFraction: 0.75), value: nearLeft)
@@ -298,7 +321,8 @@ struct ImageViewer: View {
                 }
                 if item.kind == .still && marking == nil {
                     ChromeButton(symbol: "pencil.tip.crop.circle", label: "Markup") {
-                        marking = MarkupState(itemId: item.id)
+                        focus = .viewer
+                        marking = MarkupState(itemId: item.id, marks: drafts.marks[item.id] ?? [])
                     }
                 }
             }
@@ -311,12 +335,43 @@ struct ImageViewer: View {
         .padding(.horizontal, 24)
     }
 
-    private func thumbnails(_ items: [ImageViewerContent.Item], index: Int) -> some View {
+    /// Under the image, in one bar: the thumbnails, and for a still the note and Send
+    private func bottomBar(_ content: ImageViewerContent, index: Int) -> some View {
+        let items = content.items
+        let item = items[index]
+        let note = notable(item)
+        return HStack(spacing: 0) {
+            if items.count > 1 {
+                // Leaves the note most of the bar
+                thumbnails(items, index: index, maxWidth: note ? 320 : 620)
+                if note {
+                    Divider().frame(height: 28)
+                }
+            }
+            if note {
+                noteField(item)
+                    .padding(.leading, items.count > 1 ? 12 : 16)
+                    .padding(.trailing, 8)
+                Button(sendLabel(content)) { sendAll() }
+                    .buttonStyle(.borderedProminent)
+                    .help("Sends every image with marks or a note, as one message (Return)")
+                    .padding(.trailing, 12)
+            }
+        }
+        .frame(minHeight: 56)
+        .frame(maxWidth: note ? 760 : nil)
+        .glass(in: .rect(cornerRadius: 16))
+        .padding(.horizontal, 24)
+    }
+
+    private func thumbnails(_ items: [ImageViewerContent.Item], index: Int, maxWidth: CGFloat) -> some View {
         ScrollViewReader { scroller in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
-                        Thumbnail(item: item, selected: offset == index) { turn(to: offset) }
+                        Thumbnail(item: item, selected: offset == index, touched: drafts.touched(item.id)) {
+                            turn(to: offset)
+                        }
                             .id(item.id)
                     }
                 }
@@ -324,19 +379,48 @@ struct ImageViewer: View {
                 .padding(.vertical, 8)
             }
             // As wide as the thumbnails, up to a point
-            .frame(width: min(CGFloat(items.count) * 62 - 8 + 20, 620))
+            .frame(width: min(CGFloat(items.count) * 62 - 8 + 20, maxWidth))
             .onChange(of: index) { _, index in
                 withAnimation { scroller.scrollTo(items[index].id, anchor: .center) }
             }
         }
-        .glass(in: .rect(cornerRadius: 16))
+    }
+
+    /// The shown image's note. Return sends; Shift or Option+Return adds a line; Esc
+    /// leaves the field for the viewer's keys.
+    private func noteField(_ item: ImageViewerContent.Item) -> some View {
+        TextField("Note on this image", text: drafts.noteBinding(item.id), axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.system(size: 14))
+            .lineLimit(1...4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 10)
+            .focused($focus, equals: .note)
+            .onKeyPress(.return, phases: .down) { press in
+                if press.modifiers.contains(.shift) || press.modifiers.contains(.option) {
+                    drafts.notes[item.id, default: ""] += "\n"
+                } else {
+                    sendAll()
+                }
+                return .handled
+            }
+            .onKeyPress(.escape) {
+                focus = .viewer
+                return .handled
+            }
     }
 
     // MARK: Layout
 
-    /// Where the image goes: clear of the bar, and of the thumbnails when there are some
-    private func imageArea(in size: CGSize, thumbnails: Bool) -> CGRect {
-        let side: CGFloat = 48, top: CGFloat = 70, bottom: CGFloat = thumbnails ? 100 : 40
+    /// The thumbnails or a note go under the image
+    private func hasBottomBar(_ content: ImageViewerContent, item: ImageViewerContent.Item) -> Bool {
+        content.items.count > 1 || notable(item)
+    }
+
+    /// Where the image goes: clear of the top bar, and of the bottom one when it's there
+    private func imageArea(in size: CGSize, content: ImageViewerContent, item: ImageViewerContent.Item) -> CGRect {
+        let side: CGFloat = 48, top: CGFloat = 70
+        let bottom: CGFloat = hasBottomBar(content, item: item) ? 100 : 40
         return CGRect(x: side, y: top, width: max(0, size.width - side * 2), height: max(0, size.height - top - bottom))
     }
 
@@ -388,8 +472,8 @@ struct ImageViewer: View {
 
     /// The shown image's fitted size and area, for zooming from the menu or the keyboard
     private var shownGeometry: (image: NSImage, fit: CGSize, area: CGRect)? {
-        guard let content, let image = shownItem?.image else { return nil }
-        let area = imageArea(in: windowSize, thumbnails: content.items.count > 1)
+        guard let content, let item = shownItem, let image = item.image else { return nil }
+        let area = imageArea(in: windowSize, content: content, item: item)
         return (image, fitted(image, in: area), area)
     }
 
@@ -491,14 +575,18 @@ struct ImageViewer: View {
             page = index
             zoom = Zoom()
         }
-        marking = nil
+        // Marking up, Markup goes on with the next image, with the same tool and color
+        guard let state = marking else { return }
+        endMarking()
+        guard let next = content?.items[index], next.kind == .still, next.image != nil else { return }
+        marking = MarkupState(itemId: next.id, marks: drafts.marks[next.id] ?? [], tool: state.tool, color: state.color)
     }
 
     private func didOpen() {
         page = content?.selection ?? 0
         zoom = Zoom()
         // After the terminal has let go of the keyboard
-        DispatchQueue.main.async { focused = true }
+        DispatchQueue.main.async { focus = .viewer }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
             scrolled(event)
         }
@@ -508,7 +596,8 @@ struct ImageViewer: View {
         if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
         scrollMonitor = nil
         pointer = nil
-        marking = nil
+        focus = nil
+        endMarking()
     }
 
     private func close() {
@@ -523,20 +612,72 @@ struct ImageViewer: View {
         guard var state = marking, press.modifiers.isDisjoint(with: [.command, .control]) else { return .ignored }
         switch press.key {
         case .return where state.typing == nil:
-            if send != nil { sendMarkup() }
+            if send != nil { sendAll() }
             return .handled
         case .return:
             state.commitTyping()
         case .escape where state.typing == nil:
-            marking = nil
+            endMarking()
             return .handled
         case .escape:
             state.cancelTyping()
         default:
             guard state.type(press) else { return .ignored }
         }
-        marking = state
+        update(state)
         return .handled
+    }
+
+    /// Markup's state for the image; every change is kept in its drafts
+    private func markingBinding(_ id: UUID) -> Binding<MarkupState> {
+        Binding { marking ?? MarkupState(itemId: id) } set: { update($0) }
+    }
+
+    private func update(_ state: MarkupState) {
+        marking = state
+        drafts.marks[state.itemId] = state.marks
+    }
+
+    /// Out of Markup, with the text being typed kept as a mark
+    private func endMarking() {
+        guard var state = marking else { return }
+        state.commitTyping()
+        drafts.marks[state.itemId] = state.marks
+        marking = nil
+    }
+
+    /// Stills a note goes with, when there's a pane to send to
+    private func notable(_ item: ImageViewerContent.Item) -> Bool {
+        send != nil && item.kind == .still && item.image != nil
+    }
+
+    /// What Send sends: every still with marks or a note, in order, else the one shown
+    private func outgoing(_ content: ImageViewerContent) -> [ImageViewerContent.Item] {
+        let touched = content.items.filter { notable($0) && drafts.touched($0.id) }
+        if !touched.isEmpty { return touched }
+        return shownItem.map { notable($0) ? [$0] : [] } ?? []
+    }
+
+    /// With how many go, unless it's just the one shown
+    private func sendLabel(_ content: ImageViewerContent) -> String {
+        let batch = outgoing(content)
+        let justShown = batch.count == 1 && batch.first?.id == shownItem?.id
+        return justShown || batch.isEmpty ? "Send to Claude" : "Send \(batch.count) to Claude"
+    }
+
+    private func sendAll() {
+        guard let send, let content else { return }
+        endMarking()
+        let batch = outgoing(content).compactMap { item -> Outgoing? in
+            guard let image = item.image else { return nil }
+            let marks = drafts.marks[item.id] ?? []
+            guard let shown = marks.isEmpty ? image : Mark.render(image, marks: marks) else { return nil }
+            return Outgoing(item: item, image: shown, marked: !marks.isEmpty, note: drafts.note(item.id))
+        }
+        guard !batch.isEmpty else { return }
+        for sent in batch { drafts.forget(sent.item.id) }
+        focus = nil
+        send(batch)
     }
 
     /// The marked-up image, flattened at full size, with text being typed
@@ -544,12 +685,6 @@ struct ImageViewer: View {
         guard let marking, let item = content?.items.first(where: { $0.id == marking.itemId }),
               let image = item.image, let marked = Mark.render(image, marks: marking.allMarks) else { return nil }
         return (marked, item)
-    }
-
-    private func sendMarkup() {
-        guard let (marked, item) = markedImage else { return }
-        marking = nil
-        send?(marked, item)
     }
 
     private func copyMarkup() {
@@ -726,6 +861,8 @@ private struct SideArrow: View {
 private struct Thumbnail: View {
     let item: ImageViewerContent.Item
     let selected: Bool
+    /// Has marks or a note: it goes with the next Send
+    let touched: Bool
     let action: () -> Void
     @State private var hovering = false
 
@@ -751,6 +888,15 @@ private struct Thumbnail: View {
                     .strokeBorder(.white.opacity(selected ? 0.9 : hovering ? 0.35 : 0), lineWidth: 2)
             )
             .opacity(selected || hovering ? 1 : 0.55)
+            .overlay(alignment: .topTrailing) {
+                if touched {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .overlay(Circle().strokeBorder(.black.opacity(0.4), lineWidth: 1))
+                        .frame(width: 9, height: 9)
+                        .offset(x: 3, y: -3)
+                }
+            }
             .scaleEffect(hovering && !selected ? 1.08 : 1)
             .offset(y: hovering && !selected ? -2 : 0)
         }
