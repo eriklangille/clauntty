@@ -461,9 +461,9 @@ class SessionManager: ObservableObject {
             guard let self = self, let session = session else { return }
             self.handlePortForwardRequest(from: session, port: port)
         }
-        session.onOpenTabRequested = { [weak self, weak session] port, pane in
+        session.onOpenTabRequested = { [weak self, weak session] port, pane, path in
             guard let self = self, let session = session else { return }
-            self.handleOpenTabRequest(from: session, port: port, pane: pane)
+            self.handleOpenTabRequest(from: session, port: port, pane: pane, path: path)
         }
         session.onOpenBrowserRequested = { [weak self, weak session] urlString in
             guard let self = self, let session = session else { return }
@@ -856,13 +856,16 @@ class SessionManager: ObservableObject {
     ///   - config: Connection configuration
     ///   - makeActive: Whether to switch to this tab (default true)
     ///   - workspace: The workspace tab it belongs to; by default the one shown
+    ///   - path: Where the page opens (`/admin?x=1`); by default the port's root
     func createWebTab(for port: RemotePort, config: SavedConnection, makeActive: Bool = true,
-                      workspace: UUID?? = nil) async throws -> WebTab {
+                      workspace: UUID?? = nil, path: String? = nil) async throws -> WebTab {
         let owner = workspace ?? activeSession?.groupId
         let connection = try await pooledConnection(for: config)
 
         let webTab = WebTab(remotePort: port, connectionConfig: config, sshConnection: connection)
         webTab.workspaceId = owner
+        // Before forwarding: the web view is made, and loads it, once the tab is connected
+        webTab.lastPath = path
         webTabs.append(webTab)
 
         // Add to global tab order
@@ -1210,7 +1213,7 @@ class SessionManager: ObservableObject {
 
     /// Handle an open tab request from a session (`clauntty tab`), without switching to
     /// it. The tab goes under the workspace of the pane that asked, else the session's.
-    func handleOpenTabRequest(from session: Session, port: Int, pane: String? = nil) {
+    func handleOpenTabRequest(from session: Session, port: Int, pane: String? = nil, path: String? = nil) {
         let workspace = pane.flatMap { pane in
             sessionGroups.first { $0.panes.contains { $0.id == pane } }?.id
         } ?? session.groupId
@@ -1219,15 +1222,17 @@ class SessionManager: ObservableObject {
 
         Task {
             do {
-                // Check if already open - just log and return, don't switch
-                if webTabForPort(port, config: config) != nil {
+                // Already open (restored ones too, which haven't reconnected yet): it goes
+                // to the path if there is one, else stays where it is. Not switched to.
+                if let existing = webTabs(on: config).first(where: { $0.remotePort.port == port }) {
                     Logger.clauntty.debugOnly("SessionManager: web tab for port \(port) already exists")
+                    if let path { existing.show(path) }
                     return
                 }
 
                 // Create new web tab in background (don't switch to it)
                 _ = try await createWebTab(for: remotePort, config: config, makeActive: false,
-                                           workspace: .some(workspace))
+                                           workspace: .some(workspace), path: path)
                 Logger.clauntty.debugOnly("SessionManager: opened web tab for port \(port) via OSC 777 (background)")
             } catch {
                 Logger.clauntty.error("SessionManager: failed to open tab for port \(port): \(error)")
@@ -1707,6 +1712,8 @@ class SessionManager: ObservableObject {
     /// persist) and which one is active
     func savePersistence() {
         saveGroups()
+        // Where each page is, so a relaunch opens it there
+        saveWebTabPersistence()
         if case .terminal(let id) = activeTab {
             UserDefaults.standard.set(id.uuidString, forKey: activeTabIdKey)
         } else {

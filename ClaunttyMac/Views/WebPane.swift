@@ -132,9 +132,7 @@ private struct AddressField: View {
             guard let page = try? await sessionManager.openPortInTab(remote, config: webTab.connectionConfig,
                                                                      workspace: workspace) else { return }
             guard !path.isEmpty, path != "/" else { return }
-            // Loaded already (an open page), or loads it when it's first shown
-            page.lastPath = path
-            if page.webView != nil { page.navigate(to: path) }
+            page.show(path)
         }
     }
 }
@@ -175,8 +173,7 @@ private struct WebViewContainer: NSViewRepresentable {
 
     /// Back where it was, if it was reopened
     private func load(_ webView: WKWebView) {
-        let path = webTab.lastPath.flatMap { $0.isEmpty ? nil : $0 } ?? "/"
-        webView.load(URLRequest(url: URL(string: path, relativeTo: webTab.localURL) ?? webTab.localURL))
+        webView.load(URLRequest(url: webTab.lastURL))
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {}
@@ -196,10 +193,7 @@ private struct WebViewContainer: NSViewRepresentable {
             let webTab = webTab
             observations = [
                 webView.observe(\.url) { view, _ in
-                    Task { @MainActor in
-                        webTab.currentURL = view.url
-                        webTab.updateLastPath()
-                    }
+                    Task { @MainActor in webTab.currentURL = view.url }
                 },
                 webView.observe(\.title) { view, _ in Task { @MainActor in webTab.pageTitle = view.title } },
                 webView.observe(\.canGoBack) { view, _ in Task { @MainActor in webTab.canGoBack = view.canGoBack } },

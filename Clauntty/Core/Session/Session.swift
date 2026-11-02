@@ -398,7 +398,7 @@ class Session: ObservableObject, Identifiable {
 
     /// Called when a web tab should be opened (`clauntty tab`): the port, and the pane
     /// that asked (rtach 2.29+; it may not be this session's, see handleRtachCommand)
-    var onOpenTabRequested: ((Int, String?) -> Void)?
+    var onOpenTabRequested: ((Int, String?, String?) -> Void)?
 
     /// Called when session needs reconnection (detected nil channel on send attempt)
     var onNeedsReconnect: (() -> Void)?
@@ -916,13 +916,15 @@ class Session: ObservableObject, Identifiable {
 
         switch cmd {
         case "open":
-            // "open;<port>;<pane>": commands come through the session the app shows, so
-            // the pane says whose workspace the tab belongs to. Older rtach: "open;<port>".
-            let args = parts.count > 1 ? parts[1].split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false) : []
+            // "open;<port>;<pane>[;<path>]": commands come through the session the app
+            // shows, so the pane says whose workspace the tab belongs to; the path (2.39.0+)
+            // is where the page goes, and may hold ";" itself. Older rtach: "open;<port>".
+            let args = parts.count > 1 ? parts[1].split(separator: ";", maxSplits: 2, omittingEmptySubsequences: false) : []
             if let first = args.first, let port = Int(first) {
                 let pane = args.count > 1 && !args[1].isEmpty ? String(args[1]) : nil
-                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command open port \(port) (pane \(pane ?? "none"))")
-                onOpenTabRequested?(port, pane)
+                let path = args.count > 2 && !args[2].isEmpty ? String(args[2]) : nil
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command open port \(port) (pane \(pane ?? "none"), path \(path ?? "none"))")
+                onOpenTabRequested?(port, pane, path)
             }
         case "forward":
             if parts.count > 1, let port = Int(parts[1]) {

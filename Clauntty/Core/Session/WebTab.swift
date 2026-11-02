@@ -49,7 +49,9 @@ class WebTab: ObservableObject, Identifiable {
     @Published var pageTitle: String?
 
     /// Current URL being displayed
-    @Published var currentURL: URL?
+    @Published var currentURL: URL? {
+        didSet { updateLastPath() }
+    }
 
     /// Whether the page is currently loading
     @Published var isLoading: Bool = false
@@ -78,6 +80,12 @@ class WebTab: ObservableObject, Identifiable {
     /// Reload the current page
     func reload() {
         webView?.reload()
+    }
+
+    /// Go to a path, now if the page is loaded, else when it loads
+    func show(_ path: String) {
+        lastPath = path
+        navigate(to: path)
     }
 
     /// Navigate to a path (relative to localhost:port)
@@ -146,6 +154,12 @@ class WebTab: ObservableObject, Identifiable {
     /// Local URL for WebView to load
     var localURL: URL {
         URL(string: "http://localhost:\(localPort)")!
+    }
+
+    /// Where a new web view for the page loads: the last page it was on, else the root
+    var lastURL: URL {
+        guard let lastPath, !lastPath.isEmpty else { return localURL }
+        return URL(string: lastPath, relativeTo: localURL)?.absoluteURL ?? localURL
     }
 
     // MARK: - Initialization
@@ -252,16 +266,18 @@ class WebTab: ObservableObject, Identifiable {
         }
     }
 
-    /// Track the current path for persistence
+    /// Track the current path, for a new web view and for persistence: everything after
+    /// the port, encoded as it was (`/a%20b?x=1#top`). Not another site the page went to.
     func updateLastPath() {
-        if let url = currentURL {
-            var path = url.path
-            if let query = url.query {
-                path += "?\(query)"
-            }
-            if path.isEmpty { path = "/" }
-            lastPath = path
-        }
+        guard let url = currentURL, url.host == "localhost" || url.host == "127.0.0.1",
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        parts.scheme = nil
+        parts.user = nil
+        parts.password = nil
+        parts.host = nil
+        parts.port = nil
+        guard let path = parts.string else { return }
+        lastPath = path.isEmpty ? "/" : path
     }
 }
 

@@ -26,8 +26,9 @@ struct WebTabView: View {
                 .background(Color(.systemBackground))
 
             case .connected:
+                // Made again each time the page is shown: back where it was
                 WebViewContainer(
-                    url: webTab.localURL,
+                    url: webTab.lastURL,
                     webTab: webTab,
                     webViewBinding: $webView
                 )
