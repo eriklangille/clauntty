@@ -46,6 +46,8 @@
 		C0000007 /* NewConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000007 /* NewConnectionView.swift */; };
 		C0000008 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000008 /* TerminalView.swift */; };
 		1417759DDD1EAFDD9411016D /* AgentSwitcherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DC0C373EF7C12642C82EAF /* AgentSwitcherView.swift */; };
+		AC000000000000000000000E /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC100000000000000000000E /* ChatView.swift */; };
+		AC000000000000000000000F /* DictationButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC100000000000000000000F /* DictationButton.swift */; };
 		5C1A7E2B9D3F4A6B8C0D1E2F /* PillMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D2B8F3C0E4A5B7C9D1E2F30 /* PillMenu.swift */; };
 		C0000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1000009 /* Assets.xcassets */; };
 		C0000010 /* GhosttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000010 /* GhosttyApp.swift */; };
@@ -56,6 +58,7 @@
 		C00000A3 /* SSHAuthPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A3 /* SSHAuthPrompts.swift */; };
 		C0000015 /* KeyboardAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000015 /* KeyboardAccessoryView.swift */; };
 		C0000016 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000016 /* Session.swift */; };
+		AC000000000000000000000D /* ChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC100000000000000000000D /* ChatSession.swift */; };
 		AC000000000000000000000A /* CodeDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC100000000000000000000A /* CodeDrawing.swift */; };
 		AC0000000000000000000009 /* FrameMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000009 /* FrameMonitor.swift */; };
 		AC0000000000000000000008 /* Highlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000008 /* Highlighter.swift */; };
@@ -164,6 +167,8 @@
 		C1000007 /* NewConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewConnectionView.swift; sourceTree = "<group>"; };
 		C1000008 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		A3DC0C373EF7C12642C82EAF /* AgentSwitcherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSwitcherView.swift; sourceTree = "<group>"; };
+		AC100000000000000000000E /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		AC100000000000000000000F /* DictationButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationButton.swift; sourceTree = "<group>"; };
 		6D2B8F3C0E4A5B7C9D1E2F30 /* PillMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillMenu.swift; sourceTree = "<group>"; };
 		C1000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C1000010 /* GhosttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyApp.swift; sourceTree = "<group>"; };
@@ -174,6 +179,7 @@
 		C10000A3 /* SSHAuthPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthPrompts.swift; sourceTree = "<group>"; };
 		C1000015 /* KeyboardAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessoryView.swift; sourceTree = "<group>"; };
 		C1000016 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		AC100000000000000000000D /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
 		AC100000000000000000000A /* CodeDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeDrawing.swift; sourceTree = "<group>"; };
 		AC1000000000000000000009 /* FrameMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMonitor.swift; sourceTree = "<group>"; };
 		AC1000000000000000000008 /* Highlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlighter.swift; sourceTree = "<group>"; };
@@ -386,6 +392,8 @@
 				C1000007 /* NewConnectionView.swift */,
 				C1000008 /* TerminalView.swift */,
 				A3DC0C373EF7C12642C82EAF /* AgentSwitcherView.swift */,
+				AC100000000000000000000E /* ChatView.swift */,
+				AC100000000000000000000F /* DictationButton.swift */,
 				6D2B8F3C0E4A5B7C9D1E2F30 /* PillMenu.swift */,
 				C1000015 /* KeyboardAccessoryView.swift */,
 				59A3663E616FC97D48E5888C /* SessionPickerView.swift */,
@@ -426,6 +434,7 @@
 			isa = PBXGroup;
 			children = (
 				C1000016 /* Session.swift */,
+				AC100000000000000000000D /* ChatSession.swift */,
 				AC100000000000000000000A /* CodeDrawing.swift */,
 				AC1000000000000000000009 /* FrameMonitor.swift */,
 				AC1000000000000000000008 /* Highlighter.swift */,
@@ -662,6 +671,8 @@
 				C0000007 /* NewConnectionView.swift in Sources */,
 				C0000008 /* TerminalView.swift in Sources */,
 				1417759DDD1EAFDD9411016D /* AgentSwitcherView.swift in Sources */,
+				AC000000000000000000000E /* ChatView.swift in Sources */,
+				AC000000000000000000000F /* DictationButton.swift in Sources */,
 				5C1A7E2B9D3F4A6B8C0D1E2F /* PillMenu.swift in Sources */,
 				C0000010 /* GhosttyApp.swift in Sources */,
 				C0000011 /* GhosttyBridge.swift in Sources */,
@@ -672,6 +683,7 @@
 				C0000019 /* RtachDeployer.swift in Sources */,
 				C0000015 /* KeyboardAccessoryView.swift in Sources */,
 				C0000016 /* Session.swift in Sources */,
+				AC000000000000000000000D /* ChatSession.swift in Sources */,
 				AC000000000000000000000A /* CodeDrawing.swift in Sources */,
 				AC0000000000000000000009 /* FrameMonitor.swift in Sources */,
 				AC0000000000000000000008 /* Highlighter.swift in Sources */,

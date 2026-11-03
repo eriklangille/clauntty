@@ -513,8 +513,30 @@ class RtachDeployer {
             """
         // sh, not the login shell (which may be fish); the script has no single quotes
         _ = try await connection.executeCommand("sh -c '\(script)'")
+        try await connection.executeWithStdin(
+            "cat > ~/.clauntty/bin/clauntty-chat.tmp && chmod +x ~/.clauntty/bin/clauntty-chat.tmp && mv -f ~/.clauntty/bin/clauntty-chat.tmp ~/.clauntty/bin/clauntty-chat",
+            stdinData: Data(Self.chatLauncher.utf8))
         Logger.clauntty.debugOnly("Helper commands linked (clauntty, open-browser, forward-port, open-tab)")
     }
+
+    /// `clauntty-chat`: a pane running Claude headless for the chat view (ChatSession)
+    static let chatLauncher = #"""
+#!/bin/sh
+# clauntty-chat [--session-id ID | --resume ID]: a Claude pane in chat mode. Claude runs
+# headless, speaking JSON lines through the pane, and Clauntty draws the conversation.
+# The terminal is raw: no echo, and no line length limit on what the app sends. A line
+# {"type":"clauntty_end"} from the app ends it (Claude finishes on the end of its input),
+# back at the shell, where `claude --resume ID` carries on in the terminal.
+claude=$(command -v claude || echo ~/.local/bin/claude)
+old=$(stty -g 2>/dev/null)
+stty raw -echo 2>/dev/null
+printf '\033]777;clauntty-chat\007{"type":"clauntty_chat","version":1,"args":"%s"}\n' "$*"
+awk '$0 == "{\"type\":\"clauntty_end\"}" { exit } { print; fflush() }' |
+  "$claude" -p --input-format stream-json --output-format stream-json --verbose \
+    --include-partial-messages --replay-user-messages --permission-prompt-tool stdio "$@"
+[ -n "$old" ] && stty "$old"
+printf '\n{"type":"clauntty_chat_ended"}\n'
+"""#
 
     // MARK: - Claude Code Settings
 

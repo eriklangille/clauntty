@@ -273,8 +273,53 @@ class Session: ObservableObject, Identifiable {
             // Restore the saved title when resuming a session
             if let sessionId = rtachSessionId {
                 restoreSavedTitle(rtachSessionId: sessionId)
+                restoreChat(rtachSessionId: sessionId)
             }
         }
+    }
+
+    // MARK: - Chat Mode
+
+    /// The pane runs `clauntty-chat` (Claude headless): the conversation drawn natively
+    /// over the hidden terminal. Seen in its output, and remembered for the next launch.
+    @Published private(set) var chat: ChatSession? {
+        didSet { chatModeDidChange() }
+    }
+
+    /// The chat is showing (not ended): the terminal under it keeps away from the keyboard
+    var isChatMode: Bool { chat.map { !$0.ended } ?? false }
+    var onChatModeChange: ((Bool) -> Void)?
+    func chatModeDidChange() { onChatModeChange?(isChatMode) }
+
+    /// What the chat launcher prints first: an escape sequence (OSC 777, which terminals
+    /// ignore when they don't know it), because a program's text can't carry one. A Claude
+    /// session in the terminal can show the launcher's JSON (this code, say), and that
+    /// mustn't turn its pane into a chat.
+    private static let chatMarker = Data("\u{1b}]777;clauntty-chat\u{07}".utf8)
+
+    private static func chatKey(connectionId: UUID, rtachSessionId: String) -> String {
+        "session_chat_\(connectionId.uuidString)_\(rtachSessionId)"
+    }
+
+    private func restoreChat(rtachSessionId: String) {
+        guard chat == nil,
+              let saved = UserDefaults.standard.string(forKey: Self.chatKey(connectionId: connectionConfig.id, rtachSessionId: rtachSessionId))
+        else { return }
+        chat = ChatSession(session: self, sessionId: saved.isEmpty ? nil : saved)
+    }
+
+    /// The output says this is a chat pane
+    private func noticeChat(in data: Data) {
+        guard chat == nil, data.range(of: Self.chatMarker) != nil else { return }
+        chat = ChatSession(session: self)
+        chatSessionIdChanged(nil)
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): chat mode")
+    }
+
+    /// Remembers the pane as a chat, with its Claude conversation's id once known
+    func chatSessionIdChanged(_ id: String?) {
+        guard let rtachSessionId else { return }
+        UserDefaults.standard.set(id ?? chat?.sessionId ?? "", forKey: Self.chatKey(connectionId: connectionConfig.id, rtachSessionId: rtachSessionId))
     }
 
     /// Whether this session is currently using rtach protocol framing.
@@ -754,6 +799,7 @@ class Session: ObservableObject, Identifiable {
             // the replay so nothing draws in between. Older history pages in on scroll.
             data = Data([0x1b, 0x63]) + data
             scrollbackBuffer.removeAll()
+            chat?.beginReplay()
             // A program on the alternate screen gets no replay, only a redraw, and only
             // for a real size change (Node ignores a SIGWINCH at the same size)
             if !expectingReady, data.range(of: Self.altScreenEnter) != nil {
@@ -890,6 +936,10 @@ class Session: ObservableObject, Identifiable {
             let excess = scrollbackBuffer.count - maxScrollbackSize
             scrollbackBuffer.removeFirst(excess)
         }
+
+        // A chat pane's events, for the chat drawn over the terminal
+        noticeChat(in: data)
+        chat?.ingest(data)
 
         // Forward to terminal
         onDataReceived?(data)

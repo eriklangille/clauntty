@@ -598,7 +598,21 @@ struct AgentSwitcherView: View {
     /// Where the key bar starts: above the keyboard, or at the bottom with it collapsed
     private func barTop(_ size: CGSize) -> CGFloat {
         let screen = UIScreen.main.bounds.height - originY
+        // A chat has no key bar: its window goes down to the keyboard (or near the screen's
+        // bottom), its own text box at the end
+        if focusedIsChat {
+            return keyboardVisible ? screen - keyboardHeight + 4 : screen - 6
+        }
         return keyboardVisible ? screen - keyboardHeight - Self.keyBarAboveKeyboard : screen - Self.collapsedBar
+    }
+
+    /// The window typed into shows a chat
+    private var focusedIsChat: Bool {
+        guard let focused else { return false }
+        for tab in windows where tab.id == focused {
+            if case .terminal(let session) = tab { return session.isChatMode }
+        }
+        return false
     }
 
     /// The collapsed key bar at the bottom of the screen, home indicator included
@@ -1235,6 +1249,9 @@ struct AgentSwitcherView: View {
                 actions.append(.init(id: "new", title: "New Tab", icon: "plus") {
                     Task { await sessionManager.performPaneAction(.newWorkspace, groupId: workspace) }
                 })
+                actions.append(.init(id: "chat", title: "New Chat", icon: "bubble.left.and.text.bubble.right") {
+                    Task { await sessionManager.newChat(groupId: workspace) }
+                })
             } else {
                 actions.append(.init(id: "new", title: "New Tab", icon: "plus", perform: onNewTab))
             }
@@ -1470,6 +1487,14 @@ struct SwitcherWindow: View {
 
     /// Where the window's terminal ends (in the terminal's points) and how many rows it
     /// shows, always whole rows from the cursor's
+    /// The chat's text size: smaller in the focused window than fullscreen. Trying sizes:
+    /// `defaults write com.octerm.clauntty chatTextFocused 14` (and chatTextFullscreen)
+    static func chatType(fullscreen: Bool) -> ChatType {
+        let key = fullscreen ? "chatTextFullscreen" : "chatTextFocused"
+        let size = UserDefaults.standard.double(forKey: key)
+        return ChatType(size: size > 0 ? size : (fullscreen ? 17 : 15))
+    }
+
     static func crop(cursor: Session.CursorRow?, mode: Mode, isAgent: Bool, terminalSize: CGSize, windowWidth: CGFloat)
         -> (bottom: CGFloat, rows: Int, cell: CGFloat) {
         let scale = windowWidth / terminalSize.width
@@ -1671,6 +1696,26 @@ struct SwitcherWindow: View {
                     )
                     .simultaneousGesture(swipeGesture)
                     .modifier(MoveHold(isOn: canMove, onHold: { onMenu(true) }, onMove: onMove))
+            }
+
+            // A chat pane: the conversation drawn natively over its terminal, which keeps
+            // running underneath (Claude headless, speaking JSON)
+            if web == nil, !isCard, let chat = session.chat, !chat.ended {
+                ChatView(chat: chat,
+                         colors: ReviewColors.of(ThemeManager.shared.theme(withId: ghosttyApp.currentThemeId)),
+                         topInset: floatsPill ? 0 : AgentSwitcherView.pillStrip,
+                         isActive: isFocused || isFullscreen,
+                         type: Self.chatType(fullscreen: isFullscreen))
+                    // Fullscreen, the window goes on under the keyboard: the chat ends where
+                    // the terminal does, above it
+                    .frame(height: isFullscreen ? placement.y + terminalSize.height : nil)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    // The window makes room for the keyboard itself (it ends above it, or
+                    // fullscreen the frame above does): SwiftUI's own room for it as well
+                    // counted it twice, and the end of the conversation fell under the box
+                    .ignoresSafeArea(.keyboard)
+                    .allowsHitTesting(isFocused || isFullscreen)
+                    .transition(.opacity)
             }
         }
         .frame(width: windowWidth, height: windowHeight)

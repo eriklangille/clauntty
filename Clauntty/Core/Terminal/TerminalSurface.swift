@@ -2261,8 +2261,8 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             setupAccessoryBarInWindow()
 
             // Show this tab's accessory bar and bring to front
-            accessoryBar.isHidden = false
-            accessoryBar.isUserInteractionEnabled = true
+            accessoryBar.isHidden = givesKeyboardAway
+            accessoryBar.isUserInteractionEnabled = !givesKeyboardAway
             window?.bringSubviewToFront(accessoryBar)
 
             if !isFirstResponder {
@@ -2339,7 +2339,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
     }
 
+    /// A chat pane: the chat over this terminal has the keyboard (its own text box), so
+    /// the terminal never takes it and its key bar stays hidden
+    var givesKeyboardAway = false {
+        didSet {
+            guard givesKeyboardAway != oldValue else { return }
+            accessoryBar.isHidden = givesKeyboardAway || !isActiveTab
+            accessoryBar.isUserInteractionEnabled = !accessoryBar.isHidden
+            if givesKeyboardAway, isFirstResponder { _ = resignFirstResponder() }
+        }
+    }
+
     override func becomeFirstResponder() -> Bool {
+        guard !givesKeyboardAway else { return false }
         // Only allow becoming first responder if this is the active tab
         guard isActiveTab else {
             Logger.clauntty.debugOnly("becomeFirstResponder: rejected - not active tab")

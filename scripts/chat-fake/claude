@@ -1,0 +1,74 @@
+#!/bin/bash
+# A stand-in for `claude -p --input-format stream-json --output-format stream-json ...` on
+# the test container: it replays a recorded session (recording.tsv beside it, made by
+# make-fixture.py) with its timing, one recorded turn per prompt, round and round. It waits
+# at each approval or question for the app's control_response, stops a turn on an
+# interrupt, and answers a denial with a short reply. Everything else is ignored, so the
+# chat view can be built without a Claude login or usage.
+here=$(dirname "$(readlink -f "$0")")
+rec="$here/recording.tsv"
+sid="" replay=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id|--resume) sid=$2; shift ;;
+    --replay-user-messages) replay=1 ;;
+  esac
+  shift
+done
+[ -n "$sid" ] || sid=$(cat /proc/sys/kernel/random/uuid)
+turns=$(( $(cut -f1 "$rec" | sort -n | tail -n 1) + 1 ))
+played=${CHAT_FAKE_TURN:-0}  # the turn to start at, for trying one
+
+emit() { printf '%s\n' "${1//__SID__/$sid}"; }
+
+echo_user() {
+  [ -n "$replay" ] || return 0
+  printf '%s,"session_id":"%s","uuid":"%s"}\n' "${1%\}}" "$sid" "$(cat /proc/sys/kernel/random/uuid)"
+}
+
+stopped() {
+  emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$1\",\"response\":{\"still_queued\":[]}}}"
+  emit '{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SID__"}'
+}
+
+refused() {
+  emit '{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_fake_deny","type":"message","role":"assistant","content":[]}},"session_id":"__SID__"}'
+  emit '{"type":"assistant","message":{"id":"msg_fake_deny","type":"message","role":"assistant","content":[{"type":"text","text":"OK, I won'"'"'t do that. What would you like instead?"}]},"session_id":"__SID__"}'
+  emit '{"type":"result","subtype":"success","is_error":false,"session_id":"__SID__"}'
+}
+
+request_id() { local r=${1#*\"request_id\":\"}; printf '%s' "${r%%\"*}"; }
+
+# One recorded turn. Returns when it ends, however it ends.
+play() {
+  local want=$1 turn delay kind line msg id
+  while IFS=$'\t' read -r -u 3 turn delay kind line; do
+    [ "$turn" = "$want" ] || continue
+    if read -r -t "$delay" msg; then
+      case "$msg" in
+        *'"subtype":"interrupt"'*) stopped "$(request_id "$msg")"; return ;;
+        *'"type":"user"'*) echo_user "$msg" ;;
+      esac
+    fi
+    emit "$line"
+    if [ "$kind" = ask ]; then
+      id=$(request_id "$line")
+      while read -r msg; do
+        case "$msg" in
+          *'"subtype":"interrupt"'*) stopped "$(request_id "$msg")"; return ;;
+          *"\"request_id\":\"$id\""*'"behavior":"deny"'*) refused; return ;;
+          *"\"request_id\":\"$id\""*) break ;;
+        esac
+      done
+    fi
+  done 3< "$rec"
+}
+
+while read -r msg; do
+  case "$msg" in
+    *'"type":"user"'*)
+      echo_user "$msg"
+      play $(( played % turns ))
+      played=$(( played + 1 )) ;;
+  esac
+done

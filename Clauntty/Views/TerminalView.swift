@@ -325,7 +325,12 @@ struct TerminalView: View {
         session.tapTerminal = { [weak surface] point in surface?.windowTap(at: point) }
         session.holdTerminal = { [weak surface] point in surface?.windowHold(at: point) }
         session.clearSelection = { [weak surface] in surface?.clearWindowSelection() }
-        session.showKeyboard = { [weak surface] in surface?.showSoftwareKeyboard() }
+        // A chat pane types into the chat's own box, not the terminal under it
+        session.showKeyboard = { [weak surface, weak session] in
+            if let chat = session?.chat, !chat.ended { chat.focusRequest += 1 } else { surface?.showSoftwareKeyboard() }
+        }
+        session.onChatModeChange = { [weak surface] on in surface?.givesKeyboardAway = on }
+        surface.givesKeyboardAway = session.isChatMode
         session.scrollTerminal = { [weak surface] dy in
             guard let surface else { return }
             let middle = CGPoint(x: surface.bounds.midX, y: surface.bounds.midY)

@@ -534,6 +534,26 @@ extension SessionManager {
         }
     }
 
+    /// A new tab running Claude in chat mode (`clauntty-chat`), in the folder of the pane
+    /// shown: Claude headless, drawn as a conversation rather than its TUI
+    func newChat(groupId: UUID) async {
+        guard let group = sessionGroups.first(where: { $0.id == groupId }),
+              let config = currentSession(of: group)?.connectionConfig else { return }
+        let folder = paneStates[group.activePaneId]?.cwd ?? "~"
+        let command = ["~/.clauntty/bin/clauntty-chat", "--session-id", UUID().uuidString.lowercased()]
+        do {
+            let created = try await withHost(config) { connection in
+                try await RtachDeployer(connection: connection)
+                    .workspaceCommand(["new", "--after", group.workspaceId, "--quiet", "--"] + command,
+                                      in: folder, as: WorkspaceCreated.self)
+            }
+            await refreshWorkspaces(for: config)
+            _ = showWorkspace(created.workspace)
+        } catch {
+            workspaceMessage = error.localizedDescription
+        }
+    }
+
     /// A new terminal tab on a host: a one-pane workspace in the home folder. Without
     /// rtach (no persistent sessions), a plain tab.
     @discardableResult
