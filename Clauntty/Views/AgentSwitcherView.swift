@@ -1242,27 +1242,23 @@ struct AgentSwitcherView: View {
         if let shown {
             actions = webActions(shown)
         } else {
+            // Everything that makes something new, behind one +: rarely more than one tap
+            var new: [WindowMenu.Item] = []
             if let workspace {
-                actions.append(.init(id: "split", title: "New Pane", icon: "rectangle.split.2x1") {
-                    Task { await sessionManager.performPaneAction(.split, groupId: workspace) }
-                })
-                actions.append(.init(id: "new", title: "New Tab", icon: "plus") {
+                new.append(.init(id: "new", title: "New Tab", icon: "plus.square") {
                     Task { await sessionManager.performPaneAction(.newWorkspace, groupId: workspace) }
                 })
-                actions.append(.init(id: "chat", title: "New Chat", icon: "bubble.left.and.text.bubble.right") {
+                new.append(.init(id: "chat", title: "New Chat", icon: "bubble.left") {
                     Task { await sessionManager.newChat(groupId: workspace) }
                 })
-            } else {
-                actions.append(.init(id: "new", title: "New Tab", icon: "plus", perform: onNewTab))
-            }
-            actions.append(.init(id: "ports", title: "Ports", icon: "globe") { onPorts(session) })
-            // Images closed in this window, to see again
-            if sessionManager.recentImages[tabId] != nil {
-                actions.append(.init(id: "images", title: "Images", icon: "photo.on.rectangle") {
-                    sessionManager.reopenImages(tabId)
-                    sessionManager.openImagesWindow = tabId
+                new.append(.init(id: "split", title: "Split Pane", icon: "rectangle.split.2x1") {
+                    Task { await sessionManager.performPaneAction(.split, groupId: workspace) }
                 })
+            } else {
+                new.append(.init(id: "new", title: "New Tab", icon: "plus.square", perform: onNewTab))
             }
+            new.append(.init(id: "ports", title: "Open Port…", icon: "globe") { onPorts(session) })
+            actions.append(.init(id: "add", title: "New", icon: "plus", children: new))
             actions.append(.init(id: "close", title: "Close", icon: "xmark", isDestructive: true) {
                 // Ends the pane shown; its window goes (or shows the next pane) right away
                 sessionManager.closeTab(session)
@@ -1293,7 +1289,29 @@ struct AgentSwitcherView: View {
                 }
             })
         }
-        return WindowMenu(caption: shown?.urlDisplayString, actions: actions, sections: sections)
+        // Images closed in this window, to see again: in the list with what else it has
+        if shown == nil, sessionManager.recentImages[tabId] != nil {
+            sections.append([.init(id: "images", title: "Images", icon: "photo.on.rectangle") {
+                sessionManager.reopenImages(tabId)
+                sessionManager.openImagesWindow = tabId
+            }])
+        }
+        // A Claude pane: Chat | Terminal, first in the row
+        var viewSwitch: WindowMenu.ViewSwitch?
+        var caption = shown?.urlDisplayString
+        if shown == nil, workspace != nil, let state = sessionManager.chatSwitch(for: session) {
+            let (isChat, ready): (Bool, Bool) = switch state {
+            case .toChat(let ready): (false, ready)
+            case .toTerminal(let ready): (true, ready)
+            }
+            viewSwitch = .init(isChat: isChat, isEnabled: ready) { chat in
+                Task {
+                    if chat { await sessionManager.openAsChat(session) } else { await sessionManager.openInTerminal(session) }
+                }
+            }
+            if !ready { caption = "Switches when Claude finishes" }
+        }
+        return WindowMenu(caption: caption, viewSwitch: viewSwitch, actions: actions, sections: sections)
     }
 
 }

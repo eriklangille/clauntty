@@ -127,7 +127,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.39.0"
+    static let expectedVersion = "2.40.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -536,6 +536,8 @@ awk '$0 == "{\"type\":\"clauntty_end\"}" { exit } { print; fflush() }' |
     --include-partial-messages --replay-user-messages --permission-prompt-tool stdio "$@"
 [ -n "$old" ] && stty "$old"
 printf '\n{"type":"clauntty_chat_ended"}\n'
+# The chat's JSON was never for reading: the terminal starts clean (screen and scrollback)
+printf '\033[H\033[2J\033[3J'
 """#
 
     // MARK: - Claude Code Settings
@@ -923,10 +925,14 @@ struct RemotePaneState: Codable, Equatable {
     let pushes: Bool?
     /// When the agent finished (unix ms), while it's done (rtach 2.33.0)
     let doneAt: Int64?
+    /// The agent's conversation (Claude Code's session id), to resume it in the chat view
+    /// (rtach 2.40.0)
+    let agentSession: String?
 
     private enum CodingKeys: String, CodingKey {
         case fg, cwd, title, agent, state, note, task, pushes
         case doneAt = "done_at"
+        case agentSession = "agent_session"
     }
 
     var hasAgent: Bool { agent != nil && agent != "none" }

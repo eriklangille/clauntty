@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// What a window's pill opens: an icon row of actions, then the workspace's panes, one
-/// section per tab (its web tabs last)
+/// What a window's pill opens: an icon row of actions (a Claude pane's Chat | Terminal
+/// first), then the workspace's panes, one section per tab (its web tabs last)
 struct WindowMenu {
     struct Item: Identifiable {
         let id: String
@@ -13,11 +13,22 @@ struct WindowMenu {
         var isOn = false
         var isDestructive = false
         var isDisabled = false
-        let perform: () -> Void
+        /// An action with children is a native menu of them (`+`: what's new)
+        var children: [Item] = []
+        var perform: () -> Void = {}
     }
 
-    /// Under the pill: a page's address
+    /// A Claude pane shown as its chat or its terminal
+    struct ViewSwitch {
+        let isChat: Bool
+        /// Not while Claude is in a turn or waiting on the user
+        let isEnabled: Bool
+        let choose: (_ chat: Bool) -> Void
+    }
+
+    /// Under the pill: a page's address, or why the view can't switch yet
     var caption: String? = nil
+    var viewSwitch: ViewSwitch? = nil
     let actions: [Item]
     var sections: [[Item]] = []
 }
@@ -260,9 +271,27 @@ struct MenuItems: View {
                     .padding(.trailing, 20)
                     .frame(height: Self.captionHeight)
             }
+            // The actions, then Close apart at the end. A page's actions (no Close) spread
+            // over the row.
             HStack(spacing: 0) {
-                ForEach(menu.actions) { item in
-                    actionButton(item)
+                if let view = menu.viewSwitch {
+                    ChatTerminalToggle(view: view) { chat in
+                        onChoose(.init(id: "view", title: chat ? "Chat" : "Terminal", icon: "") { view.choose(chat) })
+                    }
+                    .padding(.leading, 2)
+                    .padding(.trailing, 6)
+                }
+                let spread = menu.viewSwitch == nil && !menu.actions.contains { $0.isDestructive }
+                ForEach(menu.actions.filter { !$0.isDestructive }) { item in
+                    if spread {
+                        actionButton(item).frame(maxWidth: .infinity)
+                    } else {
+                        actionButton(item, circled: true).padding(.trailing, 6)
+                    }
+                }
+                if !spread { Spacer(minLength: 0) }
+                ForEach(menu.actions.filter(\.isDestructive)) { item in
+                    actionButton(item, circled: true).padding(.trailing, 8)
                 }
             }
             .padding(.horizontal, 10)
@@ -303,15 +332,90 @@ struct MenuItems: View {
             .padding(.horizontal, 20)
     }
 
-    private func actionButton(_ item: WindowMenu.Item) -> some View {
-        Button { onChoose(item) } label: {
-            Image(systemName: item.icon)
+    /// An icon, or (`circled`, beside Chat | Terminal and Close) an icon on a circle the
+    /// toggle's height, in its fill and edge
+    @ViewBuilder
+    private func actionIcon(_ item: WindowMenu.Item, circled: Bool) -> some View {
+        let icon = Image(systemName: item.icon)
+            .foregroundStyle(item.isDestructive ? Color.red : Color.primary)
+        if circled {
+            icon
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Color.primary.opacity(0.08)))
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.06), lineWidth: 1))
+                .frame(minHeight: Self.actionsHeight - 8)
+                .contentShape(Circle())
+        } else {
+            icon
                 .font(.system(size: 19, weight: .regular))
-                .foregroundStyle(item.isDestructive ? Color.red : Color.primary)
                 .frame(maxWidth: .infinity, minHeight: Self.actionsHeight - 8)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(MenuRowStyle(highlighted: highlighted == item.id, cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private func actionButton(_ item: WindowMenu.Item, circled: Bool = false) -> some View {
+        if !item.children.isEmpty, circled, #available(iOS 26.0, *) {
+            // A system glass button: its menu grows out of it (Liquid Glass's morph)
+            Menu {
+                ForEach(item.children) { child in
+                    Button { onChoose(child) } label: { SwiftUI.Label(child.title, systemImage: child.icon) }
+                        .disabled(child.isDisabled)
+                }
+            } label: {
+                Image(systemName: item.icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 22, height: 22)
+            }
+            .menuOrder(.fixed)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .frame(minHeight: Self.actionsHeight - 8)
+            .accessibilityLabel(item.title)
+        } else if !item.children.isEmpty {
+            Menu {
+                ForEach(item.children) { child in
+                    Button { onChoose(child) } label: { SwiftUI.Label(child.title, systemImage: child.icon) }
+                        .disabled(child.isDisabled)
+                }
+            } label: {
+                actionIcon(item, circled: circled)
+            }
+            .menuOrder(.fixed)
+            .accessibilityLabel(item.title)
+        } else {
+            plainActionButton(item, circled: circled)
+        }
+    }
+
+    @ViewBuilder
+    private func plainActionButton(_ item: WindowMenu.Item, circled: Bool) -> some View {
+        if circled, #available(iOS 26.0, *) {
+            // A system glass button, as + is
+            Button { onChoose(item) } label: {
+                Image(systemName: item.icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(item.isDestructive ? Color.red : Color.primary)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .frame(minHeight: Self.actionsHeight - 8)
+            .disabled(item.isDisabled)
+            .opacity(item.isDisabled ? 0.35 : 1)
+            .accessibilityLabel(item.title)
+            .background(frameReader(item))
+        } else {
+            flatActionButton(item, circled: circled)
+        }
+    }
+
+    private func flatActionButton(_ item: WindowMenu.Item, circled: Bool) -> some View {
+        Button { onChoose(item) } label: {
+            actionIcon(item, circled: circled)
+        }
+        .buttonStyle(MenuRowStyle(highlighted: highlighted == item.id, cornerRadius: circled ? 18 : 14))
         .disabled(item.isDisabled)
         .opacity(item.isDisabled ? 0.35 : 1)
         .accessibilityLabel(item.title)
@@ -363,6 +467,68 @@ struct MenuItems: View {
         GeometryReader { g in
             Color.clear.preference(key: RowFrames.self,
                                    value: item.isDisabled ? [:] : [item.id: g.frame(in: .named(menuSpace))])
+        }
+    }
+}
+
+/// Chat | Terminal: two words on a dark capsule, the one showing on a darker one inside it
+/// that slides across when the other is picked
+private struct ChatTerminalToggle: View {
+    let view: WindowMenu.ViewSwitch
+    let choose: (_ chat: Bool) -> Void
+    @State private var picked: Bool?
+    @Namespace private var thumb
+
+    var body: some View {
+        let isChat = picked ?? view.isChat
+        HStack(spacing: 0) {
+            option("Chat", on: isChat) { pick(true) }
+            option("Terminal", on: !isChat) { pick(false) }
+        }
+        .padding(3)
+        .modifier(ToggleTrack())
+        .opacity(view.isEnabled ? 1 : 0.4)
+        .allowsHitTesting(view.isEnabled)
+    }
+
+    private func option(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.primary.opacity(on ? 1 : 0.7))
+                .padding(.horizontal, 13)
+                .frame(height: 30)
+                .background {
+                    if on {
+                        Capsule()
+                            .fill(Color.black.opacity(0.55))
+                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.07), lineWidth: 1))
+                            .matchedGeometryEffect(id: "thumb", in: thumb)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// The thumb slides over first; then the menu closes and the pane switches
+    private func pick(_ chat: Bool) {
+        guard chat != (picked ?? view.isChat) else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { picked = chat }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) { choose(chat) }
+    }
+}
+
+/// The toggle's capsule: glass, as the glass buttons beside it, where the system has it
+private struct ToggleTrack: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content
+                .background(Capsule().fill(Color.primary.opacity(0.08)))
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.06), lineWidth: 1))
         }
     }
 }

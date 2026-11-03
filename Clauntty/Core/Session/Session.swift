@@ -308,12 +308,33 @@ class Session: ObservableObject, Identifiable {
         chat = ChatSession(session: self, sessionId: saved.isEmpty ? nil : saved)
     }
 
-    /// The output says this is a chat pane
-    private func noticeChat(in data: Data) {
-        guard chat == nil, data.range(of: Self.chatMarker) != nil else { return }
-        chat = ChatSession(session: self)
-        chatSessionIdChanged(nil)
-        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): chat mode")
+    /// The pane's output, in order, to its chats: a chat starts at the launcher's marker and
+    /// runs until the launcher's end, and what follows can hold the next one. In order,
+    /// because a replay after reconnecting can have several (a pane switched to the terminal
+    /// and back): the last one in it is what's running.
+    private func feedChat(_ data: Data) {
+        var rest = data
+        while !rest.isEmpty {
+            if chat == nil {
+                guard let marker = rest.range(of: Self.chatMarker) else { return }
+                chat = ChatSession(session: self)
+                chatSessionIdChanged(nil)
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): chat mode")
+                rest = rest.subdata(in: marker.lowerBound..<rest.endIndex)
+            }
+            guard let chat, let after = chat.ingest(rest) else { return }
+            rest = after
+        }
+    }
+
+    /// The chat launcher exited: the pane is a terminal again, and forgets it was a chat
+    /// (else a relaunch would draw whatever runs there next as an empty chat). Only the
+    /// launcher's marker makes it one again.
+    func chatDidEnd() {
+        if let rtachSessionId {
+            UserDefaults.standard.removeObject(forKey: Self.chatKey(connectionId: connectionConfig.id, rtachSessionId: rtachSessionId))
+        }
+        chat = nil
     }
 
     /// Remembers the pane as a chat, with its Claude conversation's id once known
@@ -938,8 +959,7 @@ class Session: ObservableObject, Identifiable {
         }
 
         // A chat pane's events, for the chat drawn over the terminal
-        noticeChat(in: data)
-        chat?.ingest(data)
+        feedChat(data)
 
         // Forward to terminal
         onDataReceived?(data)

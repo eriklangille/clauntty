@@ -111,15 +111,24 @@ final class ChatSession: ObservableObject {
 
     /// The pane's output: whole lines are events, anything else (the shell's prompt, the
     /// typed command, a partial line from a replay that started mid-line) is skipped
-    func ingest(_ data: Data) {
+    /// The pane's output, line by line. When the launcher's end comes, the rest isn't the
+    /// chat's: it's returned (the terminal's again, maybe with the next chat's start in it).
+    @discardableResult
+    func ingest(_ data: Data) -> Data? {
         lineBuffer.append(data)
         while let newline = lineBuffer.firstIndex(of: 0x0A) {
             let line = lineBuffer[lineBuffer.startIndex..<newline]
             lineBuffer.removeSubrange(lineBuffer.startIndex...newline)
             handleLine(Data(line))
+            if ended {
+                let rest = Data(lineBuffer)
+                lineBuffer.removeAll()
+                return rest
+            }
         }
         // A line this long without an end isn't ours
         if lineBuffer.count > 8_000_000 { lineBuffer.removeAll() }
+        return nil
     }
 
     /// rtach is about to replay the pane's recent output: it builds the live part again
@@ -153,6 +162,7 @@ final class ChatSession: ObservableObject {
             working = false
             thinking = false
             pending = nil
+            session?.chatDidEnd()
         case "system":
             system(object)
         case "stream_event":

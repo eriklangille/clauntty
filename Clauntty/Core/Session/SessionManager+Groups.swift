@@ -554,6 +554,68 @@ extension SessionManager {
         }
     }
 
+    /// What a window's menu offers for its Claude: the chat view for Claude in the terminal
+    /// (once rtach knows its conversation), the terminal for a chat. Not ready while Claude
+    /// is in a turn or waiting on the user: leaving would cut it off.
+    enum ChatSwitch: Equatable {
+        case toChat(ready: Bool)
+        case toTerminal(ready: Bool)
+    }
+
+    func chatSwitch(for session: Session) -> ChatSwitch? {
+        if let chat = session.chat, !chat.ended {
+            guard chat.sessionId != nil else { return nil }
+            return .toTerminal(ready: !chat.working && chat.pending == nil)
+        }
+        guard let pane = session.rtachSessionId, let state = paneStates[pane],
+              state.agent == "claude", state.agentSession != nil else { return nil }
+        return .toChat(ready: state.state == "idle" || state.state == "done")
+    }
+
+    /// Claude in the pane's terminal, as a chat: it exits (`/exit`, the line cleared first
+    /// in case something's typed), and at the shell's prompt the chat launcher resumes the
+    /// same conversation, its history from the transcript
+    func openAsChat(_ session: Session) async {
+        guard let pane = session.rtachSessionId, let id = paneStates[pane]?.agentSession else { return }
+        session.sendData(Data([0x15]))
+        session.sendData(Data("/exit".utf8))
+        try? await Task.sleep(for: .milliseconds(150))
+        session.sendData(Data("\r".utf8))
+        // Its SessionEnd hook says it's gone (or the shell's back in front)
+        let gone = await waitFor(seconds: 10) {
+            guard let state = self.paneStates[pane] else { return false }
+            return !state.hasAgent || (state.fg != nil && state.fg != "claude")
+        }
+        guard gone else {
+            workspaceMessage = "Claude didn't exit, so the chat didn't open"
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        session.sendData(Data("~/.clauntty/bin/clauntty-chat --resume \(id)\r".utf8))
+    }
+
+    /// A chat back in the pane's terminal: the chat ends, and at the shell's prompt Claude's
+    /// own interface resumes the conversation
+    func openInTerminal(_ session: Session) async {
+        guard let chat = session.chat, let id = chat.sessionId else { return }
+        chat.end()
+        guard await waitFor(seconds: 10, { session.chat == nil }) else {
+            workspaceMessage = "The chat didn't end, so Claude didn't open in the terminal"
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        session.sendData(Data("claude --resume \(id)\r".utf8))
+    }
+
+    private func waitFor(seconds: Double, _ condition: @escaping () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        return condition()
+    }
+
     /// A new terminal tab on a host: a one-pane workspace in the home folder. Without
     /// rtach (no persistent sessions), a plain tab.
     @discardableResult

@@ -7,15 +7,35 @@
 # chat view can be built without a Claude login or usage.
 here=$(dirname "$(readlink -f "$0")")
 rec="$here/recording.tsv"
-sid="" replay=""
+sid="" replay="" headless=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --session-id|--resume) sid=$2; shift ;;
     --replay-user-messages) replay=1 ;;
+    -p|--print) headless=1 ;;
   esac
   shift
 done
 [ -n "$sid" ] || sid=$(cat /proc/sys/kernel/random/uuid)
+
+# Without -p it's Claude's own interface, in the terminal: a stand-in that tells rtach what
+# Claude's hooks would (the conversation's id, idle, working, done, the end) and leaves on
+# /exit, for trying the switch between the terminal and the chat view
+if [ -z "$headless" ]; then
+  hook() { printf '{"session_id":"%s"}' "$sid" | ~/.clauntty/bin/clauntty agent-state "$1" 2>/dev/null; }
+  printf '\033]0;\342\234\263 Claude Code\007'
+  printf 'Claude Code (stand-in) \302\267 conversation %s\nType /exit to leave.\n\n> ' "$sid"
+  hook idle
+  while IFS= read -r line; do
+    case "$line" in
+      /exit) break ;;
+      *) hook working; sleep 1; printf 'You said: %s\n\n' "$line"; hook done ;;
+    esac
+    printf '> '
+  done
+  hook end
+  exit 0
+fi
 turns=$(( $(cut -f1 "$rec" | sort -n | tail -n 1) + 1 ))
 played=${CHAT_FAKE_TURN:-0}  # the turn to start at, for trying one
 
