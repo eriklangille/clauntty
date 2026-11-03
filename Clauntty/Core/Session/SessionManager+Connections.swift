@@ -143,6 +143,17 @@ extension SessionManager {
                 session.onNeedsReconnect?()
             }
         }
+        reconnectLostForwards()
+    }
+
+    /// Web tabs whose forward went with its SSH connection go back to closed: the one on
+    /// screen forwards again on the host's next connection, the rest when they're shown
+    /// (`reconnectIfNeeded`). Their pages load again where they were.
+    func reconnectLostForwards() {
+        for webTab in webTabs where webTab.forwardingLost {
+            Logger.clauntty.debugOnly("SessionManager: forward for port \(webTab.remotePort.port) is gone, reconnecting when shown")
+            webTab.state = .closed
+        }
     }
 
     /// Close every connection without waiting for each to time out. After the device left
@@ -182,6 +193,7 @@ extension SessionManager {
     /// device sleeps), so the active tab reconnects if it lost its channel, and otherwise
     /// every connection is checked before typing goes into one.
     func cameBack(reason: String) {
+        reconnectLostForwards()
         if let active = activeSession {
             if active.needsReconnect {
                 Logger.clauntty.debugOnly("SessionManager: reconnecting active session on \(reason) (state=\(active.stateDescription))")

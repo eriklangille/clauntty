@@ -949,9 +949,9 @@ class SessionManager: ObservableObject {
         }
         activeTab = .web(webTab.id)
 
-        // If the web tab is closed/disconnected, reconnect
-        if webTab.state == .closed {
-            Logger.clauntty.debugOnly("SessionManager: web tab is closed, reconnecting...")
+        // Restored and not connected yet, or its forward went with a connection: reconnect
+        if webTab.state == .closed || webTab.forwardingLost {
+            Logger.clauntty.debugOnly("SessionManager: web tab is closed or its forward is gone, reconnecting...")
             Task {
                 do {
                     try await reconnectWebTab(webTab)
@@ -965,21 +965,39 @@ class SessionManager: ObservableObject {
     }
 
     /// Reconnect a web tab (establish SSH connection and start port forwarding)
-    /// A restored web tab reconnects when it's shown (in tabs, when switched to; in agent
-    /// mode, when its window or pane is on screen)
-    func reconnectIfClosed(_ webTab: WebTab) async {
-        guard webTab.state == .closed else { return }
-        try? await reconnectWebTab(webTab)
+    /// A web tab reconnects when it's shown (when switched to; in agent mode, when its
+    /// window or pane is on screen, and when it goes back to closed there): a restored one,
+    /// one whose page couldn't reach its port, and one whose forward went with the SSH
+    /// connection it was on (the app was away and connected again).
+    func reconnectIfNeeded(_ webTab: WebTab) async {
+        guard webTab.state == .closed || webTab.forwardingLost else { return }
+        do {
+            try await reconnectWebTab(webTab)
+        } catch {
+            // Couldn't reach the host: Retry, not a spinner forever
+            if webTab.state == .closed || webTab.state == .connecting {
+                webTab.state = .error(error.localizedDescription)
+            }
+        }
     }
 
     func reconnectWebTab(_ webTab: WebTab) async throws {
         let config = webTab.connectionConfig
 
+        // The window, the page and a switch can all ask at once: one reconnect, the rest
+        // wait for it (two would both bind the port)
+        if let pending = webTab.reconnecting {
+            return try await pending.value
+        }
         Logger.clauntty.debugOnly("SessionManager: reconnecting web tab for port \(webTab.remotePort.port)")
-        let connection = try await hostConnection(for: config)
-
-        // Reconnect the web tab with this connection
-        try await webTab.reconnect(with: connection)
+        let reconnecting = Task { @MainActor in
+            defer { webTab.reconnecting = nil }
+            let connection = try await hostConnection(for: config)
+            // Reconnect the web tab with this connection
+            try await webTab.reconnect(with: connection)
+        }
+        webTab.reconnecting = reconnecting
+        try await reconnecting.value
 
         Logger.clauntty.debugOnly("SessionManager: web tab reconnected successfully")
     }
@@ -1226,6 +1244,7 @@ class SessionManager: ObservableObject {
                 // to the path if there is one, else stays where it is. Not switched to.
                 if let existing = webTabs(on: config).first(where: { $0.remotePort.port == port }) {
                     Logger.clauntty.debugOnly("SessionManager: web tab for port \(port) already exists")
+                    if existing.forwardingLost { try? await reconnectWebTab(existing) }
                     if let path { existing.show(path) }
                     return
                 }

@@ -1559,7 +1559,7 @@ struct SwitcherWindow: View {
                 }
                 .opacity(isCard ? 0 : 1)
                 .transition(.opacity)
-                .task(id: web.id) { await sessionManager.reconnectIfClosed(web) }
+                .task(id: web.id) { await sessionManager.reconnectIfNeeded(web) }
             }
             if web == nil, !isFullscreen, !isCard, let notice, let icon = notice.icon {
                 // Covers the empty terminal (its own overlays are centered in the whole
@@ -1909,7 +1909,7 @@ struct WebWindow: View {
         .offset(y: pullDown)
         // A restored tab reconnects when it's shown (in tabs, when switched to): here
         // it's on screen
-        .task(id: webTab.id) { await sessionManager.reconnectIfClosed(webTab) }
+        .task(id: webTab.id) { await sessionManager.reconnectIfNeeded(webTab) }
     }
 
     private var header: some View {

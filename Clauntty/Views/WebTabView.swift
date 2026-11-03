@@ -46,7 +46,7 @@ struct WebTabView: View {
                         .multilineTextAlignment(.center)
                     Button("Retry") {
                         Task {
-                            try? await webTab.startForwarding()
+                            try? await sessionManager.reconnectWebTab(webTab)
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -56,12 +56,19 @@ struct WebTabView: View {
                 .background(Color(.systemBackground))
 
             case .closed:
-                Text("Tab closed")
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemBackground))
+                // Shown, it reconnects (below)
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("Reconnecting to port \(String(webTab.remotePort.port))...")
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemBackground))
             }
         }
+        // On screen: reconnects when shown, and again whenever it goes back to closed (its
+        // page couldn't reach the port, `WebTab.loadFailed`)
+        .task(id: webTab.state == .closed) { await sessionManager.reconnectIfNeeded(webTab) }
         .onAppear {
             // Hide all terminal accessory bars when web tab appears
             if isActive {
@@ -198,7 +205,7 @@ struct WebViewContainer: UIViewRepresentable {
                 webTab.isLoading = false
                 // Don't show error for cancelled requests
                 if (error as NSError).code != NSURLErrorCancelled {
-                    webTab.state = .error(error.localizedDescription)
+                    webTab.loadFailed(error)
                 }
             }
         }

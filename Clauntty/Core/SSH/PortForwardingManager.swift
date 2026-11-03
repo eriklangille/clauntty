@@ -17,6 +17,13 @@ class PortForwardingManager {
     /// Whether the forwarder is currently running
     private(set) var isRunning = false
 
+    /// Still forwarding: its listener open and the SSH connection it tunnels through alive.
+    /// Both can go while the app is away (a reconnect makes a new connection; iOS can take
+    /// a suspended app's listening sockets back).
+    var isAlive: Bool {
+        isRunning && serverChannel?.isActive == true && sshChannel.isActive
+    }
+
     init(
         localPort: Int,
         remoteHost: String = "127.0.0.1",
@@ -79,9 +86,13 @@ class PortForwardingManager {
         }
 
         Logger.clauntty.debugOnly("PortForwarding: stopping on port \(self.localPort)")
-        try await server.close().get()
         serverChannel = nil
         isRunning = false
+        do {
+            try await server.close().get()
+        } catch ChannelError.alreadyClosed {
+            // The listener had already gone (taken back while the app was suspended)
+        }
     }
 
     /// Set up forwarding for an incoming connection

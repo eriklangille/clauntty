@@ -229,11 +229,11 @@ struct ContentView: View {
               }
 
             case .port(let portNum):
-              // Port forward - create web tab
+              // Port forward: its web tab (the one restored from last launch, if any)
               Logger.clauntty.debugOnly("Auto-connect: forwarding port \(portNum)")
               let remotePort = RemotePort(
                 id: portNum, port: portNum, process: nil, address: "127.0.0.1")
-              _ = try await sessionManager.createWebTab(for: remotePort, config: connection)
+              _ = try await sessionManager.openPortInTab(remotePort, config: connection)
             }
           }
         } else {

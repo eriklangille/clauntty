@@ -6,6 +6,7 @@ import WebKit
 /// window, as a pane's title bar is.
 struct WebPane: View {
     @EnvironmentObject private var window: WindowState
+    @EnvironmentObject private var sessionManager: SessionManager
     @ObservedObject var webTab: WebTab
 
     var body: some View {
@@ -20,7 +21,7 @@ struct WebPane: View {
             case .error(let error):
                 VStack(spacing: 12) {
                     message(error)
-                    Button("Retry") { Task { try? await webTab.startForwarding() } }
+                    Button("Retry") { Task { try? await sessionManager.reconnectWebTab(webTab) } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .closed:
@@ -29,6 +30,8 @@ struct WebPane: View {
         }
         // Here, where it's observed: it changes as pages load
         .navigationTitle(webTab.title)
+        // Shown, and back to closed (its page couldn't reach the port): forward it again
+        .task(id: webTab.state == .closed) { await sessionManager.reconnectIfNeeded(webTab) }
     }
 
     private var bar: some View {
@@ -204,7 +207,7 @@ private struct WebViewContainer: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             guard (error as NSError).code != NSURLErrorCancelled else { return }
-            Task { @MainActor in webTab.state = .error(error.localizedDescription) }
+            Task { @MainActor in webTab.loadFailed(error) }
         }
     }
 }

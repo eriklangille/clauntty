@@ -192,7 +192,37 @@ class WebTab: ObservableObject, Identifiable {
 
     // MARK: - Port Forwarding
 
-    /// Start port forwarding for this tab
+    /// Its forward has gone (the SSH connection it went through closed, or its listener
+    /// did), so the page can't load until it's made again on the host's connection now
+    var forwardingLost: Bool {
+        guard state == .connected, !connectionConfig.isLocal else { return false }
+        return !(portForwarder?.isAlive ?? false) || sshConnection?.isConnected != true
+    }
+
+    /// A reconnect under way (`SessionManager.reconnectWebTab`)
+    var reconnecting: Task<Void, Error>?
+
+    /// When the page last failed to reach its port and got its forward made again
+    private var lastLoadRecovery: Date?
+
+    /// The page couldn't reach its port. If the forward may be stale, go back to closed so
+    /// the tab reconnects (it's on screen: `reconnectIfNeeded`) and the page loads again
+    /// where it was. Only once in a while: a server that's down shows the error.
+    func loadFailed(_ error: Error) {
+        let code = (error as NSError).code
+        let unreachable = [NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost,
+                           NSURLErrorTimedOut, NSURLErrorNotConnectedToInternet].contains(code)
+        if unreachable, !connectionConfig.isLocal,
+           lastLoadRecovery.map({ Date().timeIntervalSince($0) > 15 }) ?? true {
+            Logger.clauntty.debugOnly("WebTab: port \(self.remotePort.port) unreachable (\(code)), forwarding again")
+            lastLoadRecovery = Date()
+            state = .closed
+            return
+        }
+        state = .error(error.localizedDescription)
+    }
+
+    /// Start port forwarding for this tab, replacing a forward it already has
     func startForwarding() async throws {
         // This Mac's ports are already here
         if connectionConfig.isLocal {
@@ -200,6 +230,8 @@ class WebTab: ObservableObject, Identifiable {
             state = .connected
             return
         }
+        // The old one still holds the local port
+        await stopForwarding()
         guard let connection = sshConnection else {
             Logger.clauntty.error("WebTab: no SSH connection")
             state = .error("SSH connection not available")
@@ -239,17 +271,19 @@ class WebTab: ObservableObject, Identifiable {
     /// Stop port forwarding and close the tab
     func close() async {
         Logger.clauntty.debugOnly("WebTab: closing port \(self.remotePort.port)")
-
-        if let forwarder = portForwarder {
-            do {
-                try await forwarder.stop()
-            } catch {
-                Logger.clauntty.error("WebTab: error stopping forwarder: \(error)")
-            }
-        }
-
-        portForwarder = nil
+        await stopForwarding()
         state = .closed
+    }
+
+    /// Let go of the local port
+    private func stopForwarding() async {
+        guard let forwarder = portForwarder else { return }
+        portForwarder = nil
+        do {
+            try await forwarder.stop()
+        } catch {
+            Logger.clauntty.error("WebTab: error stopping forwarder: \(error)")
+        }
     }
 
     /// Reconnect and restart port forwarding (used when restoring persisted tabs)
