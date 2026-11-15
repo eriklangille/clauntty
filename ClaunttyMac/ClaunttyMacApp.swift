@@ -148,6 +148,10 @@ struct PaneCommands: Commands {
             Button("New Workspace") { newWorkspace() }
                 .keyboardShortcut("t")
                 .disabled(activeConnection == nil)
+            // Claude drawn as a conversation, in the folder of the pane you're in
+            Button("New Chat") { activeGroup.map { group in Task { await sessionManager.newChat(groupId: group.id) } } }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+                .disabled(activeGroup == nil)
             Button("Split Right") { split(.split) }
                 .keyboardShortcut("d")
                 .disabled(activeGroup == nil)
@@ -161,6 +165,10 @@ struct PaneCommands: Commands {
                 .keyboardShortcut(.return, modifiers: [.command, .shift])
                 .disabled(activeGroup.map { $0.shownLayout.paneIds.count < 2 } ?? true)
             // As a browser reopens a closed tab
+            // A Claude pane: the chat view or Claude's own terminal interface (the title bar's toggle)
+            Button("Switch Between Chat and Terminal") { switchChat() }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+                .disabled(activeGroup == nil)
             Button("Reopen Images") { activeGroup.map { sessionManager.reopenImages($0.id) } }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(activeGroup.map { sessionManager.recentImages[$0.id] == nil } ?? true)
@@ -205,6 +213,16 @@ struct PaneCommands: Commands {
     private func split(_ action: PaneAction) {
         guard let group = activeGroup else { return }
         Task { await sessionManager.performPaneAction(action, groupId: group.id) }
+    }
+
+    private func switchChat() {
+        guard let session = sessionManager.activeSession else { return }
+        switch sessionManager.chatSwitch(for: session) {
+        case .toChat(true): Task { await sessionManager.openAsChat(session) }
+        case .toTerminal(true): Task { await sessionManager.openInTerminal(session) }
+        case .toChat(false), .toTerminal(false): sessionManager.workspaceMessage = "Switches when Claude finishes"
+        case nil: break
+        }
     }
 
     private func newWorkspace() {

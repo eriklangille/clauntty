@@ -326,7 +326,8 @@ struct TerminalStatusOverlay: View {
             } else if let stuck = session.notRespondingMessage {
                 // The pane is blank until it draws: why, and that it's not the app
                 pill("\(stuck.title) · \(stuck.detail)", action: nil)
-            } else if session.inUseElsewhere {
+            } else if session.inUseElsewhere, session.chat?.ended ?? true {
+                // (Not over a chat: whose size the PTY has doesn't matter to it)
                 pill("In use on another device · Click to use here") { session.claimActive() }
             }
         }

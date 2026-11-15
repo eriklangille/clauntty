@@ -327,6 +327,36 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
+    /// The program rtach says runs in the pane, which every device attached to it hears.
+    /// The launcher's marker can be out of reach: another device started the chat before
+    /// this one attached, and rtach replays only the recent output. Its program is
+    /// `clauntty-chat` all the same, so the pane is a chat, drawn from the output kept here
+    /// and Claude's transcript. And a chat remembered here that ended out of sight (its end
+    /// not in the replay either) has something else running: it's a terminal again.
+    func paneProgramChanged(_ program: String?, agentSession: String?) {
+        guard let program else { return }
+        if program == ChatSession.launcher {
+            launcherSeen = true
+            guard chat == nil else { return }
+            let chat = ChatSession(session: self, sessionId: agentSession)
+            self.chat = chat
+            chatSessionIdChanged(agentSession)
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): chat mode, from the pane's program")
+            if let rest = chat.ingest(scrollbackBuffer) { feedChat(rest) }
+            if self.chat === chat, agentSession != nil { Task { await chat.loadHistory() } }
+        } else if launcherSeen, let chat, !chat.ended, Date().timeIntervalSince(chat.startedAt) > 5 {
+            // Only once rtach has named the launcher in this pane: rtach before 2.40.2 called
+            // it its interpreter on macOS ("bash"), and a restart ended every chat on a Mac
+            // host, leaving Claude's JSON in a terminal that couldn't be typed in. (Not one
+            // that just started: its marker can come before rtach's next look at the pane.)
+            launcherSeen = false
+            chatDidEnd()
+        }
+    }
+
+    /// rtach has said this pane runs the chat launcher (since this session object was made)
+    private var launcherSeen = false
+
     /// The chat launcher exited: the pane is a terminal again, and forgets it was a chat
     /// (else a relaunch would draw whatever runs there next as an empty chat). Only the
     /// launcher's marker makes it one again.
@@ -1171,20 +1201,21 @@ class Session: ObservableObject, Identifiable {
     /// Upload an image to the remote server for pasting (e.g., into Claude Code)
     /// - Returns: The image's path on the remote host, or nil if the upload failed
     func uploadImage(_ image: PlatformImage) async -> String? {
-        guard let connection = sshConnection else {
-            Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): cannot upload image, no SSH connection")
-            return nil
-        }
-
-        // Convert image to PNG data
         guard let imageData = image.platformPNGData() else {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): failed to convert image to PNG")
             return nil
         }
+        return await uploadPaste(imageData, ext: "png")
+    }
 
-        // Generate unique filename
-        let filename = "clauntty-paste-\(UUID().uuidString.prefix(8)).png"
-        let remotePath = "/tmp/\(filename)"
+    /// Upload an encoded image to `/tmp/clauntty-paste-<id>.<ext>` on the remote host
+    /// - Returns: Its path there, or nil if the upload failed
+    func uploadPaste(_ imageData: Data, ext: String) async -> String? {
+        guard let connection = sshConnection else {
+            Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): cannot upload image, no SSH connection")
+            return nil
+        }
+        let remotePath = "/tmp/clauntty-paste-\(UUID().uuidString.prefix(8)).\(ext)"
 
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): uploading image (\(imageData.count) bytes) to \(remotePath)")
 
@@ -1220,7 +1251,10 @@ class Session: ObservableObject, Identifiable {
     func runRemoteScript(_ script: String) async throws -> String {
         guard let connection = sshConnection else { throw SessionError.notConnected }
         let encoded = Data(script.utf8).base64EncodedString()
-        return try await connection.executeCommand("echo \(encoded) | base64 -d | sh")
+        // A broken character (output cut at a byte count) costs that character, not the
+        // whole output (`String(data:encoding:)` gave nil, so "")
+        let data = try await connection.executeCommandData("echo \(encoded) | base64 -d | sh")
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Reviews waiting on the host (`clauntty review`)

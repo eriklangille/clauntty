@@ -41,9 +41,13 @@ played=${CHAT_FAKE_TURN:-0}  # the turn to start at, for trying one
 
 emit() { printf '%s\n' "${1//__SID__/$sid}"; }
 
+# Claude's echo of a message, and the transcript line it writes (the app reads both)
 echo_user() {
+  local line
+  line=$(printf '%s,"session_id":"%s","uuid":"%s"}' "${1%\}}" "$sid" "$(cat /proc/sys/kernel/random/uuid)")
+  mkdir -p ~/.claude/projects/-fake && printf '%s\n' "$line" >> ~/.claude/projects/-fake/"$sid".jsonl
   [ -n "$replay" ] || return 0
-  printf '%s,"session_id":"%s","uuid":"%s"}\n' "${1%\}}" "$sid" "$(cat /proc/sys/kernel/random/uuid)"
+  printf '%s\n' "$line"
 }
 
 stopped() {
@@ -57,7 +61,18 @@ refused() {
   emit '{"type":"result","subtype":"success","is_error":false,"session_id":"__SID__"}'
 }
 
+# A permission mode change: answered as Claude does, with the new mode in a status event
+mode() {
+  local m=${1#*\"mode\":\"}; m=${m%%\"*}
+  emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$(request_id "$1")\",\"response\":{\"mode\":\"$m\"}}}"
+  emit "{\"type\":\"system\",\"subtype\":\"status\",\"status\":null,\"permissionMode\":\"$m\",\"session_id\":\"__SID__\"}"
+}
+
 request_id() { local r=${1#*\"request_id\":\"}; printf '%s' "${r%%\"*}"; }
+
+# Messages sent during a turn: Claude holds them until the turn ends (or is interrupted),
+# then echoes and answers each
+held=()
 
 # One recorded turn. Returns when it ends, however it ends.
 play() {
@@ -67,7 +82,9 @@ play() {
     if read -r -t "$delay" msg; then
       case "$msg" in
         *'"subtype":"interrupt"'*) stopped "$(request_id "$msg")"; return ;;
-        *'"type":"user"'*) echo_user "$msg" ;;
+        *'"subtype":"set_permission_mode"'*) mode "$msg" ;;
+        *'"subtype":"background_tasks"'*) emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$(request_id "$msg")\",\"response\":{}}}" ;;
+        *'"type":"user"'*) held+=("$msg") ;;
       esac
     fi
     emit "$line"
@@ -76,6 +93,7 @@ play() {
       while read -r msg; do
         case "$msg" in
           *'"subtype":"interrupt"'*) stopped "$(request_id "$msg")"; return ;;
+          *'"type":"user"'*) held+=("$msg") ;;
           *"\"request_id\":\"$id\""*'"behavior":"deny"'*) refused; return ;;
           *"\"request_id\":\"$id\""*) break ;;
         esac
@@ -86,9 +104,21 @@ play() {
 
 while read -r msg; do
   case "$msg" in
-    *'"type":"user"'*)
+    *'"subtype":"set_permission_mode"'*) mode "$msg" ;;
+    *'"content":"big"'*)
+      # A tool result as long as a big file read: rtach's replay after a reattach (its last
+      # 16KB) is then a fragment of it, as with real conversations
       echo_user "$msg"
-      play $(( played % turns ))
-      played=$(( played + 1 )) ;;
+      big=$(head -c 150000 /dev/zero | tr '\0' 'x')
+      emit "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_big\",\"content\":\"$big\"}]},\"session_id\":\"__SID__\"}"
+      emit '{"type":"result","subtype":"success","is_error":false,"session_id":"__SID__"}' ;;
+    *'"type":"user"'*)
+      held=("$msg")
+      while [ ${#held[@]} -gt 0 ]; do
+        msg=${held[0]}; held=("${held[@]:1}")
+        echo_user "$msg"
+        play $(( played % turns ))
+        played=$(( played + 1 ))
+      done ;;
   esac
 done

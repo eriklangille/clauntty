@@ -1,3 +1,5 @@
+import Combine
+import os
 import SwiftUI
 
 /// The tab the shown pane is in, its panes split as rtach keeps them, each under a
@@ -329,7 +331,7 @@ private struct PaneTile: View {
             }
             if let session = sessionManager.sessions.first(where: { $0.groupId == group.id && $0.pane?.paneId == paneId }) {
                 ZStack {
-                    TerminalContainer(session: session, views: views, focused: focused) {
+                    PaneContent(session: session, views: views, focused: focused) {
                         MainView.show(selection, sessionManager)
                     }
                     TerminalStatusOverlay(session: session) {
@@ -346,6 +348,29 @@ private struct PaneTile: View {
             }
         }
         .background(ThemeColors.background(ghostty.theme))
+    }
+}
+
+/// A pane's terminal, and over it, when the pane runs `clauntty-chat`, the conversation
+/// drawn natively (as on the phone). The terminal keeps running underneath; while the
+/// chat shows, the chat's box has the keyboard, not the terminal.
+private struct PaneContent: View {
+    @EnvironmentObject private var ghostty: MacGhosttyApp
+    @ObservedObject var session: Session
+    let views: TerminalViews
+    let focused: Bool
+    let onFocus: () -> Void
+
+    var body: some View {
+        let chat = session.chat.flatMap { $0.ended ? nil : $0 }
+        ZStack {
+            TerminalContainer(session: session, views: views, focused: focused && chat == nil, onFocus: onFocus)
+            if let chat {
+                ChatView(chat: chat, colors: ReviewColors.of(ghostty.theme), isActive: focused,
+                         type: ChatType(size: CGFloat(views.effectiveFontSize) + 1))
+                    .simultaneousGesture(TapGesture().onEnded { if !focused { onFocus() } })
+            }
+        }
     }
 }
 
@@ -415,6 +440,11 @@ struct PaneHeader: View {
                 }
             }
             Spacer(minLength: 8)
+            // A Claude pane: chat or terminal, always shown (it says which this is)
+            if let session = sessionManager.sessions.first(where: { $0.groupId == selection.groupId && $0.pane?.paneId == selection.paneId }) {
+                PaneChatSwitch(session: session)
+                    .padding(.trailing, 4)
+            }
             Group {
                 button("rectangle.split.2x1", help: "Split Right (⌘D)") { splitPane(.split) }
                 button("rectangle.split.1x2", help: "Split Down (⇧⌘D)") { splitPane(.splitDown) }
@@ -447,6 +477,82 @@ struct PaneHeader: View {
     private func splitPane(_ action: PaneAction) {
         MainView.show(selection, sessionManager)
         Task { await sessionManager.performPaneAction(action, groupId: selection.groupId) }
+    }
+}
+
+/// Chat | Terminal for a pane's Claude, in its title bar (on the phone it's in the window's
+/// menu): the chat view for Claude in the terminal, once rtach knows its conversation, and
+/// the terminal for a chat. Dimmed while Claude is in a turn or waiting on the user.
+private struct PaneChatSwitch: View {
+    @EnvironmentObject private var sessionManager: SessionManager
+    @ObservedObject var session: Session
+    /// The chat's working and waiting change what it offers
+    @State private var chatChanges = 0
+    /// Chosen, the switch takes a few seconds: the thumb stays where it was moved meanwhile
+    @State private var picked: Bool?
+    @Namespace private var thumb
+
+    var body: some View {
+        // Read, so the chat's changes redraw this
+        let _ = chatChanges
+        Group {
+            if let state = sessionManager.chatSwitch(for: session) {
+                let (isChat, ready): (Bool, Bool) = switch state {
+                case .toChat(let ready): (false, ready)
+                case .toTerminal(let ready): (true, ready)
+                }
+                let shown = picked ?? isChat
+                HStack(spacing: 0) {
+                    option("Chat", on: shown) { choose(true, from: isChat) }
+                    option("Terminal", on: !shown) { choose(false, from: isChat) }
+                }
+                .padding(2)
+                .background(Capsule().fill(Color.white.opacity(0.06)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 1))
+                .opacity(ready || picked != nil ? 1 : 0.45)
+                .allowsHitTesting(ready && picked == nil)
+                .help(ready ? "" : "Switches when Claude finishes")
+            }
+        }
+        .onReceive(session.chat?.objectWillChange.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()) { _ in
+            chatChanges &+= 1
+        }
+    }
+
+    private func option(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(on ? Color.primary : Color.secondary)
+                .padding(.horizontal, 8)
+                .frame(height: 18)
+                .background {
+                    if on {
+                        Capsule()
+                            .fill(Color.white.opacity(0.14))
+                            .matchedGeometryEffect(id: "thumb", in: thumb)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func choose(_ chat: Bool, from isChat: Bool) {
+        guard chat != isChat else { return }
+        Logger.clauntty.debugOnly("PaneChatSwitch: to \(chat ? "chat" : "terminal")")
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { picked = chat }
+        Task {
+            if chat { await sessionManager.openAsChat(session) } else { await sessionManager.openInTerminal(session) }
+            // The launcher's typed: until the pane is what was picked (or it gives up)
+            for _ in 0..<40 {
+                if case .toTerminal = sessionManager.chatSwitch(for: session), chat { break }
+                if !chat, session.chat == nil { break }
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            picked = nil
+        }
     }
 }
 

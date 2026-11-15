@@ -23,6 +23,21 @@ extension NSImage {
         return rep.representation(using: .png, properties: [:])
     }
 }
+
+extension NSPasteboard {
+    /// Images to paste: image files (copied in Finder), else an image with no text
+    /// (a screenshot copied to the clipboard). Nil when it's text.
+    func pastedImages() -> [NSImage]? {
+        let files = (readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let imageFiles = files.filter { (try? $0.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.conforms(to: .image) == true }
+        if !imageFiles.isEmpty {
+            let images = imageFiles.compactMap { NSImage(contentsOf: $0) }
+            return images.isEmpty ? nil : images
+        }
+        guard files.isEmpty, string(forType: .string) == nil, let image = NSImage(pasteboard: self) else { return nil }
+        return [image]
+    }
+}
 #endif
 
 /// App-level calls shared code makes, per platform.

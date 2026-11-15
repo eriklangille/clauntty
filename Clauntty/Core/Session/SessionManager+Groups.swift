@@ -75,6 +75,8 @@ extension SessionManager {
         session.pane = PaneRef(paneId: paneId, groupTitle: group.title)
         // A pane is an rtach session, named by its id
         session.rtachSessionId = paneId
+        // A chat (another device's, maybe), as its program says
+        if let state = paneStates[paneId] { session.paneProgramChanged(state.fg, agentSession: state.agentSession) }
         session.state = .disconnected
         session.onStateChange = { [weak self] in
             self?.sessionStateVersion += 1
@@ -540,7 +542,7 @@ extension SessionManager {
         guard let group = sessionGroups.first(where: { $0.id == groupId }),
               let config = currentSession(of: group)?.connectionConfig else { return }
         let folder = paneStates[group.activePaneId]?.cwd ?? "~"
-        let command = ["~/.clauntty/bin/clauntty-chat", "--session-id", UUID().uuidString.lowercased()]
+        let command = ["~/.clauntty/bin/clauntty-chat"] + Self.chatModeArgs + ["--session-id", UUID().uuidString.lowercased()]
         do {
             let created = try await withHost(config) { connection in
                 try await RtachDeployer(connection: connection)
@@ -591,7 +593,15 @@ extension SessionManager {
             return
         }
         try? await Task.sleep(for: .milliseconds(300))
-        session.sendData(Data("~/.clauntty/bin/clauntty-chat --resume \(id)\r".utf8))
+        let launch = (["~/.clauntty/bin/clauntty-chat"] + Self.chatModeArgs + ["--resume", id]).joined(separator: " ")
+        session.sendData(Data((launch + "\r").utf8))
+    }
+
+    /// The permission mode a chat starts in (`ChatSession.preferredMode`). Asking first is
+    /// Claude's own default, so that needs nothing.
+    static var chatModeArgs: [String] {
+        let mode = ChatSession.preferredMode
+        return mode == "default" || !mode.allSatisfy({ $0.isLetter }) ? [] : ["--mode", mode]
     }
 
     /// A chat back in the pane's terminal: the chat ends, and at the shell's prompt Claude's

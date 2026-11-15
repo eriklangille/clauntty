@@ -240,7 +240,17 @@ class SessionManager: ObservableObject {
     /// A workspace action that failed, to show the user
     @Published var workspaceMessage: String?
     /// Each pane's last state from rtach
-    var paneStates: [String: RemotePaneState] = [:]
+    var paneStates: [String: RemotePaneState] = [:] {
+        didSet { followChats(from: oldValue) }
+    }
+
+    /// A pane's program says whether it's a chat, for every device attached to it
+    private func followChats(from old: [String: RemotePaneState]) {
+        for session in sessions {
+            guard let pane = session.rtachSessionId, let state = paneStates[pane], old[pane]?.fg != state.fg else { continue }
+            session.paneProgramChanged(state.fg, agentSession: state.agentSession)
+        }
+    }
     /// Panes whose agent finished while the user wasn't looking, on a host without
     /// `done_at` (rtach before 2.33.0): shown as done until seen
     var unseenDonePanes: Set<String> = []

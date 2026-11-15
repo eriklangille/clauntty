@@ -127,7 +127,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.40.0"
+    static let expectedVersion = "2.40.2"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -522,18 +522,43 @@ class RtachDeployer {
     /// `clauntty-chat`: a pane running Claude headless for the chat view (ChatSession)
     static let chatLauncher = #"""
 #!/bin/sh
-# clauntty-chat [--session-id ID | --resume ID]: a Claude pane in chat mode. Claude runs
+# clauntty-chat [--mode MODE] [--session-id ID | --resume ID]: a Claude pane in chat mode. Claude runs
 # headless, speaking JSON lines through the pane, and Clauntty draws the conversation.
 # The terminal is raw: no echo, and no line length limit on what the app sends. A line
 # {"type":"clauntty_end"} from the app ends it (Claude finishes on the end of its input),
 # back at the shell, where `claude --resume ID` carries on in the terminal.
+# Images: the app uploads each to /tmp and sends "clauntty-file:/tmp/clauntty-paste-ID.png"
+# as its data, which goes to Claude as the file's base64 (version 2). Claude's echo of a
+# message (--replay-user-messages) comes back without image data: every device would get
+# it through the pane, and rtach would keep it.
+# --mode: the permission mode, asked of Claude before anything else it reads. A mode Claude
+# refuses (auto, where the account lacks it) leaves the chat as it was; Claude's own
+# --permission-mode might stop it starting.
+mode=
+if [ "$1" = "--mode" ]; then mode=$2; shift 2; fi
 claude=$(command -v claude || echo ~/.local/bin/claude)
 old=$(stty -g 2>/dev/null)
 stty raw -echo 2>/dev/null
-printf '\033]777;clauntty-chat\007{"type":"clauntty_chat","version":1,"args":"%s"}\n' "$*"
-awk '$0 == "{\"type\":\"clauntty_end\"}" { exit } { print; fflush() }' |
+printf '\033]777;clauntty-chat\007{"type":"clauntty_chat","version":2,"args":"%s"}\n' "$*"
+{
+[ -n "$mode" ] && printf '{"type":"control_request","request_id":"mode-start","request":{"subtype":"set_permission_mode","mode":"%s"}}\n' "$mode"
+awk '
+$0 == "{\"type\":\"clauntty_end\"}" { exit }
+{
+  line = $0; out = ""
+  while (match(line, /"clauntty-file:\/tmp\/clauntty-paste-[A-Za-z0-9]+\.(png|jpg)"/)) {
+    path = substr(line, RSTART + 15, RLENGTH - 16); data = ""; cmd = "base64 < " path
+    while ((cmd | getline part) > 0) data = data part
+    close(cmd)
+    out = out substr(line, 1, RSTART - 1) "\"" data "\""
+    line = substr(line, RSTART + RLENGTH)
+  }
+  print out line; fflush()
+}'
+} |
   "$claude" -p --input-format stream-json --output-format stream-json --verbose \
-    --include-partial-messages --replay-user-messages --permission-prompt-tool stdio "$@"
+    --include-partial-messages --replay-user-messages --permission-prompt-tool stdio "$@" |
+  awk '/^\{"type":"user"/ && /"type":"image"/ { gsub(/"data":"[A-Za-z0-9+\/=]+"/, "\"data\":\"\"") } { print; fflush() }'
 [ -n "$old" ] && stty "$old"
 printf '\n{"type":"clauntty_chat_ended"}\n'
 # The chat's JSON was never for reading: the terminal starts clean (screen and scrollback)

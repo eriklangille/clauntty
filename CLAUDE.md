@@ -594,6 +594,46 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   `TerminalViews.frameInWindow`). Zoom, paging, the
   bar (always shown; each button's label under it on hover) and the thumbnails are all SwiftUI; Cmd+=/−/0 go to it while it's open. `clauntty tab PORT` makes a `WebTab`, listed under the
   workspace that opened it and shown in `WebPane` (WKWebView on the forwarded port).
+- **Chat panes** (plan: `plans/2026-10-25-clauntty-agent-chat.md`): a pane running
+  `clauntty-chat` shows `ChatView` (shared, in `Core/Session`) over its terminal
+  (`SplitPanes.PaneContent`), its column at most 760 pt wide, sized from the terminal's font;
+  its box has the keyboard while the chat shows. Return sends, Shift/Option+Return adds a
+  line. An approval's buttons are native and on the right, as a dialog's: ⌘Return allows, Esc
+  denies (a question: ⌘Return sends, Esc skips). Images: ⌘V (only an image, no text, on the
+  clipboard; an NSEvent monitor, since the field editor takes the paste) or a drop adds a
+  thumbnail above the text; on the phone, the edit menu's Paste (the box is a UITextView there,
+  `ChatTextView`: SwiftUI's TextField offers Paste only for text, and iOS 27's
+  `pasteDestination` doesn't change that). Sending uploads each (scaled to Claude's 1568 px / 1.15 MP, PNG or
+  JPEG) to `/tmp/clauntty-paste-*` over SSH, and the message's image data is
+  `clauntty-file:<path>`: `clauntty-chat` (version 2) puts the file's base64 there, and drops
+  image data from Claude's echo and the history it reads, so megabytes never pass through
+  the pane. The permission mode sits by the send button (a native menu; ⇧Tab cycles it, as
+  in the terminal): `set_permission_mode`, the mode from Claude's init and status events. New
+  chats start in the last one picked (auto at first) through `clauntty-chat --mode`, which
+  asks Claude before anything else: a mode Claude refuses (auto, where the account lacks
+  it) leaves the chat as it was, where Claude's own `--permission-mode` might stop it starting. A running
+  tool counts its time up (from when it's allowed, if asked), and a command offers "Run in
+  background" (also ⌃B on the Mac): the `background_tasks` control request, Claude Code's
+  Ctrl+B. A message sent while Claude works waits under the conversation, dimmed
+  (`ChatSession.queued`: Claude holds it and echoes it only when it runs); "Send now", or
+  Return in the empty box, interrupts so it runs next (Claude Code's "enter to interrupt and
+  send"). Another device's images (and history's) come from Claude's transcript on the host
+  when shown (`loadImages`). The phone's vertical drags in the window being typed into only
+  scroll (no flick to the next window); a chat scrolls itself. On the phone the chat is laid out once at the
+  screen's width and scaled down into its window, as the terminal is, so fullscreen and back is
+  a zoom, not a reflow (reflowing at each window's width rewrapped every message per frame and
+  could end scrolled past its rows: blank). It sits in `NoSafeAreaHost` (no safe areas): its
+  frame already ends above the keyboard. The terminal under a chat is hidden (its JSON showed
+  through mid-animation). The conversation is kept on the device (`ChatCache`, Application
+  Support/ChatCache/<conversation>.json, the last 1000 items, saved at each turn's end and
+  before a replay), shown at once on open; the replay (rtach's last 16KB, often a fragment of
+  one long line) and the transcript only add to it. Rows are equatable (`ChatRow`), Markdown is
+  parsed once per text, and the scroll to the end is one at a time. Test with a real
+  conversation: copy a long transcript into the container (`~/.claude/projects/-fake/<id>.jsonl`)
+  and `clauntty-chat --resume <id>`; "big" makes the stand-in print a 150KB line. The title bar has Chat | Terminal for a Claude pane (`PaneChatSwitch`), also Pane >
+  Switch Between Chat and Terminal (⌥⌘C); Pane > New Chat is ⌥⌘T. No mic yet (the
+  speech model is iOS-only). mac-driver's clicks don't reach the title bar's strip (its
+  buttons too): try the toggle with the shortcut.
 - **Settings** (Cmd+,, `MacSettings`): General: what Cmd+1–9 go to (`PaneCommands.NumberKeys`:
   the nth workspace, the default, or the nth pane; while Cmd alone is held, each workspace's
   number shows on its sidebar row, at once, `WindowState.commandHeld`). Appearance: font size (`TerminalViews.setFontSize`,

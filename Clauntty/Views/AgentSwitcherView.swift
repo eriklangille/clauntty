@@ -46,22 +46,15 @@ struct AgentSwitcherView: View {
     @State private var webReturn: UUID?
     /// The web tab a window shows instead of its terminal (window id → web tab id)
     @State private var shownWeb: [UUID: UUID] = [:]
-    /// What a vertical drag in the typed-into window does, chosen when it starts
-    @State private var dragMode: DragMode?
+    /// A vertical drag in the typed-into window is under way (it scrolls)
+    @State private var scrolling = false
     /// How far the finger had moved at the last scroll step
     @State private var scrolledY: CGFloat = 0
-    /// When the drag chose (a flick is over quickly)
-    @State private var dragStart = Date()
-    /// The fastest the finger went in this drag
-    @State private var peakSpeed: CGFloat = 0
     /// The window whose pill menu is open
     @State private var menuWindow: UUID?
     /// The window whose menu is closing: it stays over the others until the panel is
     /// back in its pill
     @State private var closingMenu: UUID?
-    /// Over a TUI the scroll waits until the drag can't be a flick: it's mouse wheel
-    /// events, which a flick's undo wouldn't take back cleanly
-    @State private var holdScroll = false
     /// Fullscreen, another window just finished or needs you: every window's dot comes
     /// out of the screen's edge for `edgeTime`
     @State private var edgeOut = false
@@ -102,24 +95,6 @@ struct AgentSwitcherView: View {
         let id: UUID
     }
 
-    enum DragMode {
-        /// A quick swipe: the next or previous window
-        case page
-        /// A slower drag: scrolls the window's terminal (or page) under the finger
-        case scroll
-    }
-
-    /// Starting faster than this (points a second), a drag in the typed-into window
-    /// pages right away; slower, it scrolls back through the terminal...
-    static let flickSpeed: CGFloat = 800
-    /// ...unless it turns out a flick: over within `flickTime`, at its fastest quicker
-    /// than `flickPeakSpeed` or on average quicker than `flickAverageSpeed`. Then the
-    /// lines it scrolled go back and it pages. (A flick is still speeding up when it
-    /// starts, so its start alone reads as a scroll; reading drags are slow throughout,
-    /// or longer.)
-    static let flickPeakSpeed: CGFloat = 900
-    static let flickAverageSpeed: CGFloat = 450
-    static let flickTime: TimeInterval = 0.5
     /// How long the edge's dots stay out
     static let edgeTime: TimeInterval = 10
 
@@ -644,9 +619,10 @@ struct AgentSwitcherView: View {
 
     // MARK: Paging
 
-    /// Overview: scrolls freely with momentum. Typing: a quick swipe moves one window
-    /// to the next, the keyboard going with it; a slower drag scrolls the
-    /// window's terminal, as in a tab.
+    /// Overview: scrolls freely with momentum. Typing: a vertical drag scrolls the window's
+    /// terminal or page, at once and however fast (the rail and the overview change
+    /// windows). It used to page on a flick, which fought with scrolling, and over a TUI
+    /// the scroll waited half a second to rule a flick out.
     private func pager(count: Int, heights: [CGFloat], items: [(id: UUID, session: Session)], loose: [WebTab],
                        maxScroll: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
@@ -661,91 +637,25 @@ struct AgentSwitcherView: View {
                     drag = dy
                     return
                 }
-                if dragMode == nil {
+                if !scrolling {
                     guard abs(dy) > abs(dx) else { return }
-                    // By how fast it starts
-                    let quick = abs(value.velocity.height) > Self.flickSpeed
-                    dragMode = quick ? .page : .scroll
+                    scrolling = true
                     scrolledY = 0
-                    dragStart = value.time
-                    peakSpeed = 0
-                    holdScroll = dragMode == .scroll && focusedTakesMouse(items: items, loose: loose)
-                    if dragMode == .scroll && !holdScroll { scrollFocused(nil, items: items, loose: loose) }
+                    scrollFocused(nil, items: items, loose: loose)
                 }
-                switch dragMode {
-                case .scroll:
-                    peakSpeed = max(peakSpeed, abs(value.velocity.height))
-                    if holdScroll {
-                        guard value.time.timeIntervalSince(dragStart) >= Self.flickTime else { break }
-                        holdScroll = false
-                        scrollFocused(nil, items: items, loose: loose)
-                    }
-                    scrollFocused(dy - scrolledY, items: items, loose: loose)
-                    scrolledY = dy
-                default:
-                    let atEdge = (index == 0 && dy > 0) || (index >= count - 1 && dy < 0)
-                    drag = atEdge ? dy * 0.3 : dy
-                }
+                scrollFocused(dy - scrolledY, items: items, loose: loose)
+                scrolledY = dy
             }
             .onEnded { value in
-                let dy = value.translation.height
                 let projected = value.predictedEndTranslation.height
-                let mode = dragMode
-                dragMode = nil
-                guard menuWindow == nil, moving == nil else { return }
-                if focused != nil && mode == .scroll {
-                    let duration = value.time.timeIntervalSince(dragStart)
-                    let average = abs(dy) / max(0.05, duration)
-                    let peak = max(peakSpeed, abs(value.velocity.height))
-                    let flick = duration < Self.flickTime && (peak > Self.flickPeakSpeed || average > Self.flickAverageSpeed)
-                    let held = holdScroll
-                    holdScroll = false
-                    guard flick else {
-                        // A short slow drag over a TUI: its scroll, now
-                        if held {
-                            scrollFocused(nil, items: items, loose: loose)
-                            scrollFocused(dy, items: items, loose: loose)
-                        }
-                        return
-                    }
-                    // A flick after all: put back what it scrolled, then page its way
-                    scrollFocused(-scrolledY, items: items, loose: loose)
-                    let current = min(index, count - 1)
-                    // Down from the first: the overview, the header's above it
-                    if current == 0 && dy > 0 { return toOverview() }
-                    let target = min(max(0, current + (dy < 0 ? 1 : -1)), count - 1)
-                    if target != current { commitFocus(target, items: items, loose: loose) }
-                    return
-                }
-                if focused != nil && mode == nil {
-                    // A tap-like drag that never chose doesn't page
-                    withAnimation(snap) { drag = 0 }
-                    return
-                }
-                if focused == nil {
-                    // Carry on with the flick's momentum, then settle within the ends
-                    let target = min(max(0, scrollOffset - projected), maxScroll)
-                    withAnimation(.spring(response: 0.5, dampingFraction: 1)) {
-                        scrollOffset = target
-                        drag = 0
-                    }
-                    return
-                }
-                let current = min(index, count - 1)
-                let threshold = min(120, (heights.indices.contains(current) ? heights[current] : 0) * 0.3)
-                var target = current
-                if dy < -threshold || projected < -200 { target = current + 1 }
-                if dy > threshold || projected > 200 { target = current - 1 }
-                if target < 0 {
+                scrolling = false
+                guard menuWindow == nil, moving == nil, focused == nil else { return }
+                // Carry on with the flick's momentum, then settle within the ends
+                let target = min(max(0, scrollOffset - projected), maxScroll)
+                withAnimation(.spring(response: 0.5, dampingFraction: 1)) {
+                    scrollOffset = target
                     drag = 0
-                    return toOverview()
                 }
-                target = min(max(0, target), count - 1)
-                if target == current {
-                    withAnimation(snap) { drag = 0 }
-                    return
-                }
-                commitFocus(target, items: items, loose: loose)
             }
     }
 
@@ -792,13 +702,10 @@ struct AgentSwitcherView: View {
             scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: false)
             return
         }
-        items.first { $0.id == focused }?.session.scrollTerminal?(dy)
-    }
-
-    /// The typed-into window shows a TUI that takes the mouse (scrolls are wheel events)
-    private func focusedTakesMouse(items: [(id: UUID, session: Session)], loose: [WebTab]) -> Bool {
-        guard let focused, webShown(in: focused) == nil, !loose.contains(where: { $0.id == focused }) else { return false }
-        return items.first { $0.id == focused }?.session.terminalTakesMouse?() ?? false
+        guard let session = items.first(where: { $0.id == focused })?.session else { return }
+        // A chat scrolls itself; its terminal is hidden under it
+        if let chat = session.chat, !chat.ended { return }
+        session.scrollTerminal?(dy)
     }
 
     /// The rail tapped or scrubbed: show that window (focus follows when the finger lifts)
@@ -1345,6 +1252,12 @@ struct SwitcherWindow: View {
     /// Fullscreen in landscape: the terminal has the whole height, the pill and the
     /// button float over its top right
     var floatsPill = false
+
+    /// The pane is a chat: its conversation is drawn over the (hidden) terminal
+    private var showsChat: Bool {
+        guard let chat = session.chat else { return false }
+        return !chat.ended
+    }
     /// The web tab shown instead of the terminal (swiped to: the workspace's last panes)
     let web: WebTab?
     /// How many web tabs the workspace has, after its terminal panes
@@ -1505,12 +1418,11 @@ struct SwitcherWindow: View {
 
     /// Where the window's terminal ends (in the terminal's points) and how many rows it
     /// shows, always whole rows from the cursor's
-    /// The chat's text size: smaller in the focused window than fullscreen. Trying sizes:
-    /// `defaults write com.octerm.clauntty chatTextFocused 14` (and chatTextFullscreen)
-    static func chatType(fullscreen: Bool) -> ChatType {
-        let key = fullscreen ? "chatTextFullscreen" : "chatTextFocused"
-        let size = UserDefaults.standard.double(forKey: key)
-        return ChatType(size: size > 0 ? size : (fullscreen ? 17 : 15))
+    /// The chat's text size, fullscreen (a window shows it scaled down, as its terminal).
+    /// Trying sizes: `defaults write com.octerm.clauntty chatTextFullscreen 16`
+    static var chatType: ChatType {
+        let size = UserDefaults.standard.double(forKey: "chatTextFullscreen")
+        return ChatType(size: size > 0 ? size : 17)
     }
 
     static func crop(cursor: Session.CursorRow?, mode: Mode, isAgent: Bool, terminalSize: CGSize, windowWidth: CGFloat)
@@ -1589,8 +1501,10 @@ struct SwitcherWindow: View {
                 .environmentObject(appState)
             }
             // Showing a page, the terminal stays (live, keeping its place) under it; a card
-            // keeps both under it
-            .opacity(web == nil && !isCard ? 1 : 0)
+            // keeps both under it. Under a chat it's Claude's JSON: hidden, or it showed
+            // through while the window went fullscreen or back (UIKit resizes it at once,
+            // the chat over it animates)
+            .opacity(web == nil && !isCard && !showsChat ? 1 : 0)
             if let web {
                 ClipHost(passesTouches: !isFullscreen, contentSize: webSize,
                          scale: isFullscreen ? 1 : windowWidth / webSize.width,
@@ -1718,15 +1632,27 @@ struct SwitcherWindow: View {
 
             // A chat pane: the conversation drawn natively over its terminal, which keeps
             // running underneath (Claude headless, speaking JSON)
-            if web == nil, !isCard, let chat = session.chat, !chat.ended {
-                ChatView(chat: chat,
+            if web == nil, !isCard, showsChat, let chat = session.chat {
+                // Laid out at the screen's width, as the terminal is, and scaled down to the
+                // window: going fullscreen and back is a zoom. Laid out at each window's own
+                // width (and text size), every message rewrapped on each frame of the
+                // window's animation, jumped about, and could end up scrolled past its rows.
+                let scale = terminalSize.width > 0 ? min(1, windowWidth / terminalSize.width) : 1
+                // Fullscreen, the window goes on under the keyboard: the chat ends where the
+                // terminal does, above it
+                let height = isFullscreen ? placement.y + terminalSize.height : windowHeight
+                // In a hosting view with no safe areas: the chat's height already ends above
+                // the keyboard. SwiftUI's own room for it either counted it again (scaled,
+                // the chat is laid out taller than it's drawn, so the end sat under the
+                // box) or, told to ignore it, stretched the chat under the keyboard
+                NoSafeAreaHost(content: ChatView(chat: chat,
                          colors: ReviewColors.of(ThemeManager.shared.theme(withId: ghosttyApp.currentThemeId)),
-                         topInset: floatsPill ? 0 : AgentSwitcherView.pillStrip,
+                         topInset: (floatsPill ? 0 : AgentSwitcherView.pillStrip) / scale,
                          isActive: isFocused || isFullscreen,
-                         type: Self.chatType(fullscreen: isFullscreen))
-                    // Fullscreen, the window goes on under the keyboard: the chat ends where
-                    // the terminal does, above it
-                    .frame(height: isFullscreen ? placement.y + terminalSize.height : nil)
+                         type: Self.chatType))
+                    .frame(width: terminalSize.width, height: height / scale)
+                    .scaleEffect(scale, anchor: .topLeading)
+                    .frame(width: windowWidth, height: height, alignment: .topLeading)
                     .frame(maxHeight: .infinity, alignment: .top)
                     // The window makes room for the keyboard itself (it ends above it, or
                     // fullscreen the frame above does): SwiftUI's own room for it as well
@@ -2759,5 +2685,22 @@ extension View {
         } else {
             self.background(shape.fill(.ultraThinMaterial))
         }
+    }
+}
+
+/// SwiftUI content in a hosting controller that takes no safe areas (keyboard included):
+/// for content whose frame already accounts for them
+struct NoSafeAreaHost<Content: View>: UIViewControllerRepresentable {
+    let content: Content
+
+    func makeUIViewController(context: Context) -> UIHostingController<Content> {
+        let host = UIHostingController(rootView: content)
+        host.safeAreaRegions = []
+        host.view.backgroundColor = .clear
+        return host
+    }
+
+    func updateUIViewController(_ host: UIHostingController<Content>, context: Context) {
+        host.rootView = content
     }
 }

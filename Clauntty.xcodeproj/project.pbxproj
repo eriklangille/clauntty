@@ -392,7 +392,6 @@
 				C1000007 /* NewConnectionView.swift */,
 				C1000008 /* TerminalView.swift */,
 				A3DC0C373EF7C12642C82EAF /* AgentSwitcherView.swift */,
-				AC100000000000000000000E /* ChatView.swift */,
 				AC100000000000000000000F /* DictationButton.swift */,
 				6D2B8F3C0E4A5B7C9D1E2F30 /* PillMenu.swift */,
 				C1000015 /* KeyboardAccessoryView.swift */,
@@ -435,6 +434,7 @@
 			children = (
 				C1000016 /* Session.swift */,
 				AC100000000000000000000D /* ChatSession.swift */,
+				AC100000000000000000000E /* ChatView.swift */,
 				AC100000000000000000000A /* CodeDrawing.swift */,
 				AC1000000000000000000009 /* FrameMonitor.swift */,
 				AC1000000000000000000008 /* Highlighter.swift */,

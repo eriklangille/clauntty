@@ -1285,7 +1285,7 @@ struct HunkLayout: Equatable {
     }
 }
 
-private extension View {
+extension View {
     /// The Mac's text fields: Shift+Return (and Option+Return) adds a line, as in Messages
     /// and Slack; a vertical TextField otherwise ends editing on any Return. ⌘Return submits.
     /// Plain Return is left as it was.
