@@ -11,7 +11,8 @@ import UniformTypeIdentifiers
 /// Pinch, double-click or Cmd+= / Cmd+− zoom; scrolling or dragging pans a zoomed
 /// image. A two-finger swipe, the arrow keys, the side arrows or a thumbnail turn the
 /// page. Esc, Space or a click outside the image closes. Images that arrive while it's
-/// open are added, and it moves to the first of them.
+/// open are added to the thumbnails; the page stays where it is. M (or a tool's key)
+/// starts Markup.
 ///
 /// Each still has a note field under it. Marks and notes stay with their image
 /// (`ImageDrafts`) until Send, which sends every image that has either, each with its note,
@@ -88,9 +89,8 @@ struct ImageViewer: View {
         // Shown with images already there: going back to a workspace that has some
         .onAppear { if content != nil { didOpen() } }
         .onDisappear { didClose() }
-        .onChange(of: content?.selection) { _, selection in
-            if let selection { turn(to: selection) }
-        }
+        // Images that arrive while it's open join the thumbnails; the page stays where it
+        // is (jumping to them pulled the image out from under Markup)
         .onReceive(NotificationCenter.default.publisher(for: Self.zoomCommand)) { note in
             zoomCommand((note.object as? NSNumber)?.floatValue)
         }
@@ -320,10 +320,7 @@ struct ImageViewer: View {
                     openInPreview(item)
                 }
                 if item.kind == .still && marking == nil {
-                    ChromeButton(symbol: "pencil.tip.crop.circle", label: "Markup") {
-                        focus = .viewer
-                        marking = MarkupState(itemId: item.id, marks: drafts.marks[item.id] ?? [])
-                    }
+                    ChromeButton(symbol: "pencil.tip.crop.circle", label: "Markup (M)") { startMarking() }
                 }
             }
             ChromeButton(symbol: "xmark", label: "Close (Esc)") { close() }
@@ -609,8 +606,21 @@ struct ImageViewer: View {
     /// Marking up: Return finishes text being typed, else sends; Esc drops the text being
     /// typed, else leaves Markup (not the viewer); the rest types or picks a tool or color
     private func markupKey(_ press: KeyPress) -> KeyPress.Result {
-        guard var state = marking, press.modifiers.isDisjoint(with: [.command, .control]) else { return .ignored }
+        guard press.modifiers.isDisjoint(with: [.command, .control]) else { return .ignored }
+        let key = press.characters.lowercased()
+        guard var state = marking else {
+            // Not marking up: M starts Markup (with the pen), as does a tool's key with that tool
+            guard press.phase == .down, press.modifiers.isDisjoint(with: [.option]) else { return .ignored }
+            if key == "m" { return startMarking() ? .handled : .ignored }
+            if let tool = MarkupState.Tool.allCases.first(where: { String($0.key) == key }) {
+                return startMarking(tool: tool) ? .handled : .ignored
+            }
+            return .ignored
+        }
         switch press.key {
+        case _ where state.typing == nil && key == "m":
+            if press.phase == .down { endMarking() }
+            return .handled
         case .return where state.typing == nil:
             if send != nil { sendAll() }
             return .handled
@@ -636,6 +646,15 @@ struct ImageViewer: View {
     private func update(_ state: MarkupState) {
         marking = state
         drafts.marks[state.itemId] = state.marks
+    }
+
+    /// Into Markup on the image shown, if it's a still. False when it isn't.
+    @discardableResult
+    private func startMarking(tool: MarkupState.Tool = .pen) -> Bool {
+        guard marking == nil, let item = shownItem, item.kind == .still, item.image != nil else { return false }
+        focus = .viewer
+        marking = MarkupState(itemId: item.id, marks: drafts.marks[item.id] ?? [], tool: tool)
+        return true
     }
 
     /// Out of Markup, with the text being typed kept as a mark

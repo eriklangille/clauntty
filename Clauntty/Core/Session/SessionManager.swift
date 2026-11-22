@@ -541,6 +541,22 @@ class SessionManager: ObservableObject {
         #endif
     }
 
+    /// The image viewer's Send to Claude, to the pane that ran `clauntty show`; nil when
+    /// that pane is gone. A pane that's resting attaches first (it has no connection to
+    /// upload over until then).
+    func imageSender(for content: ImageViewerContent?) -> (([(image: PlatformImage, note: String)]) -> Void)? {
+        guard let id = content?.source, sessions.contains(where: { $0.id == id }) else { return nil }
+        return { [weak self] images in
+            guard let self, let session = self.sessions.first(where: { $0.id == id }) else { return }
+            Task { @MainActor in
+                if !session.hasAttachedChannel {
+                    do { try await self.reconnect(session: session) } catch { return }
+                }
+                session.sendImages(images)
+            }
+        }
+    }
+
     /// Reconnect a disconnected session
     /// Uses the session's existing rtach session ID to reattach
     func reconnect(session: Session) async throws {
@@ -1480,7 +1496,7 @@ class SessionManager: ObservableObject {
             if !away { Haptic.imagesArrived.play() }
         } else {
             if var current = imageViewer {
-                // Already viewing: add the new images and jump to the first of them
+                // Already viewing: add the new images (the viewer stays on its page; it opens on the first new one)
                 current.selection = current.items.count
                 current.items += images
                 imageViewer = current

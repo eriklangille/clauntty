@@ -21,6 +21,7 @@
 		5AE31ABCC791B62288ED04F5 /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A3E2A64FA9B3B72703629BB /* ThemeManager.swift */; };
 		70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297EA9CE961BFF920036934A /* SelectionHandleView.swift */; };
 		733936A7CBE2B60407C98651 /* WebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */; };
+		AC0000000000000000000010 /* ImageMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000010 /* ImageMarks.swift */; };
 		7BFB27A8AEC758530B629ADA /* SSHConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */; };
 		7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28503FD938162D88F8B6A69F /* WebTabView.swift */; };
 		80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A3663E616FC97D48E5888C /* SessionPickerView.swift */; };
@@ -89,6 +90,7 @@
 		C0000027 /* SpeechManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000027 /* SpeechManager.swift */; };
 		C0000028 /* PortsSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000028 /* PortsSheetView.swift */; };
 		C00000A1 /* ImageViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000A1 /* ImageViewerView.swift */; };
+		AC0000000000000000000011 /* ImageMarkupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1000000000000000000011 /* ImageMarkupView.swift */; };
 		C0000029 /* PersistedWebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000029 /* PersistedWebTab.swift */; };
 		CC4B62670E3311459A29FF4C /* SSHKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F66C88A0644682800154EE25 /* SSHKey.swift */; };
 		D1000001 /* GhosttyAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* GhosttyAppTests.swift */; };
@@ -157,6 +159,7 @@
 		ABF7282BEC77B8743E5A14F7 /* Themes */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
 		CCAE48ED4FB13F83D75BD4F8 /* PaneStatusIndicator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaneStatusIndicator.swift; sourceTree = "<group>"; };
 		BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTab.swift; sourceTree = "<group>"; };
+		AC1000000000000000000010 /* ImageMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMarks.swift; sourceTree = "<group>"; };
 		C1000000 /* Clauntty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C1000001 /* ClaunttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaunttyApp.swift; sourceTree = "<group>"; };
 		C1000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -209,6 +212,7 @@
 		C1000027 /* SpeechManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechManager.swift; sourceTree = "<group>"; };
 		C1000028 /* PortsSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortsSheetView.swift; sourceTree = "<group>"; };
 		C10000A1 /* ImageViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewerView.swift; sourceTree = "<group>"; };
+		AC1000000000000000000011 /* ImageMarkupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMarkupView.swift; sourceTree = "<group>"; };
 		C1000029 /* PersistedWebTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedWebTab.swift; sourceTree = "<group>"; };
 		D2000001 /* GhosttyAppTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyAppTests.swift; path = ../Tests/ClaunttyTests/GhosttyAppTests.swift; sourceTree = "<group>"; };
 		D2000002 /* TerminalSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TerminalSurfaceTests.swift; path = ../Tests/ClaunttyTests/TerminalSurfaceTests.swift; sourceTree = "<group>"; };
@@ -401,6 +405,7 @@
 				F1A00006 /* VoiceAgentViews.swift */,
 				C1000028 /* PortsSheetView.swift */,
 				C10000A1 /* ImageViewerView.swift */,
+				AC1000000000000000000011 /* ImageMarkupView.swift */,
 				297EA9CE961BFF920036934A /* SelectionHandleView.swift */,
 				CCAE48ED4FB13F83D75BD4F8 /* PaneStatusIndicator.swift */,
 				0CD476298B71607D9BDB445C /* ServerPickerView.swift */,
@@ -449,6 +454,7 @@
 				D4874ED9A2E6E254D7091964 /* SessionManager+Connections.swift */,
 				C1000023 /* WordList.swift */,
 				BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */,
+				AC1000000000000000000010 /* ImageMarks.swift */,
 				C1000029 /* PersistedWebTab.swift */,
 			);
 			path = Session;
@@ -705,6 +711,7 @@
 				C00000A2 /* NetworkMonitor.swift in Sources */,
 				8EE9D92CA010B003B254D7CA /* PortForwardingManager.swift in Sources */,
 				733936A7CBE2B60407C98651 /* WebTab.swift in Sources */,
+				AC0000000000000000000010 /* ImageMarks.swift in Sources */,
 				7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */,
 				C0000024 /* NotificationManager.swift in Sources */,
 				35AA25C947A293E6B7A37873 /* PushNotifications.swift in Sources */,
@@ -718,6 +725,7 @@
 				F0A00006 /* VoiceAgentViews.swift in Sources */,
 				C0000028 /* PortsSheetView.swift in Sources */,
 				C00000A1 /* ImageViewerView.swift in Sources */,
+				AC0000000000000000000011 /* ImageMarkupView.swift in Sources */,
 				C0000026 /* PowerManager.swift in Sources */,
 				C0000027 /* SpeechManager.swift in Sources */,
 				70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */,

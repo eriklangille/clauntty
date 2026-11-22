@@ -76,26 +76,10 @@ final class TerminalViews {
     /// as Cmd+V pastes one (so Claude Code attaches it) and its note after it, a line per
     /// image, then Return. If an upload fails, the rest is left typed, not sent.
     func sendImages(_ images: [(image: NSImage, note: String)], into session: Session) {
-        Task { @MainActor [weak self, weak session] in
-            var lines: [(path: String?, note: String)] = []
-            for (image, note) in images {
-                lines.append((await session?.uploadImage(image), note))
-            }
-            guard let session, let view = self?.views[session.id]?.view else { return }
-            for (index, line) in lines.enumerated() {
-                if let path = line.path {
-                    view.pasteText(path)
-                    // Its own paste, so it's taken as an image
-                    try? await Task.sleep(for: .milliseconds(60))
-                }
-                let text = (line.path == nil || line.note.isEmpty ? "" : " ") + line.note
-                    + (index < lines.count - 1 ? "\n" : "")
-                if !text.isEmpty { view.pasteText(text) }
-            }
-            guard lines.allSatisfy({ $0.path != nil }) else { return }
-            // After Claude Code has taken the pastes in
-            try? await Task.sleep(for: .milliseconds(300))
-            session.sendData(Data("\r".utf8))
+        // Into the terminal as Cmd+V would paste it (a chat takes them as a message)
+        session.sendImages(images) { [weak self, weak session] text in
+            guard let session else { return }
+            self?.views[session.id]?.view.pasteText(text)
         }
     }
 

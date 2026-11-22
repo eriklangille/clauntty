@@ -1198,6 +1198,52 @@ class Session: ObservableObject, Identifiable {
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): window change \(columns)x\(rows)")
     }
 
+    /// The image viewer's Send to Claude: the images, each with its note, as one message.
+    /// In a chat it's a message with them attached. In a terminal each is uploaded and its
+    /// path pasted (as a paste, so Claude Code attaches it), its note after it, a line per
+    /// image, then Return (not if an upload failed). `paste` pastes text as the platform's
+    /// terminal view does; without it the text goes in bracketed paste markers.
+    func sendImages(_ images: [(image: PlatformImage, note: String)], paste: ((String) -> Void)? = nil) {
+        guard !images.isEmpty else { return }
+        if isChatMode, let chat {
+            chat.send(Self.imagesMessage(notes: images.map(\.note)), images: images.map(\.image))
+            return
+        }
+        Task { @MainActor [weak self] in
+            var lines: [(path: String?, note: String)] = []
+            for (image, note) in images {
+                lines.append((await self?.uploadImage(image), note))
+            }
+            guard let self else { return }
+            let paste = paste ?? { [weak self] text in
+                let text = text.replacingOccurrences(of: "\u{1b}", with: "")
+                self?.sendData(Data(("\u{1b}[200~" + text + "\u{1b}[201~").utf8))
+            }
+            for (index, line) in lines.enumerated() {
+                if let path = line.path {
+                    paste(path)
+                    // Its own paste, so it's taken as an image
+                    try? await Task.sleep(for: .milliseconds(60))
+                }
+                let text = (line.path == nil || line.note.isEmpty ? "" : " ") + line.note
+                    + (index < lines.count - 1 ? "\n" : "")
+                if !text.isEmpty { paste(text) }
+            }
+            guard lines.allSatisfy({ $0.path != nil }) else { return }
+            // After Claude Code has taken the pastes in
+            try? await Task.sleep(for: .milliseconds(300))
+            sendData(Data("\r".utf8))
+        }
+    }
+
+    /// A chat message's text for images sent with notes: the note alone for one image,
+    /// else "Image N: note" for each that has one
+    nonisolated static func imagesMessage(notes: [String]) -> String {
+        let notes = notes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if notes.count == 1 { return notes[0] }
+        return notes.enumerated().compactMap { $1.isEmpty ? nil : "Image \($0 + 1): \($1)" }.joined(separator: "\n")
+    }
+
     /// Upload an image to the remote server for pasting (e.g., into Claude Code)
     /// - Returns: The image's path on the remote host, or nil if the upload failed
     func uploadImage(_ image: PlatformImage) async -> String? {

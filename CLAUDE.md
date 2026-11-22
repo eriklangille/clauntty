@@ -572,12 +572,29 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   (`WaitingImages`: Application Support/<bundle id>/Waiting, a folder per workspace, synced
   from the didSets, loaded with the saved workspaces), so a restart doesn't lose them; the
   host's inbox entry is gone once downloaded. The phone's windows keep theirs the same way,
-  and reopen from the window menu. An item is a still, an animated GIF (`AnimatedImage`,
+  and reopen from the window menu. The phone's viewer (`ImageViewerView`) has Markup too
+  (✎; `ImageMarkupView`: one finger draws, two pinch and pan, a tap with Text or on text types,
+  through a hidden field, kept above the keyboard; the tools along the bottom, the color a dot
+  that opens the six; Cancel puts the marks back), and the note field and Send under the image
+  with the thumbnails, in Markup too (circle something, then type what it is, and send from
+  there). Markup draws over the image in the very place the viewer shows it (both centered on
+  the whole screen; the pages ignore the safe areas), and going in or out has no fade, only the
+  bars change: a cross-fade of two copies of one image dimmed it halfway. Under the image is one card:
+  the note and Send, with Markup's tools (`ImageMarkupTools`) folded into its top while marking
+  up. Starting a note folds them away (their height to zero in the card, so nothing sits over the
+  note as it shrinks) as iOS moves the card up with the keyboard, and the image fits between the
+  bars above it. The agent switcher under the viewer holds its keyboard changes until it closes
+  (`coveredKeyboard`): following the note's keyboard there laid out every window, a hitch that
+  left the card behind the keyboard. The marks, `ImageDrafts` and flattening are shared (`ImageMarks.swift`), as
+  is sending (`Session.sendImages`: a chat gets one message with the images and the notes, a
+  terminal the pasted paths, notes and Return; `SessionManager.imageSender` attaches a resting
+  pane first). An item is a still, an animated GIF (`AnimatedImage`,
   NSImageView; its bytes kept to save or copy as a GIF) or a video (mp4, mov, m4v: downloaded
   to a file, 200 MB cap, played muted in `AVPlayerView`, its first frame the thumbnail).
   **Markup** (stills): pen, circle, arrow and text over the image (`Markup.swift`; marks in
-  fractions of the image, so they follow zoom). Keys: P, C, A, T for the tools and 1–6 for the
-  colors. Text starts with a click (Text tool) or a double-click (any tool), and is typed
+  fractions of the image, so they follow zoom). M starts and ends it (the pen first), as does the
+  button; P, C, A, T pick the tools (and start it with that tool) and 1–6 the colors. Images that
+  arrive meanwhile join the thumbnails without turning the page. Text starts with a click (Text tool) or a double-click (any tool), and is typed
   straight into the image: no text field, the layer draws it and a caret as it'll be flattened,
   with keys from the viewer's `markupKey` (backspace comes as `onDeleteCommand`). Dragging text
   moves it; clicking it with Text types into it again. Return finishes the text, then sends;

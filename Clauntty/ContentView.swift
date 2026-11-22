@@ -77,7 +77,8 @@ struct ContentView: View {
     }
     .fullScreenCover(item: $sessionManager.imageViewer) { _ in
       // Images from `clauntty show` on a remote host
-      ImageViewerView(content: $sessionManager.imageViewer)
+      ImageViewerView(content: $sessionManager.imageViewer,
+                      send: sessionManager.imageSender(for: sessionManager.imageViewer))
     }
     .onAppear {
       checkAutoConnect()

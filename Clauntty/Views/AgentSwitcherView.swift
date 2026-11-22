@@ -34,6 +34,14 @@ struct AgentSwitcherView: View {
     /// keyboard coming and going never resizes anything
     @State private var keyboardHeight: CGFloat = 336
     @State private var keyboardVisible = false
+    /// The keyboard while the image viewer is over the windows (its note's), applied when
+    /// it closes: following it under the viewer laid out every window as the keyboard came
+    /// up, a hitch that left the viewer's note behind the keyboard
+    @State private var coveredKeyboard = CoveredKeyboard()
+    final class CoveredKeyboard {
+        var height: CGFloat?
+        var visible: Bool?
+    }
     /// Bumped when a window's cursor moves (its crop and height follow it)
     @State private var cursorTick = 0
     /// The overview's scroll position (nothing focused): it scrolls freely
@@ -428,6 +436,11 @@ struct AgentSwitcherView: View {
         // Seen images go when the viewer closes (after it zooms back into the thumbnail);
         // the viewer's Save keeps one in Photos
         .fullScreenCover(item: $openImages, onDismiss: {
+            if let visible = coveredKeyboard.visible {
+                if let height = coveredKeyboard.height { keyboardHeight = height }
+                keyboardVisible = visible
+                coveredKeyboard = CoveredKeyboard()
+            }
             if let window = viewedImages {
                 viewedImages = nil
                 clearImages(window)
@@ -436,7 +449,7 @@ struct AgentSwitcherView: View {
             ImageViewerView(content: Binding(
                 get: { sessionManager.windowImages[open.id] },
                 set: { if $0 == nil { openImages = nil } }
-            ))
+            ), send: sessionManager.imageSender(for: sessionManager.windowImages[open.id]))
             // From the thumbnail, which is tagged with the images' id
             .modifier(ZoomFrom(id: sessionManager.windowImages[open.id]?.id ?? open.id, namespace: imagesZoom))
         }
@@ -480,6 +493,11 @@ struct AgentSwitcherView: View {
             // How far the keyboard reaches up from the bottom of the screen
             let height = UIScreen.main.bounds.height - frame.minY
             guard height > 100 else { return }
+            if openImages != nil {
+                coveredKeyboard.height = height
+                coveredKeyboard.visible = true
+                return
+            }
             keyboardShows &+= 1
             // With the keyboard, so the window follows the key bar up
             withAnimation(.easeOut(duration: 0.25)) {
@@ -488,6 +506,10 @@ struct AgentSwitcherView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            if openImages != nil {
+                coveredKeyboard.visible = false
+                return
+            }
             // The keyboard collapsed: the window stays, down to the key bar (the
             // rail's buttons go to the overview). A moment later, and only if it stayed
             // down: bringing a hidden keyboard back hides and shows it in quick succession.
