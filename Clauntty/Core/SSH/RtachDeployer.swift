@@ -330,6 +330,7 @@ class RtachDeployer {
         // they leave are cleaned up below)
         await upgradeSessions()
         await cleanupOldBinaries()
+        await cleanupDrops()
         await checkSpawnd()
         await updatePushFile()
     }
@@ -431,6 +432,14 @@ class RtachDeployer {
         if path == "~" { return "~" }
         if path.hasPrefix("~/") { return "~/" + shellQuote(String(path.dropFirst(2))) }
         return shellQuote(path)
+    }
+
+    /// Files dropped on a pane a week ago or more (`Session.placeFiles`): a folder per
+    /// drop, dated by when it was made
+    private func cleanupDrops() async {
+        _ = try? await connection.executeCommand(
+            "find ~/\(Session.dropsPath) -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null; true"
+        )
     }
 
     /// Clean up old rtach binaries that are no longer in use

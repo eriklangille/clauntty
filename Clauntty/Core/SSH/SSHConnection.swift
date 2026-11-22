@@ -408,6 +408,39 @@ class SSHConnection: ObservableObject {
 
     /// Execute a command and write binary data to stdin
     func executeWithStdin(_ command: String, stdinData: Data) async throws {
+        let childChannel = try await openExec(command)
+        Logger.clauntty.debugOnly("executeWithStdin: exec request sent, writing \(stdinData.count) bytes")
+        try await write(stdinData, to: childChannel)
+        try await finishStdin(childChannel)
+    }
+
+    /// Execute a command with a file as its stdin, read and sent a piece at a time, so a
+    /// big one is never all in memory: each piece waits for the one before it to go out,
+    /// and the SSH window holds those back until the host has taken them. Cancelling the
+    /// task stops it and closes the channel.
+    /// - Parameter progress: the bytes sent so far, after each piece
+    func executeWithStdin(_ command: String, file: URL, progress: (Int64) -> Void) async throws {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        let childChannel = try await openExec(command)
+        var sent: Int64 = 0
+        do {
+            while true {
+                try Task.checkCancellation()
+                guard let piece = try handle.read(upToCount: 256 * 1024), !piece.isEmpty else { break }
+                try await write(piece, to: childChannel)
+                sent += Int64(piece.count)
+                progress(sent)
+            }
+        } catch {
+            childChannel.close(promise: nil)
+            throw error
+        }
+        try await finishStdin(childChannel)
+    }
+
+    /// A channel running `command`, for writing to its stdin
+    private func openExec(_ command: String) async throws -> Channel {
         guard let channel = self.channel, channel.isActive else {
             Logger.clauntty.error("executeWithStdin: channel not connected or inactive")
             throw SSHError.notConnected
@@ -437,17 +470,23 @@ class SSHConnection: ObservableObject {
             wantReply: true
         )
         try await childChannel.triggerUserOutboundEvent(execRequest).get()
-        Logger.clauntty.debugOnly("executeWithStdin: exec request sent, writing \(stdinData.count) bytes")
+        return childChannel
+    }
 
-        // Write stdin data directly to channel (with proper await via promise)
+    /// Bytes to a command's stdin, returning once they've gone out
+    private func write(_ data: Data, to childChannel: Channel) async throws {
         let writePromise = childChannel.eventLoop.makePromise(of: Void.self)
         childChannel.eventLoop.execute {
-            var buffer = childChannel.allocator.buffer(capacity: stdinData.count)
-            buffer.writeBytes(stdinData)
+            var buffer = childChannel.allocator.buffer(capacity: data.count)
+            buffer.writeBytes(data)
             let channelData = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
             childChannel.writeAndFlush(channelData, promise: writePromise)
         }
         try await writePromise.futureResult.get()
+    }
+
+    /// End a command's stdin and wait for it to finish
+    private func finishStdin(_ childChannel: Channel) async throws {
         Logger.clauntty.debugOnly("executeWithStdin: data written, sending EOF")
 
         // Send EOF to indicate we're done writing (close output side of channel)

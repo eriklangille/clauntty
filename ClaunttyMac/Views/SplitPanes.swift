@@ -371,6 +371,75 @@ private struct PaneContent: View {
                     .simultaneousGesture(TapGesture().onEnded { if !focused { onFocus() } })
             }
         }
+        .overlay(alignment: .bottom) {
+            if !session.uploads.isEmpty {
+                UploadsBar(session: session, colors: ReviewColors.of(ghostty.theme))
+                    .padding(.bottom, chat == nil ? 14 : 120)
+            }
+        }
+    }
+}
+
+/// Files a pane is sending to its host (`Session.uploads`): each one's name, how much
+/// has gone, and an × that stops it. Shown once one has taken a moment, so a small
+/// file comes and goes without a flash.
+private struct UploadsBar: View {
+    @ObservedObject var session: Session
+    let colors: ReviewColors
+    @State private var shown = false
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ForEach(session.uploads) { upload in
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle().stroke(colors.fg.opacity(0.15), lineWidth: 2.5)
+                        Circle().trim(from: 0, to: max(0.02, upload.fraction))
+                            .stroke(colors.fg, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .animation(.linear(duration: 0.2), value: upload.fraction)
+                    }
+                    .frame(width: 16, height: 16)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(upload.name)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(colors.fg)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(Self.progress(upload))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(colors.dim)
+                    }
+                    .frame(maxWidth: 260, alignment: .leading)
+                    Button { session.cancelUpload(upload.id) } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(colors.dim)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop uploading")
+                }
+                .padding(.leading, 12)
+                .padding(.trailing, 6)
+                .padding(.vertical, 7)
+                .glass(in: Capsule())
+            }
+        }
+        .opacity(shown ? 1 : 0)
+        .animation(.easeOut(duration: 0.15), value: shown)
+        .task {
+            try? await Task.sleep(for: .milliseconds(600))
+            shown = true
+        }
+    }
+
+    /// "12 MB of 40 MB"
+    static func progress(_ upload: Session.FileUpload) -> String {
+        let total = ByteCountFormatter.string(fromByteCount: upload.size, countStyle: .file)
+        let sent = ByteCountFormatter.string(fromByteCount: upload.sent, countStyle: .file)
+        return "\(sent) of \(total)"
     }
 }
 

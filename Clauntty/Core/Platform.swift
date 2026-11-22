@@ -37,6 +37,17 @@ extension NSPasteboard {
         guard files.isEmpty, string(forType: .string) == nil, let image = NSImage(pasteboard: self) else { return nil }
         return [image]
     }
+
+    /// Files to paste that aren't images (those go as `pastedImages`): copied in Finder,
+    /// or dragged in. Not folders, yet. Nil when there are none.
+    func pastedFiles() -> [URL]? {
+        let files = (readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let others = files.filter {
+            let values = try? $0.resourceValues(forKeys: [.contentTypeKey, .isDirectoryKey])
+            return values?.isDirectory != true && values?.contentType?.conforms(to: .image) != true
+        }
+        return others.isEmpty ? nil : others
+    }
 }
 #endif
 

@@ -26,6 +26,9 @@ final class MacTerminalView: NSView, NSTextInputClient {
     var onFocus: (() -> Void)?
     /// Images pasted or dropped: uploaded to the host, then `pasteText` their paths
     var onPasteImages: (([NSImage]) -> Void)?
+    /// Other files pasted or dropped: uploaded to the host whole (`Session.placeFiles`),
+    /// then their paths pasted
+    var onPasteFiles: (([URL]) -> Void)?
     /// A key pressed or something pasted: the user, not the terminal answering a query
     var onTyped: (() -> Void)?
     private let nearTopRows: UInt = 100
@@ -623,11 +626,18 @@ final class MacTerminalView: NSView, NSTextInputClient {
     /// host and their paths pasted, which Claude Code attaches, as on the phone.
     @objc func paste(_ sender: Any?) {
         onTyped?()
-        if let images = Self.images(on: NSPasteboard.general) {
-            onPasteImages?(images)
-        } else {
+        if !pasteFiles(from: NSPasteboard.general) {
             perform("paste_from_clipboard")
         }
+    }
+
+    /// The images and other files on a pasteboard, each kind its own way; false if it
+    /// had neither
+    private func pasteFiles(from pasteboard: NSPasteboard) -> Bool {
+        let images = Self.images(on: pasteboard), files = pasteboard.pastedFiles()
+        if let images { onPasteImages?(images) }
+        if let files { onPasteFiles?(files) }
+        return images != nil || files != nil
     }
 
     @IBAction override func selectAll(_ sender: Any?) { perform("select_all") }
@@ -645,14 +655,13 @@ final class MacTerminalView: NSView, NSTextInputClient {
     // MARK: Drop
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        Self.images(on: sender.draggingPasteboard) == nil ? [] : .copy
+        let pasteboard = sender.draggingPasteboard
+        return Self.images(on: pasteboard) != nil || pasteboard.pastedFiles() != nil ? .copy : []
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let images = Self.images(on: sender.draggingPasteboard) else { return false }
         window?.makeFirstResponder(self)
-        onPasteImages?(images)
-        return true
+        return pasteFiles(from: sender.draggingPasteboard)
     }
 }
 
@@ -663,6 +672,7 @@ extension MacTerminalView: NSMenuItemValidation {
             return surface.map { ghostty_surface_has_selection($0) } ?? false
         case #selector(paste(_:)):
             return NSPasteboard.general.string(forType: .string) != nil || Self.images(on: NSPasteboard.general) != nil
+                || NSPasteboard.general.pastedFiles() != nil
         default:
             return true
         }

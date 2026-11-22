@@ -18,7 +18,7 @@ struct ChatView: View {
     var type = ChatType.standard
 
     @State private var draft = ""
-    /// Images to send with the next message (pasted or dropped)
+    /// Images and files to send with the next message (pasted or dropped)
     @State private var attachments: [Attachment] = []
     #if os(iOS)
     /// The box has the keyboard (a UIKit text view on the phone: `ChatTextView`)
@@ -69,11 +69,14 @@ struct ChatView: View {
         .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in
             guard chat.takesImages else { return false }
             Self.loadImages(providers) { attach($0) }
+            #if os(macOS)
+            Self.loadFiles(providers) { attach(files: $0) }
+            #endif
             return true
         }
         #if os(macOS)
-        // ⌘V with an image: the text field would take only text
-        .modifier(PasteImages(enabled: isActive && chat.takesImages) { attach($0) })
+        // ⌘V with an image or a file: the text field would take only text
+        .modifier(PasteImages(enabled: isActive && chat.takesImages) { attach($0) } files: { attach(files: $0) })
         #endif
         .environment(\.chatType, type)
         .background(colors.bg)
@@ -209,6 +212,13 @@ struct ChatView: View {
     private func attach(_ images: [PlatformImage]) {
         withAnimation(.easeOut(duration: 0.15)) {
             attachments += images.map { Attachment(image: $0) }
+        }
+        typing = true
+    }
+
+    private func attach(files: [URL]) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            attachments += files.map { Attachment(file: $0) }
         }
         typing = true
     }
@@ -350,7 +360,7 @@ struct ChatView: View {
             if !chat.queued.isEmpty { chat.interrupt() }
             return
         }
-        chat.send(draft, images: attachments.map(\.image))
+        chat.send(draft, images: attachments.compactMap(\.image), files: attachments.compactMap(\.file))
         draft = ""
         attachments = []
         // On the Mac, Return ends the field's editing: stay in it for the next message
@@ -358,9 +368,11 @@ struct ChatView: View {
     }
 }
 
+/// An image going with the next message, or a file (uploaded whole, its path sent)
 struct Attachment: Identifiable {
     let id = UUID()
-    let image: PlatformImage
+    var image: PlatformImage?
+    var file: URL?
 }
 
 extension Image {
@@ -384,6 +396,25 @@ extension ChatView {
             if !images.isEmpty { done(images) }
         }
     }
+
+    #if os(macOS)
+    /// Dropped files that aren't images (or folders): those go whole, as their paths
+    static func loadFiles(_ providers: [NSItemProvider], then done: @escaping @MainActor ([URL]) -> Void) {
+        Task { @MainActor in
+            var files: [URL] = []
+            for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                let url: URL? = await withCheckedContinuation { done in
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in done.resume(returning: url) }
+                }
+                let values = try? url?.resourceValues(forKeys: [.contentTypeKey, .isDirectoryKey])
+                if let url, values?.isDirectory != true, values?.contentType?.conforms(to: .image) != true {
+                    files.append(url)
+                }
+            }
+            if !files.isEmpty { done(files) }
+        }
+    }
+    #endif
 
     private static func loadImage(_ provider: NSItemProvider) async -> PlatformImage? {
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
@@ -463,8 +494,8 @@ private struct ModeMenu: View {
     }
 }
 
-/// The images waiting to go with the next message, above the text, each with a button
-/// that takes it out
+/// The images and files waiting to go with the next message, above the text, each with
+/// a button that takes it out
 private struct AttachmentStrip: View {
     @Binding var attachments: [Attachment]
     let colors: ReviewColors
@@ -473,10 +504,8 @@ private struct AttachmentStrip: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(attachments) { attachment in
-                    Image(platformImage: attachment.image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 56, height: 56)
+                    preview(attachment)
+                        .frame(height: 56)
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay(alignment: .topTrailing) {
                             Button {
@@ -496,6 +525,46 @@ private struct AttachmentStrip: View {
                         }
                 }
             }
+        }
+    }
+
+    /// An image as itself; a file as its icon, name and size
+    @ViewBuilder
+    private func preview(_ attachment: Attachment) -> some View {
+        if let image = attachment.image {
+            Image(platformImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 56)
+        } else if let file = attachment.file {
+            HStack(spacing: 8) {
+                #if os(macOS)
+                Image(nsImage: NSWorkspace.shared.icon(forFile: file.path))
+                    .resizable()
+                    .frame(width: 32, height: 32)
+                #else
+                Image(systemName: "doc")
+                    .font(.system(size: 22))
+                    .foregroundStyle(colors.dim)
+                #endif
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.lastPathComponent)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(colors.fg)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                            .font(.system(size: 11))
+                            .foregroundStyle(colors.dim)
+                    }
+                }
+                .frame(maxWidth: 180, alignment: .leading)
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 26)
+            .frame(maxHeight: .infinity)
+            .background(colors.fg.opacity(0.08))
         }
     }
 }
@@ -674,6 +743,7 @@ import AppKit
 private struct PasteImages: ViewModifier {
     let enabled: Bool
     let paste: ([PlatformImage]) -> Void
+    let files: ([URL]) -> Void
     @State private var monitor: Any?
 
     func body(content: Content) -> some View {
@@ -686,14 +756,16 @@ private struct PasteImages: ViewModifier {
     private func install() {
         remove()
         guard enabled else { return }
-        let paste = paste
+        let paste = paste, pasteFiles = files
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   event.charactersIgnoringModifiers == "v",
                   // The chat's box has the keyboard, not a terminal or another field
-                  NSApp.keyWindow?.firstResponder is NSTextView,
-                  let images = NSPasteboard.general.pastedImages() else { return event }
-            paste(images)
+                  NSApp.keyWindow?.firstResponder is NSTextView else { return event }
+            let images = NSPasteboard.general.pastedImages(), files = NSPasteboard.general.pastedFiles()
+            guard images != nil || files != nil else { return event }
+            if let images { paste(images) }
+            if let files { pasteFiles(files) }
             return nil
         }
     }

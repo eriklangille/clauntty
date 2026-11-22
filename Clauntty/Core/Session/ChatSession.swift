@@ -639,7 +639,24 @@ final class ChatSession: ObservableObject {
 
     // MARK: - Input
 
-    func send(_ prompt: String, images: [PlatformImage] = []) {
+    func send(_ prompt: String, images: [PlatformImage] = [], files: [URL] = []) {
+        // Files go to the host whole first (their progress shows on the pane), then the
+        // message, with their paths above the text: Claude reads them with its tools
+        if !files.isEmpty {
+            Task {
+                guard let paths = await session?.placeFiles(files) else { return }
+                let placed = paths.compactMap { $0 }
+                guard placed.count == files.count else {
+                    live.append(.note(id: "upload-\(UUID().uuidString)",
+                                      text: files.count == 1 ? "The file didn't upload, so this wasn't sent"
+                                                             : "A file didn't upload, so this wasn't sent"))
+                    return
+                }
+                send(([placed.joined(separator: "\n")] + [prompt]).filter { !$0.isEmpty }.joined(separator: "\n\n"),
+                     images: images)
+            }
+            return
+        }
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !images.isEmpty else { return }
         let id = "local-\(UUID().uuidString)"

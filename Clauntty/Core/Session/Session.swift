@@ -1275,6 +1275,102 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
+    // MARK: - Files from this device
+
+    /// A file on its way to the host, shown on its pane until it's there
+    struct FileUpload: Identifiable, Equatable {
+        /// The drop's folder on the host
+        let id: String
+        let name: String
+        let size: Int64
+        var sent: Int64 = 0
+        var fraction: Double { size > 0 ? Double(sent) / Double(size) : 0 }
+    }
+
+    /// Files uploading now (`placeFiles`)
+    @Published private(set) var uploads: [FileUpload] = []
+    private var uploadTasks: [String: Task<String?, Never>] = [:]
+
+    /// Dropped files on a host, under ~: a folder per drop, so each keeps its own name
+    /// (Claude learns something from "Q3 budget.xlsx") and two with the same name don't
+    /// meet. The deploy clears folders a week old (`RtachDeployer.cleanupDrops`).
+    nonisolated static let dropsPath = ".clauntty/drops"
+
+    /// Files from this device (dropped or pasted) where the pane's programs can read them:
+    /// each uploaded to `~/.clauntty/drops/<id>/<its name>` on the host, one at a time.
+    /// On This Mac they're here already: their own paths.
+    /// - Returns: each one's path there, in order; nil for one that failed or was cancelled
+    func placeFiles(_ urls: [URL]) async -> [String?] {
+        if connectionConfig.isLocal { return urls.map(\.path) }
+        var paths: [String?] = []
+        for url in urls {
+            let id = UUID().uuidString.prefix(8).lowercased()
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+            let upload = FileUpload(id: id, name: Self.dropName(url.lastPathComponent), size: size)
+            uploads.append(upload)
+            let task = Task { [weak self] in await self?.uploadFile(url, as: upload) }
+            uploadTasks[id] = task
+            paths.append(await task.value)
+            uploadTasks[id] = nil
+            uploads.removeAll { $0.id == id }
+        }
+        return paths
+    }
+
+    /// Stop a file uploading (its × on the pane); what's on the host so far is deleted
+    func cancelUpload(_ id: String) {
+        uploadTasks[id]?.cancel()
+    }
+
+    /// The file's name as it goes on the host: as it is, but for what the login shell
+    /// (sh or fish) could read differently inside quotes, and a leading dot, which would
+    /// hide it
+    nonisolated static func dropName(_ name: String) -> String {
+        var name = String(name.unicodeScalars.map {
+            CharacterSet.controlCharacters.contains($0) || $0 == "\\" || $0 == "/" ? "_" : Character($0)
+        })
+        while name.hasPrefix(".") { name.removeFirst() }
+        if name.count > 200 { name = String(name.suffix(200)) }
+        return name.isEmpty ? "file" : name
+    }
+
+    private func uploadFile(_ url: URL, as upload: FileUpload) async -> String? {
+        guard let connection = sshConnection else {
+            Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): cannot upload a file, no SSH connection")
+            return nil
+        }
+        let folder = "~/\(Self.dropsPath)/\(upload.id)"
+        let name = RtachDeployer.shellQuote(upload.name)
+        var shown = 0.0
+        do {
+            try await connection.executeWithStdin("mkdir -p \(folder) && cat > \(folder)/\(name)", file: url) { [weak self] sent in
+                // Redrawn a hundred times at most, not for every piece
+                guard let self, let at = uploads.firstIndex(where: { $0.id == upload.id }) else { return }
+                let fraction = upload.size > 0 ? Double(sent) / Double(upload.size) : 1
+                guard fraction - shown >= 0.01 || sent == upload.size else { return }
+                shown = fraction
+                uploads[at].sent = sent
+            }
+            try Task.checkCancellation()
+            // That all of it arrived, and where (the home folder, to paste a whole path).
+            // stat, not wc, which reads a big file through on some hosts (busybox)
+            let lines = try await runRemoteScript("cd \(folder) && { stat -c %s \(name) 2>/dev/null || stat -f %z \(name); } && pwd")
+                .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard lines.count == 2, Int64(lines[0]) == upload.size else {
+                throw SessionError.uploadIncomplete
+            }
+            return lines[1] + "/" + upload.name
+        } catch {
+            if error is CancellationError {
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): upload of \(upload.name) cancelled")
+            } else {
+                Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): failed to upload \(upload.name): \(error)")
+            }
+            _ = try? await connection.executeCommand("rm -rf \(folder)")
+            return nil
+        }
+    }
+
     /// Download a file from the remote host over this session's SSH connection
     func downloadFile(_ path: String, maxBytes: Int) async throws -> Data {
         guard let connection = sshConnection else { throw SessionError.notConnected }
@@ -1798,6 +1894,8 @@ enum ImageInbox {
 enum SessionError: Error, LocalizedError, Equatable {
     case notConnected
     case fileTooLarge
+    /// An uploaded file isn't all there on the host
+    case uploadIncomplete
     /// The host's answer to a review's reply script, when it wasn't one it gives
     case reviewReplyFailed(String)
 
@@ -1807,6 +1905,8 @@ enum SessionError: Error, LocalizedError, Equatable {
             return "SSH connection not established"
         case .fileTooLarge:
             return "File is too large"
+        case .uploadIncomplete:
+            return "The file didn't all arrive"
         case .reviewReplyFailed(let output):
             return output.isEmpty ? "The host didn't take the comments" : "The host didn't take the comments: \(output.prefix(200))"
         }

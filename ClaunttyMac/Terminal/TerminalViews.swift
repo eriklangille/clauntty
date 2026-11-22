@@ -83,6 +83,13 @@ final class TerminalViews {
         }
     }
 
+    /// A path as it's pasted into a pane: as it is when a shell would read it the same,
+    /// else in single quotes (a shell and Claude both take those)
+    nonisolated static func pastable(_ path: String) -> String {
+        let plain = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+,:@%=")
+        return path.unicodeScalars.allSatisfy(plain.contains) ? path : RtachDeployer.shellQuote(path)
+    }
+
     /// Where the session's pane is in its window, from the top left, if it's on screen
     func frameInWindow(of sessionId: UUID) -> CGRect? {
         guard let pane = views[sessionId]?.view.superview, let window = pane.window,
@@ -172,6 +179,14 @@ final class TerminalViews {
                     if let path = await session?.uploadImage(image) { paths.append(path) }
                 }
                 if !paths.isEmpty { view?.pasteText(paths.joined(separator: " ")) }
+            }
+        }
+        // Other files whole, under their own names (progress on the pane: `UploadsBar`)
+        view.onPasteFiles = { [weak session, weak view] files in
+            Task { @MainActor in
+                guard let paths = await session?.placeFiles(files) else { return }
+                let placed = paths.compactMap { $0 }.map(Self.pastable)
+                if !placed.isEmpty { view?.pasteText(placed.joined(separator: " ")) }
             }
         }
         // Another device has the pane: draw it at that device's grid. Ours again (we

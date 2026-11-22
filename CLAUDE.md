@@ -563,6 +563,16 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
 - **Pasting images:** Cmd+V, Ctrl+V (only with nothing but an image on the clipboard) and
   dropping image files upload to the host's /tmp (`Session.uploadImage`) and paste the
   path, as the phone does, so Claude Code attaches it.
+- **Dropping files:** any other file, dropped on a pane or copied in Finder and pasted with
+  Cmd+V (`NSPasteboard.pastedFiles`; not folders yet), goes to the host whole under its own
+  name, `~/.clauntty/drops/<id>/<name>` (`Session.placeFiles`), and its path is pasted (quoted
+  only when a shell needs it, `TerminalViews.pastable`). The upload reads the file a piece at a
+  time (`SSHConnection.executeWithStdin(_:file:progress:)`: each piece waits for the last to go
+  out, so a 6 GB file stays out of memory), then checks the size with `stat` (wc read big files
+  through on busybox). A bar on the pane (`UploadsBar`, shown after 0.6 s) has the name, how
+  much has gone and an × (`cancelUpload`, which deletes what arrived). A This Mac pane pastes
+  the file's own path. The deploy deletes drop folders a week old (`cleanupDrops`). Plan:
+  `plans/2026-11-20-clauntty-file-drop.md`.
 - **Images and pages:** `clauntty show` images go with the workspace of the pane that
   ran it (`windowImages`, by workspace, as agent mode on the phone). `ImageViewer` shows
   them over that workspace's panes only, when it's on screen; another workspace's wait,
@@ -618,7 +628,8 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   line. An approval's buttons are native and on the right, as a dialog's: ⌘Return allows, Esc
   denies (a question: ⌘Return sends, Esc skips). Images: ⌘V (only an image, no text, on the
   clipboard; an NSEvent monitor, since the field editor takes the paste) or a drop adds a
-  thumbnail above the text; on the phone, the edit menu's Paste (the box is a UITextView there,
+  thumbnail above the text (another file: a chip with its icon, name and size, uploaded as a
+  dropped file is when sent, its path above the text); on the phone, the edit menu's Paste (the box is a UITextView there,
   `ChatTextView`: SwiftUI's TextField offers Paste only for text, and iOS 27's
   `pasteDestination` doesn't change that). Sending uploads each (scaled to Claude's 1568 px / 1.15 MP, PNG or
   JPEG) to `/tmp/clauntty-paste-*` over SSH, and the message's image data is
