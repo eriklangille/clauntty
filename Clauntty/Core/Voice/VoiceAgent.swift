@@ -696,7 +696,7 @@ final class VoiceAgent: ObservableObject {
         }
         guard let state = sessionManager?.paneStates[pane.id] else { return entry }
         if state.hasAgent {
-            entry["runs"] = state.agent == "claude" ? "Claude Code" : state.agent
+            entry["runs"] = state.agent == "claude" ? "Claude Code" : state.agent == "antigravity" ? "Antigravity CLI (agy)" : state.agent
             entry["status"] = Self.statusText(state)
             if let task = state.task, !task.isEmpty { entry["last_prompt"] = task }
         } else {

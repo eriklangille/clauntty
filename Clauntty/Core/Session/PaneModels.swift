@@ -496,7 +496,7 @@ extension SessionGroup {
         guard let shown = panes.first(where: { $0.id == activePaneId }) ?? panes.first,
               shown.status != .none else { return nil }
         let paneTitle = shown.title
-        return paneTitle.isEmpty || paneTitle == title || ["claude", "agent"].contains(paneTitle) ? nil : paneTitle
+        return paneTitle.isEmpty || paneTitle == title || ["claude", "antigravity", "agent"].contains(paneTitle) ? nil : paneTitle
     }
 
     /// What needs you most among its panes: one waiting on you beats one that's done,

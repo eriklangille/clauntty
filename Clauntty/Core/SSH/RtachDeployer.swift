@@ -127,7 +127,7 @@ class RtachDeployer {
     /// 2.8.0 - request_history: history paged backwards by stream position, line-aligned, without alternate-screen output
     /// 2.8.2 - Fix: restore mouse/bracketed-paste/focus/cursor-key modes on attach (TUI stopped taking clicks after reconnect)
     /// 2.9.0 - `clauntty` command (open/forward/tab/show/status) reaching the active session from any shell; exits on SIGTERM
-    static let expectedVersion = "2.40.2"
+    static let expectedVersion = "2.41.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -323,6 +323,7 @@ class RtachDeployer {
         do {
             try await deployHelperScripts()
             try await deployClaudeHook()
+            await deployAntigravityHooks()
         } catch {
             Logger.clauntty.warning("RtachDeployer: helper scripts or hook failed: \(error.localizedDescription)")
         }
@@ -659,6 +660,93 @@ printf '\033[H\033[2J\033[3J'
     }
 
     /// Write Claude settings to remote server
+    // MARK: - Antigravity
+
+    static let antigravityDir = "~/.gemini/antigravity-cli"
+    static let antigravityHooksPath = "~/.gemini/config/hooks.json"
+    static let antigravitySettingsPath = "~/.gemini/antigravity-cli/settings.json"
+
+    /// Antigravity's CLI (`agy`), where it's installed: its state in the pane, as Claude's
+    /// hooks give Claude's (rtach `pane_state.zig`, `clauntty agent-state --agent
+    /// antigravity`). Its hooks say working (each model call, each tool), done (Stop) and
+    /// when it asks a question (PreToolUse on ask_question); an approval has no hook, but
+    /// its title command runs whenever its state changes and says when one shows. Our
+    /// hooks are one named entry, "clauntty", in its global hooks.json; the title command
+    /// goes in its settings only when there isn't one already (the user's stays). It has
+    /// no hook for its end: rtach ends it when agy leaves the foreground.
+    private func deployAntigravityHooks() async {
+        do {
+            let here = try await connection.executeCommand("test -d \(Self.antigravityDir) && echo yes || true")
+            guard here.trimmingCharacters(in: .whitespacesAndNewlines) == "yes" else { return }
+
+            let command = "~/.clauntty/bin/clauntty agent-state --agent antigravity"
+            func handler(_ state: String) -> [String: Any] {
+                ["type": "command", "command": "\(command) \(state)", "timeout": 5]
+            }
+            let ours: [String: Any] = [
+                "SessionStart": [handler("idle")],
+                "PreInvocation": [handler("working")],
+                "PreToolUse": [["matcher": "ask_question", "hooks": [handler("blocked")]]],
+                "PostToolUse": [["matcher": "*", "hooks": [handler("working")]]],
+                "Stop": [handler("done")],
+            ]
+            if var hooks = try await readJSONObject(Self.antigravityHooksPath) {
+                if !Self.sameJSON(hooks["clauntty"], ours) {
+                    hooks["clauntty"] = ours
+                    try await writeJSONObject(hooks, to: Self.antigravityHooksPath)
+                    Logger.clauntty.debugOnly("RtachDeployer: Antigravity hooks deployed")
+                }
+            }
+
+            let title: [String: Any] = ["type": "command", "command": "\(command) title"]
+            if var settings = try await readJSONObject(Self.antigravitySettingsPath) {
+                let current = (settings["title"] as? [String: Any])?["command"] as? String
+                // Not there, or ours (an older one): the user's own stays
+                if current == nil || current!.contains("clauntty agent-state"), !Self.sameJSON(settings["title"], title) {
+                    settings["title"] = title
+                    try await writeJSONObject(settings, to: Self.antigravitySettingsPath)
+                    Logger.clauntty.debugOnly("RtachDeployer: Antigravity title command set")
+                } else if current?.contains("clauntty agent-state") == false {
+                    Logger.clauntty.debugOnly("RtachDeployer: Antigravity has its own title command; no approval state there")
+                }
+            }
+        } catch {
+            Logger.clauntty.warning("RtachDeployer: Antigravity hooks failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// A JSON object file on the host: empty if there's none, nil if it isn't an object
+    /// (left alone, rather than written over)
+    private func readJSONObject(_ path: String) async throws -> [String: Any]? {
+        let output = try await connection.executeCommand("cat \(path) 2>/dev/null || true")
+        let text = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return [:] }
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            Logger.clauntty.warning("RtachDeployer: \(path) isn't a JSON object, left as it is")
+            return nil
+        }
+        return object
+    }
+
+    /// Write a JSON object file on the host through a temp file and a rename, readable by
+    /// the user alone (as agy keeps its settings)
+    private func writeJSONObject(_ object: [String: Any], to path: String) async throws {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        let dir = (path as NSString).deletingLastPathComponent
+        try await connection.executeWithStdin(
+            "mkdir -p \(dir) && umask 077 && tmp=$(mktemp \(path).XXXXXX) && { cat > \"$tmp\" && mv -f \"$tmp\" \(path) || { rm -f \"$tmp\"; exit 1; }; }",
+            stdinData: data
+        )
+    }
+
+    private static func sameJSON(_ a: Any?, _ b: Any) -> Bool {
+        guard let a, JSONSerialization.isValidJSONObject(a) || a is [Any] else { return false }
+        let ja = try? JSONSerialization.data(withJSONObject: a, options: .sortedKeys)
+        let jb = try? JSONSerialization.data(withJSONObject: b, options: .sortedKeys)
+        return ja != nil && ja == jb
+    }
+
     private func writeClaudeSettings(_ settings: [String: Any]) async throws {
         // Ensure directory exists
         _ = try await connection.executeCommand("mkdir -p ~/.claude")
@@ -951,7 +1039,7 @@ struct RemotePaneState: Codable, Equatable {
     let fg: String?
     let cwd: String?
     let title: String?
-    /// "claude", or "none"
+    /// "claude", "antigravity" (agy), or "none"
     let agent: String?
     /// none, idle, working, blocked or done
     let state: String?

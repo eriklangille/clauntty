@@ -716,6 +716,14 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   some other way, without it, the app's This Mac is the real one, with the user's live
   sessions: never send it test input.
 
+## Antigravity
+
+Panes running Antigravity's CLI (`agy`) get the same states as Claude's (working, needs you, done):
+`RtachDeployer.deployAntigravityHooks`, on hosts with `~/.gemini/antigravity-cli`, puts one entry,
+"clauntty", in `~/.gemini/config/hooks.json`, and a title command in its `settings.json` only when it
+has none (an approval has no hook; the title command hears of one). The states themselves are rtach's
+(`pane_state.zig`; rtach's CLAUDE.md, Pane state). The chat view stays Claude's.
+
 ## Key Info
 
 - **Bundle ID**: `com.octerm.clauntty`
