@@ -17,6 +17,12 @@ class PortForwardingManager {
     /// Whether the forwarder is currently running
     private(set) var isRunning = false
 
+    /// The loopback address the remote server answered on. A server listening on IPv6
+    /// loopback alone (Bun's dev server on macOS: `[::1]:PORT`) refuses 127.0.0.1, so a
+    /// refused connection tries the other one, and later connections go straight there.
+    /// Only touched on the SSH channel's event loop, where every connection is set up.
+    private var answeringHost: String?
+
     /// Still forwarding: its listener open and the SSH connection it tunnels through alive.
     /// Both can go while the app is away (a reconnect makes a new connection; iOS can take
     /// a suspended app's listening sockets back).
@@ -110,11 +116,40 @@ class PortForwardingManager {
             return inboundChannel.eventLoop.makeFailedFuture(PortForwardingError.notRunning)
         }
 
+        let first = answeringHost ?? remoteHost
+        return tunnel(inboundChannel: inboundChannel, sshChannel: sshChannel, host: first, port: remotePort)
+            .map { [weak self] in self?.answeringHost = first; return }
+            .flatMapError { [weak self] error -> EventLoopFuture<Void> in
+                // Refused there: the other loopback address, if it hasn't answered before
+                guard let self, self.answeringHost == nil, let other = Self.otherLoopback(first) else {
+                    return inboundChannel.eventLoop.makeFailedFuture(error)
+                }
+                Logger.clauntty.debugOnly("PortForwarding: \(first):\(remotePort) refused, trying \(other)")
+                return self.tunnel(inboundChannel: inboundChannel, sshChannel: sshChannel, host: other, port: remotePort)
+                    .map { [weak self] in self?.answeringHost = other; return }
+            }
+            .flatMapError { error in
+                Logger.clauntty.error("PortForwarding: directTCPIP channel failed: \(error)")
+                inboundChannel.close(promise: nil)
+                return inboundChannel.eventLoop.makeFailedFuture(error)
+            }
+    }
+
+    /// IPv4 loopback for IPv6's and back; nil for a name ("localhost") or another address
+    static func otherLoopback(_ host: String) -> String? {
+        switch host {
+        case "127.0.0.1": return "::1"
+        case "::1": return "127.0.0.1"
+        default: return nil
+        }
+    }
+
+    /// One SSH direct-tcpip channel to host:port on the remote, relaying the inbound
+    /// connection through it
+    private func tunnel(inboundChannel: Channel, sshChannel: Channel, host: String, port: Int) -> EventLoopFuture<Void> {
         guard let originatorAddress = inboundChannel.remoteAddress else {
-            Logger.clauntty.error("PortForwarding: inbound channel has no remote address")
             return inboundChannel.eventLoop.makeFailedFuture(PortForwardingError.missingOriginatorAddress)
         }
-
         // Create paired glue handlers to relay data between channels
         let (sshSide, localSide) = GlueHandler.matchedPair()
 
@@ -126,8 +161,8 @@ class PortForwardingManager {
 
             // Create directTCPIP channel to remote
             let directTCPIP = SSHChannelType.DirectTCPIP(
-                targetHost: remoteHost,
-                targetPort: remotePort,
+                targetHost: host,
+                targetPort: port,
                 originatorAddress: originatorAddress
             )
 
@@ -144,11 +179,7 @@ class PortForwardingManager {
 
             return promise.futureResult.map { _ in }
         }.map {
-            Logger.clauntty.debugOnly("PortForwarding: tunnel established to \(remoteHost):\(remotePort)")
-        }.flatMapError { error in
-            Logger.clauntty.error("PortForwarding: directTCPIP channel failed: \(error)")
-            inboundChannel.close(promise: nil)
-            return inboundChannel.eventLoop.makeFailedFuture(error)
+            Logger.clauntty.debugOnly("PortForwarding: tunnel established to \(host):\(port)")
         }
     }
 }

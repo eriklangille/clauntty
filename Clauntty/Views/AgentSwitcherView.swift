@@ -1511,7 +1511,10 @@ struct SwitcherWindow: View {
                 ZStack(alignment: .topLeading) {
                     ForEach(paneSessions.contains { $0.id == session.id } ? paneSessions : paneSessions + [session]) { pane in
                         let shown = pane.id == session.id
-                        TerminalView(session: pane, isTabSelectorPresented: !shown || !isFocused, isVisible: shown)
+                        // Under a page it isn't the one in use: no keyboard, no key bar. It was,
+                        // and the page hid its key bar once (`hideAllAccessoryBars`), but the
+                        // terminal's next refresh brought the bar back over the page.
+                        TerminalView(session: pane, isTabSelectorPresented: !shown || !isFocused || web != nil, isVisible: shown)
                             .id(pane.id)
                             .frame(width: terminalSize.width, height: terminalSize.height)
                             .opacity(shown ? 1 : 0)
