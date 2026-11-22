@@ -109,7 +109,8 @@ struct ChatView: View {
                             .padding(.top, 18)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     } else if chat.working {
-                        WorkingRow(thinking: chat.thinking, colors: colors)
+                        WorkingRow(label: chat.compacting ? "Compacting the conversation" : chat.thinking ? "Thinking" : "Working",
+                                   colors: colors)
                             .padding(.top, 16)
                     }
                     if !chat.queued.isEmpty {
@@ -213,15 +214,18 @@ struct ChatView: View {
     }
 
     private var inputBar: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Text across the top, a row of controls under it; one inset all round
+        VStack(alignment: .leading, spacing: 10) {
             if !attachments.isEmpty {
                 AttachmentStrip(attachments: $attachments, colors: colors)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
             }
-            inputRow
+            textField
+            controls
         }
-        .glass(in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+        .padding(.horizontal, Self.inset)
+        .padding(.top, Self.inset)
+        .padding(.bottom, Self.inset - 4)
+        .glass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         #if os(iOS)
         .overlay { RecordingEdge(recording: recording) }
         #endif
@@ -243,50 +247,73 @@ struct ChatView: View {
         #endif
     }
 
-    private var inputRow: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            #if os(iOS)
-            // SwiftUI's field pastes only text; this one takes an image too
-            ChatTextView(text: $draft, focused: $typing, placeholder: "Message Claude",
-                         size: type.size, colors: colors, submit: send,
-                         pasteImages: { if chat.takesImages { attach($0) } })
-                .padding(.leading, 16)
-                .padding(.vertical, 10)
-            #else
-            TextField("Message Claude", text: $draft, axis: .vertical)
-                .font(type.body)
-                .lineLimit(1...6)
-                .textFieldStyle(.plain)
-                .focused($typing)
-                .foregroundStyle(colors.fg)
-                .tint(colors.fg)
-                .padding(.leading, 16)
-                .padding(.vertical, 10)
-                .onSubmit(send)
-                .newlineKeys(text: $draft, submit: send)
-                // Shift+Tab goes through the permission modes, as in the terminal. AppKit
-                // sends it as backtab (U+0019); left alone, it moves the keyboard out of the box.
-                // ⌃B: running commands go to the background, as in Claude Code
-                .onKeyPress(keys: ["b"], phases: .down) { press in
-                    guard press.modifiers == .control, chat.hasForegroundCommand else { return .ignored }
-                    chat.runInBackground()
-                    return .handled
-                }
-                .onKeyPress(keys: [.tab, KeyEquivalent("\u{19}")], phases: .down) { press in
-                    guard press.key == KeyEquivalent("\u{19}") || press.modifiers.contains(.shift),
-                          chat.permissionMode != nil else { return .ignored }
-                    chat.nextPermissionMode()
-                    return .handled
-                }
-            #endif
+    /// The box's inset on every side
+    static let inset: CGFloat = 14
+
+    private var textField: some View {
+        Group {
+        #if os(iOS)
+        // SwiftUI's field pastes only text; this one takes an image too
+        ChatTextView(text: $draft, focused: $typing, placeholder: "Message Claude",
+                     size: type.size, colors: colors, submit: send,
+                     pasteImages: { if chat.takesImages { attach($0) } })
+        #else
+        TextField("Message Claude", text: $draft, axis: .vertical)
+            .font(type.body)
+            .lineLimit(1...6)
+            .textFieldStyle(.plain)
+            .focused($typing)
+            .foregroundStyle(colors.fg)
+            .tint(colors.fg)
+            .onSubmit(send)
+            .newlineKeys(text: $draft, submit: send)
+            // Shift+Tab goes through the permission modes, as in the terminal. AppKit
+            // sends it as backtab (U+0019); left alone, it moves the keyboard out of the box.
+            // Esc stops Claude, as in Claude Code. Asking for approval, Esc is Deny
+            // (the approval's own shortcut), so it's left to that.
+            .onKeyPress(.escape, phases: .down) { _ in
+                guard chat.pending == nil, chat.working else { return .ignored }
+                chat.interrupt()
+                return .handled
+            }
+            // ⌃B: running commands go to the background, as in Claude Code
+            .onKeyPress(keys: ["b"], phases: .down) { press in
+                guard press.modifiers == .control, chat.hasForegroundCommand else { return .ignored }
+                chat.runInBackground()
+                return .handled
+            }
+            .onKeyPress(keys: [.tab, KeyEquivalent("\u{19}")], phases: .down) { press in
+                guard press.key == KeyEquivalent("\u{19}") || press.modifiers.contains(.shift),
+                      chat.permissionMode != nil else { return .ignored }
+                chat.nextPermissionMode()
+                return .handled
+            }
+        #endif
+        }
+    }
+
+    /// Under the text: the permission mode on the left; on the right how full the context
+    /// is (from half the auto-compact point), the model, the mic (phone) and send/stop, all
+    /// centred on the button. No separators: spacing and weight tell them apart.
+    private var controls: some View {
+        HStack(spacing: 12) {
             if let mode = chat.permissionMode {
                 ModeMenu(mode: mode, colors: colors, size: type.size) { chat.setPermissionMode($0) }
-                    .padding(.bottom, 10)
+            }
+            Spacer(minLength: 8)
+            if let context = chat.context, context.fraction >= ContextLabel.shownFrom {
+                ContextLabel(context: context, colors: colors, size: type.size)
+            }
+            if let model = chat.model.flatMap(ChatView.modelName) {
+                Text(model)
+                    .font(.system(size: type.size - 4))
+                    .foregroundStyle(colors.faint)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             #if os(iOS)
             DictationButton(text: $draft, recording: $recording, colors: colors,
                             offersDownload: true, size: type.size)
-                .padding(.bottom, 4)
             #endif
             Button {
                 if canSend { send() } else if chat.working { chat.interrupt() }
@@ -300,12 +327,20 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .disabled(!canSend && !chat.working)
-            .padding(.trailing, 6)
-            .padding(.bottom, 5)
             #if os(macOS)
-            .padding(.leading, 6)
+            .help(chat.working && !canSend ? "Stop (Esc)" : "Send (Return)")
             #endif
         }
+    }
+
+    /// "claude-opus-5-5" → "Opus 5.5" (a date or "[1m]" after it left off)
+    static func modelName(_ id: String) -> String? {
+        var parts = id.replacingOccurrences(of: "[1m]", with: "").split(separator: "-").map(String.init)
+        if parts.first == "claude" { parts.removeFirst() }
+        parts.removeAll { $0.count == 8 && $0.allSatisfy(\.isNumber) }
+        guard let family = parts.first, !family.isEmpty else { return nil }
+        let version = parts.dropFirst().filter { $0.allSatisfy(\.isNumber) }.joined(separator: ".")
+        return family.prefix(1).uppercased() + family.dropFirst() + (version.isEmpty ? "" : " " + version)
     }
 
     private func send() {
@@ -368,6 +403,33 @@ extension ChatView {
     }
 }
 
+/// How full Claude's context is, by the mode: shown from half full ("62%"), and near the
+/// point Claude compacts, a warning colour and what happens ("Compacts soon · 91%")
+private struct ContextLabel: View {
+    static let shownFrom = 0.5
+    static let warnFrom = 0.85
+    let context: ChatSession.ContextUsage
+    let colors: ReviewColors
+    let size: CGFloat
+
+    var body: some View {
+        let percent = min(100, Int((context.fraction * 100).rounded()))
+        let warn = context.fraction >= Self.warnFrom
+        // Orange near the point Claude compacts; the tooltip (Mac) says what that means
+        Text("\(percent)% context")
+            .font(.system(size: size - 4).monospacedDigit())
+            .foregroundStyle(warn ? Color.orange : colors.faint)
+            .lineLimit(1)
+            .fixedSize()
+            #if os(macOS)
+            .help(context.autoCompacts
+                  ? "Context used: \(context.tokens / 1000)k of \(context.limit / 1000)k tokens. Claude compacts the conversation at 100%."
+                  : "Context used: \(context.tokens / 1000)k of \(context.limit / 1000)k tokens. Auto-compact is off.")
+            #endif
+            .accessibilityLabel("Context \(percent) percent used")
+    }
+}
+
 /// What Claude asks before it acts, in the box beside the send button: a native menu
 private struct ModeMenu: View {
     let mode: String
@@ -382,9 +444,14 @@ private struct ModeMenu: View {
             }
             .pickerStyle(.inline)
         } label: {
-            Text(ChatSession.label(mode: mode))
-                .font(.system(size: size - 3))
-                .foregroundStyle(colors.dim)
+            HStack(spacing: 3) {
+                Text(ChatSession.label(mode: mode))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: size - 7, weight: .semibold))
+            }
+            .font(.system(size: size - 4))
+            .foregroundStyle(colors.dim)
+            .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -1035,7 +1102,7 @@ private struct CopyButton: View {
 /// Claude's spark, turning while it works
 private struct WorkingRow: View {
     @Environment(\.chatType) private var type
-    let thinking: Bool
+    let label: String
     let colors: ReviewColors
 
     var body: some View {
@@ -1049,12 +1116,19 @@ private struct WorkingRow: View {
                 let period = 1.8
                 let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
                 let x = -0.4 + phase * 1.8
-                Text(thinking ? "Thinking" : "Working")
+                Text(label)
                     .font(type.small)
                     .foregroundStyle(LinearGradient(colors: [colors.faint, colors.fg, colors.faint],
                                                     startPoint: UnitPoint(x: x - 0.35, y: 0.5),
                                                     endPoint: UnitPoint(x: x + 0.35, y: 0.5)))
             }
+            #if os(macOS)
+            // As Claude Code puts it beside its spinner
+            Text("esc to interrupt")
+                .font(type.footnote)
+                .foregroundStyle(colors.faint)
+                .padding(.leading, 6)
+            #endif
         }
     }
 }

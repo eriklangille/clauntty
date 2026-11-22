@@ -117,6 +117,19 @@ final class ChatSession: ObservableObject {
     }
     /// Asks the view to put the cursor in its text box (the window was tapped)
     @Published var focusRequest = 0
+    /// How full Claude's context is, from its own report (`get_context_usage`, answered by
+    /// the Claude Code process from what it has: no API call, no tokens)
+    struct ContextUsage: Equatable {
+        let tokens: Int
+        /// Claude compacts the conversation here (or, with auto-compact off, the window)
+        let limit: Int
+        let autoCompacts: Bool
+        var fraction: Double { limit > 0 ? Double(tokens) / Double(limit) : 0 }
+    }
+    @Published private(set) var context: ContextUsage?
+    /// Claude is summarizing the conversation (a minute or two)
+    @Published private(set) var compacting = false
+
     /// Messages sent while Claude works: Claude holds them until the turn ends (or is
     /// interrupted: "Send now", Claude Code's "enter to interrupt and send"), and only then
     /// echoes them. Drawn under the conversation until they go in.
@@ -299,6 +312,8 @@ final class ChatSession: ObservableObject {
         case "control_cancel_request":
             // Claude stopped waiting (interrupted)
             if let id = object["request_id"] as? String, pendingRequestId == id { pending = nil }
+        case "control_response":
+            contextResponse(object)
         case "result":
             finishTurn(stopped: (object["subtype"] as? String) == "error_during_execution")
         default:
@@ -317,15 +332,56 @@ final class ChatSession: ObservableObject {
             working = true
             if loadedHistoryFor != sessionId { Task { await loadHistory() } }
             permissionMode = object["permissionMode"] as? String ?? permissionMode
+            if context == nil { requestContextUsage() }
         case "status":
-            // Also comes, with no status, when the mode changes
-            if object["status"] is String { working = true }
+            // Also comes, with no status, when the mode changes or a compaction ends
+            let status = object["status"] as? String
+            compacting = status == "compacting"
+            if status != nil, !compacting { working = true }
             permissionMode = object["permissionMode"] as? String ?? permissionMode
+        case "compact_boundary":
+            compacting = false
+            live.append(.note(id: "compact-\(object["uuid"] as? String ?? UUID().uuidString)",
+                              text: Self.compactNote(object["compact_metadata"] as? [String: Any], idle: !working)))
+            requestContextUsage()
         case "thinking_tokens":
             thinking = true
         default:
             break
         }
+    }
+
+    /// "Compacted · 407k → 13k tokens", "Compacted while idle" (no turn running: Claude
+    /// does it before the prompt cache expires), "Compacted (/compact)"
+    nonisolated static func compactNote(_ meta: [String: Any]?, idle: Bool) -> String {
+        let manual = meta?["trigger"] as? String == "manual"
+        var text = manual ? "Compacted (/compact)" : idle ? "Compacted while idle" : "Compacted"
+        func k(_ n: Int) -> String { n >= 1000 ? "\(Int((Double(n) / 1000).rounded()))k" : "\(n)" }
+        if let pre = (meta?["pre_tokens"] ?? meta?["preTokens"]) as? Int {
+            if let post = (meta?["post_tokens"] ?? meta?["postTokens"]) as? Int {
+                text += " · \(k(pre)) → \(k(post)) tokens"
+            } else {
+                text += " · \(k(pre)) tokens"
+            }
+        }
+        return text
+    }
+
+    /// Asked after each turn and each compaction. The Claude Code process answers from the
+    /// last reply's usage and its own estimates ("summary"): nothing goes to the API.
+    func requestContextUsage() {
+        write(["type": "control_request", "request_id": "ctx-\(UUID().uuidString.prefix(8))",
+               "request": ["subtype": "get_context_usage", "detail": "summary"]])
+    }
+
+    private func contextResponse(_ object: [String: Any]) {
+        guard let response = object["response"] as? [String: Any],
+              (response["request_id"] as? String)?.hasPrefix("ctx-") == true,
+              let usage = response["response"] as? [String: Any],
+              let tokens = usage["totalTokens"] as? Int else { return }
+        let autoCompacts = usage["isAutoCompactEnabled"] as? Bool ?? true
+        let limit = (autoCompacts ? usage["autoCompactThreshold"] as? Int : nil) ?? usage["maxTokens"] as? Int ?? 0
+        context = ContextUsage(tokens: tokens, limit: limit, autoCompacts: autoCompacts)
     }
 
     private func streamEvent(_ event: [String: Any]) {
@@ -536,6 +592,8 @@ final class ChatSession: ObservableObject {
             live += queued
             queued = []
         }
+        compacting = false
+        requestContextUsage()
         saveCache()
     }
 
@@ -767,7 +825,7 @@ final class ChatSession: ObservableObject {
             export LC_ALL=C
             for t in "$HOME"/.claude/projects/*/"\(sessionId)".jsonl; do
               [ -f "$t" ] || continue
-              tail -c 60000000 "$t" | tail -n +2 | grep -E '"type":"(user|assistant)"|"type":"queued_command"' | grep -v '"isSidechain":true' |
+              tail -c 60000000 "$t" | tail -n +2 | grep -E '"type":"(user|assistant)"|"type":"queued_command"|"subtype":"compact_boundary"' | grep -v '"isSidechain":true' |
                 awk 'length($0) < 300000' | sed -E 's#"[A-Za-z0-9+/=]{200,}"#""#g'
               break
             done
@@ -824,6 +882,14 @@ final class ChatSession: ObservableObject {
                 }
                 continue
             }
+            // A compaction: a quiet line where it happened. The summary that follows (a
+            // user message, `isCompactSummary`) isn't the user's and isn't shown.
+            if type == "system", object["subtype"] as? String == "compact_boundary" {
+                let id = "compact-\(object["uuid"] as? String ?? "\(items.count)")"
+                items.append(.note(id: id, text: compactNote(object["compactMetadata"] as? [String: Any], idle: false)))
+                continue
+            }
+            if (object["isCompactSummary"] as? Bool) == true { continue }
             guard type == "user" || type == "assistant",
                   (object["isMeta"] as? Bool) != true, (object["isSidechain"] as? Bool) != true,
                   let message = object["message"] as? [String: Any] else { continue }

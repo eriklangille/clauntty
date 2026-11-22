@@ -607,8 +607,16 @@ that script and rerun it (`python3 scripts/gen-mac-project.py`). Don't hand-edit
   JPEG) to `/tmp/clauntty-paste-*` over SSH, and the message's image data is
   `clauntty-file:<path>`: `clauntty-chat` (version 2) puts the file's base64 there, and drops
   image data from Claude's echo and the history it reads, so megabytes never pass through
-  the pane. The permission mode sits by the send button (a native menu; ⇧Tab cycles it, as
-  in the terminal): `set_permission_mode`, the mode from Claude's init and status events. New
+  the pane. The box is the text, then a row of controls (`controls`, one 14 pt inset all round, no
+  separators): the permission mode on the left (a native menu; ⇧Tab cycles it, as in the
+  terminal); on the right how full the context is (from half the auto-compact point, orange
+  from 85%: `get_context_usage` "summary", answered by the Claude Code process itself, no
+  tokens, after each turn and compaction), the model, the mic (phone) and send/stop. On the
+  Mac, Esc interrupts (with an approval up it's Deny), and the Working row says "esc to
+  interrupt", as Claude Code does beside its spinner. Compactions
+  show "Compacting the conversation" and then a note ("Compacted · 860k → 13k tokens", "Compacted
+  while idle" when no turn ran); history shows the same notes, never the summary. The mode is
+  `set_permission_mode`, the mode from Claude's init and status events. New
   chats start in the last one picked (auto at first) through `clauntty-chat --mode`, which
   asks Claude before anything else: a mode Claude refuses (auto, where the account lacks
   it) leaves the chat as it was, where Claude's own `--permission-mode` might stop it starting. A running

@@ -89,6 +89,10 @@ struct TerminalView: View {
                     onTextInput: { data in
                         // Send keyboard input to SSH via session
                         Logger.clauntty.verbose("[INPUT] onTextInput called with \(data.count) bytes: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
+                        // Under a chat the terminal is Claude's input: a stray key there (or
+                        // the terminal answering a query) is a line that isn't JSON, and
+                        // Claude quits on it
+                        guard !session.isChatMode else { return }
                         session.sendData(data)
                     },
                     onImagePaste: { image in

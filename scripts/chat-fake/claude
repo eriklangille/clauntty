@@ -70,6 +70,22 @@ mode() {
 
 request_id() { local r=${1#*\"request_id\":\"}; printf '%s' "${r%%\"*}"; }
 
+# Context use, as Claude's get_context_usage reports it: grows each turn, back down after a
+# compaction. Starts high, so the meter shows.
+ctx=600000
+usage() {
+  emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$(request_id "$1")\",\"response\":{\"totalTokens\":$ctx,\"maxTokens\":1000000,\"autoCompactThreshold\":967000,\"isAutoCompactEnabled\":true,\"percentage\":$(( ctx / 10000 ))}}}"
+}
+
+# A compaction, as Claude streams one: compacting for a while, the boundary, done
+compact() {
+  emit '{"type":"system","subtype":"status","status":"compacting","session_id":"__SID__"}'
+  sleep 3
+  emit "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"compact_metadata\":{\"trigger\":\"auto\",\"pre_tokens\":$ctx,\"post_tokens\":13000},\"session_id\":\"__SID__\",\"uuid\":\"$(cat /proc/sys/kernel/random/uuid)\"}"
+  emit '{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"__SID__"}'
+  ctx=13000
+}
+
 # Messages sent during a turn: Claude holds them until the turn ends (or is interrupted),
 # then echoes and answers each
 held=()
@@ -83,6 +99,7 @@ play() {
       case "$msg" in
         *'"subtype":"interrupt"'*) stopped "$(request_id "$msg")"; return ;;
         *'"subtype":"set_permission_mode"'*) mode "$msg" ;;
+        *'"subtype":"get_context_usage"'*) usage "$msg" ;;
         *'"subtype":"background_tasks"'*) emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$(request_id "$msg")\",\"response\":{}}}" ;;
         *'"type":"user"'*) held+=("$msg") ;;
       esac
@@ -93,6 +110,7 @@ play() {
       while read -r msg; do
         case "$msg" in
           *'"subtype":"interrupt"'*) stopped "$(request_id "$msg")"; return ;;
+          *'"subtype":"get_context_usage"'*) usage "$msg" ;;
           *'"type":"user"'*) held+=("$msg") ;;
           *"\"request_id\":\"$id\""*'"behavior":"deny"'*) refused; return ;;
           *"\"request_id\":\"$id\""*) break ;;
@@ -105,6 +123,27 @@ play() {
 while read -r msg; do
   case "$msg" in
     *'"subtype":"set_permission_mode"'*) mode "$msg" ;;
+    *'"subtype":"get_context_usage"'*) usage "$msg" ;;
+    *'"content":"compact"'*)
+      # An auto-compaction during a turn, then a short reply
+      echo_user "$msg"
+      emit '{"type":"system","subtype":"status","status":"requesting","session_id":"__SID__"}'
+      compact
+      emit '{"type":"assistant","message":{"id":"msg_fake_compact","type":"message","role":"assistant","content":[{"type":"text","text":"Carrying on from the summary."}]},"session_id":"__SID__"}'
+      emit '{"type":"result","subtype":"success","is_error":false,"session_id":"__SID__"}' ;;
+    *'"content":"grow"'*)
+      # A turn that fills the context a lot (a big file read)
+      echo_user "$msg"
+      ctx=$(( ctx + 150000 ))
+      emit '{"type":"assistant","message":{"id":"msg_fake_grow","type":"message","role":"assistant","content":[{"type":"text","text":"Read a big file."}]},"session_id":"__SID__"}'
+      emit '{"type":"result","subtype":"success","is_error":false,"session_id":"__SID__"}' ;;
+    *'"content":"idle"'*)
+      # A short turn, then Claude compacting while nothing runs
+      echo_user "$msg"
+      emit '{"type":"assistant","message":{"id":"msg_fake_idle","type":"message","role":"assistant","content":[{"type":"text","text":"Done. (Idle compaction comes next.)"}]},"session_id":"__SID__"}'
+      emit '{"type":"result","subtype":"success","is_error":false,"session_id":"__SID__"}'
+      sleep 2
+      compact ;;
     *'"content":"big"'*)
       # A tool result as long as a big file read: rtach's replay after a reattach (its last
       # 16KB) is then a fragment of it, as with real conversations
@@ -119,6 +158,7 @@ while read -r msg; do
         echo_user "$msg"
         play $(( played % turns ))
         played=$(( played + 1 ))
+        ctx=$(( ctx + 110000 ))
       done ;;
   esac
 done

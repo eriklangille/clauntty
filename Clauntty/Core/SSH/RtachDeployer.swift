@@ -539,11 +539,15 @@ if [ "$1" = "--mode" ]; then mode=$2; shift 2; fi
 claude=$(command -v claude || echo ~/.local/bin/claude)
 old=$(stty -g 2>/dev/null)
 stty raw -echo 2>/dev/null
-printf '\033]777;clauntty-chat\007{"type":"clauntty_chat","version":2,"args":"%s"}\n' "$*"
+printf '\033]777;clauntty-chat\007{"type":"clauntty_chat","version":3,"args":"%s"}\n' "$*"
 {
 [ -n "$mode" ] && printf '{"type":"control_request","request_id":"mode-start","request":{"subtype":"set_permission_mode","mode":"%s"}}\n' "$mode"
+# Only JSON goes to Claude: a line that is not (keys that reached the terminal) made Claude
+# quit ("Error parsing streaming input line"). Text before a message on its line is dropped.
 awk '
+{ sub(/\r$/, "") }
 $0 == "{\"type\":\"clauntty_end\"}" { exit }
+{ i = index($0, "{"); if (i == 0) next; $0 = substr($0, i) }
 {
   line = $0; out = ""
   while (match(line, /"clauntty-file:\/tmp\/clauntty-paste-[A-Za-z0-9]+\.(png|jpg)"/)) {

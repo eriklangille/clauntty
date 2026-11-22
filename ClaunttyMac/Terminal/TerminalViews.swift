@@ -168,7 +168,12 @@ final class TerminalViews {
         // top of it asks for the next page, as on the phone
         session.onScrollbackReceived = { [weak view] data in view?.prependHistory(data) }
         view.onScrollNearTop = { [weak session] in session?.loadMoreScrollbackIfNeeded() }
-        view.onInput = { [weak session] data in session?.sendData(data) }
+        // Under a chat the terminal is Claude's input: keys that reach it (it can still have
+        // the keyboard just after a reattach) are a line that isn't JSON, and Claude quits
+        view.onInput = { [weak session] data in
+            guard let session, !session.isChatMode else { return }
+            session.sendData(data)
+        }
         view.onTyped = { [weak session] in session?.onTyped?() }
         // Session skips this while another device has the pane
         view.onResize = { [weak session] columns, rows in
