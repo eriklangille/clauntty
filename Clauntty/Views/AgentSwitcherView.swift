@@ -36,7 +36,8 @@ struct AgentSwitcherView: View {
     @State private var keyboardVisible = false
     /// The keyboard while the image viewer is over the windows (its note's), applied when
     /// it closes: following it under the viewer laid out every window as the keyboard came
-    /// up, a hitch that left the viewer's note behind the keyboard
+    /// up, a hitch that left the viewer's note behind the keyboard. Only if nothing came
+    /// after: the terminal's keyboard can be back up before the viewer's close ends
     @State private var coveredKeyboard = CoveredKeyboard()
     final class CoveredKeyboard {
         var height: CGFloat?
@@ -498,6 +499,8 @@ struct AgentSwitcherView: View {
                 coveredKeyboard.visible = true
                 return
             }
+            // Newer than what the viewer saw: it isn't applied when the viewer's gone
+            coveredKeyboard = CoveredKeyboard()
             keyboardShows &+= 1
             // With the keyboard, so the window follows the key bar up
             withAnimation(.easeOut(duration: 0.25)) {
@@ -510,6 +513,7 @@ struct AgentSwitcherView: View {
                 coveredKeyboard.visible = false
                 return
             }
+            coveredKeyboard = CoveredKeyboard()
             // The keyboard collapsed: the window stays, down to the key bar (the
             // rail's buttons go to the overview). A moment later, and only if it stayed
             // down: bringing a hidden keyboard back hides and shows it in quick succession.
