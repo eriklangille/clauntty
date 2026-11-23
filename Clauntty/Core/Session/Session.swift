@@ -991,6 +991,8 @@ class Session: ObservableObject, Identifiable {
         // A chat pane's events, for the chat drawn over the terminal
         feedChat(data)
 
+        if imageMarkers != nil, imageMarkers!.count < 1 << 20 { imageMarkers!.append(data) }
+
         // Forward to terminal
         onDataReceived?(data)
         if !hasOutput { hasOutput = true }
@@ -1219,21 +1221,54 @@ class Session: ObservableObject, Identifiable {
                 let text = text.replacingOccurrences(of: "\u{1b}", with: "")
                 self?.sendData(Data(("\u{1b}[200~" + text + "\u{1b}[201~").utf8))
             }
+            // Claude Code takes a moment to read a pasted image (0.4–0.7s for a phone
+            // screenshot), and a Return before it's done sends the text without it. So
+            // each path waits for its "[Image #N]" before what comes next. A pane that
+            // doesn't answer the first isn't taking images: the rest go without waiting.
+            imageMarkers = Data()
+            defer { imageMarkers = nil }
+            var attached: Bool? = nil
             for (index, line) in lines.enumerated() {
                 if let path = line.path {
                     paste(path)
-                    // Its own paste, so it's taken as an image
-                    try? await Task.sleep(for: .milliseconds(60))
+                    if attached != false {
+                        attached = await waitForImageMarkers(index + 1, within: isClaudeSession ? .seconds(8) : .seconds(1.5))
+                    } else {
+                        // Its own paste, so it's taken as an image
+                        try? await Task.sleep(for: .milliseconds(60))
+                    }
                 }
                 let text = (line.path == nil || line.note.isEmpty ? "" : " ") + line.note
                     + (index < lines.count - 1 ? "\n" : "")
                 if !text.isEmpty { paste(text) }
             }
             guard lines.allSatisfy({ $0.path != nil }) else { return }
-            // After Claude Code has taken the pastes in
-            try? await Task.sleep(for: .milliseconds(300))
+            // Claude, but an image didn't show: left typed for the user to send
+            if attached == false && isClaudeSession { return }
+            // After the note's paste is taken in
+            try? await Task.sleep(for: .milliseconds(attached == true ? 150 : 300))
             sendData(Data("\r".utf8))
         }
+    }
+
+    /// The pane's output while `sendImages` waits for Claude Code's "[Image #N]"
+    private var imageMarkers: Data?
+
+    /// Whether `count` different "[Image #N]" have been drawn since `sendImages` began,
+    /// checked until `within` has passed
+    private func waitForImageMarkers(_ count: Int, within limit: Duration) async -> Bool {
+        let deadline = ContinuousClock.now + limit
+        while ContinuousClock.now < deadline {
+            if let output = imageMarkers, Self.imageMarkerCount(in: output) >= count { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return false
+    }
+
+    /// How many different "[Image #N]" are in terminal output
+    nonisolated static func imageMarkerCount(in output: Data) -> Int {
+        let text = String(decoding: output, as: UTF8.self)
+        return Set(text.matches(of: /\[Image #(\d+)\]/).map { $0.output.1 }).count
     }
 
     /// A chat message's text for images sent with notes: the note alone for one image,
